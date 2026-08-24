@@ -72,6 +72,7 @@ import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.MarkdownTypography
 import dev.agentdeck.shared.*
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
@@ -249,9 +250,11 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun loadChanges(agentId: String) = viewModelScope.launch {
         runCatching { repository.changes(agentId) }
-            .onSuccess { changes -> _sessionChanges.update { it + (agentId to changes) } }
+            .onSuccess { changes -> _sessionChanges.value = mapOf(agentId to changes) }
     }
 
+    // Keyed by agent but holding only the open one: each entry can be hundreds of events, and
+    // accumulating them for every session visited would grow without bound.
     private val _sessionHistory = MutableStateFlow<Map<String, List<AgentEvent>>>(emptyMap())
     val sessionHistory = _sessionHistory.asStateFlow()
 
@@ -261,7 +264,7 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun loadHistory(agentId: String) = viewModelScope.launch {
         runCatching { repository.history(agentId) }
-            .onSuccess { events -> _sessionHistory.update { it + (agentId to events) } }
+            .onSuccess { events -> _sessionHistory.value = mapOf(agentId to events) }
     }
 
     private val _slashCommands = MutableStateFlow<Map<String, List<SlashCommand>>>(emptyMap())
@@ -1204,7 +1207,16 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     val terminalCount = remember(sessionAgent.events) { terminalEvents(sessionAgent.events).size }
     val hasAttention = pendingApproval != null || pendingQuestion != null
     val isPaused = agent.state == "paused"
-    LaunchedEffect(agent.id, agent.events.size) { onLoadChanges(); onLoadHistory() }
+    // Live events already merge over the fetched history, so a refetch is only needed to recover
+    // what has aged out of the snapshot's window since. Keying this on event count instead would
+    // refetch the session's whole history on every tool call.
+    LaunchedEffect(agent.id) {
+        while (true) {
+            onLoadHistory()
+            onLoadChanges()
+            delay(20_000)
+        }
+    }
     LaunchedEffect(agent.id) { onLoadSlashCommands() }
     BackHandler { onDismiss() }
 

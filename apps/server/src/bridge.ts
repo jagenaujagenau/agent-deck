@@ -63,6 +63,34 @@ const now = () => new Date().toISOString();
 const makeId = () => crypto.randomUUID();
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 
+/** Serialized to every connected device; both callers hand it straight to JSON. */
+type SnapshotPayload = {
+  sequence: number;
+  bridge: { status: string; name: string; timestamp: string };
+  summary: { active: number; waiting: number; errors: number; tokens: number; costUsd: number };
+  agents: Array<Record<string, unknown>>;
+};
+
+/**
+ * A snapshot feeds live cards, and it is re-sent in full on every change, so it carries only what a
+ * card can show. Whole histories and diff bodies are large, change constantly, and are already
+ * served per session by `/history` and `/changes` — including them here would push hundreds of
+ * kilobytes to every connected device on every event.
+ */
+const SNAPSHOT_EVENT_LIMIT = 24;
+const SNAPSHOT_DETAIL_LIMIT = 400;
+const HISTORY_TOOL_DETAIL_LIMIT = 240;
+const HISTORY_COMMAND_LIMIT = 2_000;
+
+function cardEvent(event: AgentEvent): AgentEvent {
+  const detail = event.detail && event.detail.length > SNAPSHOT_DETAIL_LIMIT
+    ? `${event.detail.slice(0, SNAPSHOT_DETAIL_LIMIT - 1).trimEnd()}…`
+    : event.detail;
+  // `diff` and `command` bodies are the bulk of an event and are never rendered on a card.
+  const { diff: _diff, command: _command, ...rest } = event;
+  return { ...rest, detail };
+}
+
 class BridgeStore {
   private readonly agents = new Map<string, AgentRecord>();
   private readonly commands = new Map<string, Command>();
@@ -74,6 +102,8 @@ class BridgeStore {
   getRevision() {
     return this.revision;
   }
+
+  private snapshotCache?: { revision: number; value: SnapshotPayload };
 
   private changed() {
     this.revision += 1;
@@ -173,9 +203,18 @@ class BridgeStore {
       id: row.id,
       kind: row.kind,
       summary: row.summary,
-      detail: row.detail ?? undefined,
+      // A tool event's detail is the rendered tool call, which no tab shows: the conversation
+      // excludes tool events and the terminal renders `command`. Keeping the head of it preserves
+      // debuggability while dropping the bulk of a session's payload.
+      detail: row.tool && row.detail && row.detail.length > HISTORY_TOOL_DETAIL_LIMIT
+        ? `${row.detail.slice(0, HISTORY_TOOL_DETAIL_LIMIT - 1).trimEnd()}…`
+        : row.detail ?? undefined,
       tool: row.tool ?? undefined,
-      command: row.command ?? undefined,
+      // The terminal card renders the command, so it is kept — but a multi-kilobyte heredoc is
+      // already unreadable on a phone, and a session's worth of them is most of this payload.
+      command: row.command && row.command.length > HISTORY_COMMAND_LIMIT
+        ? `${row.command.slice(0, HISTORY_COMMAND_LIMIT - 1).trimEnd()}…`
+        : row.command ?? undefined,
       path: row.path ?? undefined,
       options: row.options ? JSON.parse(row.options) as string[] : undefined,
       createdAt: row.created_at,
@@ -537,14 +576,24 @@ class BridgeStore {
     }
   }
 
-  snapshot() {
+  snapshot(): SnapshotPayload {
+    // Every connected device asks for the same snapshot on the same revision — the SSE loop calls
+    // this once per client per change. Building it once per revision keeps that from scaling with
+    // the number of watchers.
+    if (this.snapshotCache?.revision === this.revision) return this.snapshotCache.value;
     const timestamp = Date.now();
+    // One query for every projection rather than one per agent.
+    const projections = new Map<string, RuntimeProjection>();
+    for (const row of this.database.query<{ agent_id: string; data: string }, []>("SELECT agent_id, data FROM bridge_runtime_projections").all()) {
+      try { projections.set(row.agent_id, JSON.parse(row.data) as RuntimeProjection); } catch { /* Compatibility projection remains available. */ }
+    }
+    const approvals = new Map<string, PendingApproval>();
+    for (const agent of this.agents.values()) {
+      const approval = this.pendingApprovalFor(agent.id);
+      if (approval) approvals.set(agent.id, approval);
+    }
     const agents = [...this.agents.values()].map((agent) => {
-      let projection: RuntimeProjection | undefined;
-      if (agent.runtimeProtocol === "canonical-v1") {
-        const row = this.database.query<{ data: string }, [string]>("SELECT data FROM bridge_runtime_projections WHERE agent_id = ?").get(agent.id);
-        try { if (row) projection = JSON.parse(row.data) as RuntimeProjection; } catch { /* Compatibility projection remains available. */ }
-      }
+      const projection = agent.runtimeProtocol === "canonical-v1" ? projections.get(agent.id) : undefined;
       const activeProjection = projection && projection.state === agent.state ? projection : undefined;
       return {
       ...agent,
@@ -554,15 +603,15 @@ class BridgeStore {
       processedTokens: activeProjection?.usageKnown ? activeProjection.processedTokens : Number.isFinite(agent.processedTokens) ? agent.processedTokens : agent.tokens,
       costUsd: Number.isFinite(agent.costUsd) ? agent.costUsd : 0,
       state: !agent.isDemo && timestamp - Date.parse(agent.lastSeenAt) > ((activeProjection?.state ?? agent.state) === "idle" ? 10 * 60_000 : 45_000) ? "offline" as const : activeProjection?.state ?? agent.state,
-      pendingApproval: this.pendingApprovalFor(agent.id),
-      events: agent.events.slice(-100).reverse(),
+      pendingApproval: approvals.get(agent.id),
+      events: agent.events.slice(-SNAPSHOT_EVENT_LIMIT).reverse().map(cardEvent),
     };
     });
     const active = agents.filter((agent) => ["running", "waiting", "paused"].includes(agent.state)).length;
     const historical = this.database.query<{ tokens: number; cost_usd: number }, []>(
       "SELECT COALESCE(SUM(tokens), 0) AS tokens, COALESCE(SUM(cost_usd), 0) AS cost_usd FROM bridge_usage_deltas",
     ).get() ?? { tokens: 0, cost_usd: 0 };
-    return {
+    const value = {
       sequence: this.revision,
       bridge: { status: "connected", name: process.env.BRIDGE_NAME ?? "Local bridge", timestamp: now() },
       summary: {
@@ -574,6 +623,8 @@ class BridgeStore {
       },
       agents,
     };
+    this.snapshotCache = { revision: this.revision, value };
+    return value;
   }
 
   heartbeat(input: Omit<AgentRecord, "events" | "lastSeenAt"> & { events?: AgentEvent[] }) {
