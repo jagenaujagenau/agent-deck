@@ -1,0 +1,560 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { basename } from "node:path";
+import { AgentDeckClient, clip, type AgentState, type EventKind, type RemoteCommand } from "../../packages/agent-adapter/src/index";
+import { describeToolCall, normalizeApprovalMode, requiresApproval, usesRemoteApproval, type ApprovalMode } from "./approval-policy";
+import { mutatesFile, readFileForDiff } from "../../packages/agent-adapter/src/file-snapshot";
+import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
+
+const HEARTBEAT_INTERVAL_MS = 10_000;
+const COMMAND_INTERVAL_MS = 2_000;
+/**
+ * How long a question waits for a remote answer before the host terminal takes over. The tool's own
+ * prompt cannot appear while this blocks, so a long window hides the question from whoever is at the
+ * terminal. Keep it short by default; raise it when nobody is at the machine, or 0 to never wait.
+ */
+const QUESTION_TIMEOUT_MS = Math.max(0, Number(process.env.AGENT_DECK_QUESTION_TIMEOUT_MS ?? 30_000) || 0);
+
+/**
+ * `/reload` builds a fresh module scope, so the outgoing extension instance is unreachable through
+ * module state. A well-known global is the only channel left for handing the live session over.
+ */
+const RELOAD_HANDOFF = Symbol.for("agent-deck.pi.reload-handoff");
+type ReloadHandoff = { owner: string; stop: () => void; context: () => ExtensionContext | undefined };
+const handoffSlot = globalThis as typeof globalThis & { [RELOAD_HANDOFF]?: ReloadHandoff };
+
+const bridge = new AgentDeckClient();
+/** Contents of each file a tool is about to rewrite, captured at execution start and diffed at end. */
+const pendingFileEdits = new Map<string, { target: string; before: string }>();
+const MAX_PENDING_FILE_EDITS = 64;
+
+type UsageTotals = { tokens: number; costUsd: number };
+
+function clipMultiline(value: unknown, limit = 64_000): string {
+  const text = String(value ?? "").replace(/\r\n?/g, "\n").trim();
+  return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}
+
+function contentOfType(content: unknown, type: "text" | "thinking", field: "text" | "thinking"): string {
+  if (typeof content === "string") return type === "text" ? content : "";
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((part) => {
+    if (!part || typeof part !== "object") return [];
+    const item = part as Record<string, unknown>;
+    return item.type === type && typeof item[field] === "string" ? [item[field] as string] : [];
+  }).join("\n");
+}
+
+const textContent = (content: unknown) => contentOfType(content, "text", "text");
+const reasoningContent = (content: unknown) => contentOfType(content, "thinking", "thinking");
+
+function usageTotals(ctx: ExtensionContext): UsageTotals {
+  let tokens = 0;
+  let costUsd = 0;
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+    const usage = entry.message.usage;
+    tokens += usage?.totalTokens ?? 0;
+    costUsd += usage?.cost?.total ?? 0;
+  }
+  return { tokens, costUsd };
+}
+
+function lastUserTask(ctx: ExtensionContext): string {
+  const entries = [...ctx.sessionManager.getBranch()].reverse();
+  for (const entry of entries) {
+    if (entry.type === "message" && entry.message.role === "user") {
+      const text = clip(textContent(entry.message.content));
+      if (text) return text;
+    }
+  }
+  return "Ready for a remote instruction";
+}
+
+const bridgeRequest = <T>(path: string, init: RequestInit = {}) => bridge.request<T>(path, init);
+
+export default function agentDeckExtension(pi: ExtensionAPI) {
+  let ctx: ExtensionContext | undefined;
+  let state: AgentState = "idle";
+  let task = "Ready for a remote instruction";
+  let objective: string | undefined;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let commandTimer: ReturnType<typeof setInterval> | undefined;
+  let polling = false;
+  let connected = false;
+  let approvalMode: ApprovalMode = normalizeApprovalMode(process.env.AGENT_DECK_APPROVAL_MODE);
+  let streamingEventId: string | undefined;
+  let streamingReasoningEventId: string | undefined;
+  let activeTurnId: string | undefined;
+  let streamingText = "";
+  let streamingReasoning = "";
+  let lastStreamingPublishAt = 0;
+  let lastReasoningPublishAt = 0;
+  let pendingApproval: {
+    id: string;
+    toolName: string;
+    detail: string;
+    createdAt: string;
+    expiresAt: string;
+    decide: (approved: boolean) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  } | undefined;
+
+  const agentId = () => ctx?.sessionManager.getSessionId() ?? process.env.PI_SESSION_ID ?? "pi-unknown";
+
+  const modelName = () => {
+    const model = ctx?.model;
+    return model ? `${model.provider}/${model.id}` : "Pi";
+  };
+
+  const heartbeat = async () => {
+    if (!ctx) return;
+    const usage = usageTotals(ctx);
+    try {
+      await bridgeRequest("/agents/heartbeat", {
+        method: "POST",
+        body: JSON.stringify({
+          id: agentId(),
+          name: pi.getSessionName() ?? `Pi · ${basename(ctx.cwd)}`,
+          project: basename(ctx.cwd),
+          model: modelName(),
+          runtime: "pi",
+          runtimeProtocol: "canonical-v1",
+          state,
+          task,
+          objective,
+          tokens: usage.tokens,
+          processedTokens: usage.tokens,
+          costUsd: usage.costUsd,
+          capabilities: ["pause", "resume", "stop", ...(usesRemoteApproval(approvalMode) ? ["approve", "reject"] : []), "prompt", "steer", "follow_up"],
+          pendingApproval: pendingApproval ? {
+            id: pendingApproval.id,
+            tool: pendingApproval.toolName,
+            detail: pendingApproval.detail,
+            createdAt: pendingApproval.createdAt,
+            expiresAt: pendingApproval.expiresAt,
+          } : undefined,
+        }),
+      });
+      connected = true;
+      ctx.ui.setStatus("agent-deck", ctx.ui.theme.fg("success", `● Agent Deck · gate ${approvalMode}`));
+    } catch {
+      if (connected) connected = false;
+      ctx.ui.setStatus("agent-deck", ctx.ui.theme.fg("warning", `○ Agent Deck · gate ${approvalMode}`));
+    }
+  };
+
+  const publishRuntime = (type: string, payload: Record<string, unknown>, refs: { id?: string; turnId?: string; itemId?: string; requestId?: string } = {}) => {
+    if (!ctx) return Promise.resolve();
+    return bridgeRequest(`/agents/${encodeURIComponent(agentId())}/runtime-events`, {
+      method: "POST",
+      body: JSON.stringify({
+        id: refs.id ?? crypto.randomUUID(), agentId: agentId(), type, createdAt: new Date().toISOString(), payload,
+        ...(refs.turnId ? { turnId: refs.turnId } : {}), ...(refs.itemId ? { itemId: refs.itemId } : {}), ...(refs.requestId ? { requestId: refs.requestId } : {}),
+      }),
+    });
+  };
+
+  const publishEvent = (kind: EventKind, summary: string, detail?: string, id?: string, extra: Record<string, unknown> = {}) => {
+    if (!ctx) return;
+    void bridgeRequest(`/agents/${encodeURIComponent(agentId())}/events`, {
+      method: "POST",
+      body: JSON.stringify({ id, kind, summary: clip(summary, 120), detail: detail ? clipMultiline(detail) : undefined, ...extra }),
+    }).catch(() => {});
+  };
+
+  const acknowledge = async (commandId: string) => {
+    await bridgeRequest(`/agents/${encodeURIComponent(agentId())}/commands/${encodeURIComponent(commandId)}/ack`, { method: "POST" });
+  };
+
+  const settleApproval = (approved: boolean) => {
+    const pending = pendingApproval;
+    if (!pending) return false;
+    pendingApproval = undefined;
+    clearTimeout(pending.timeout);
+    pending.decide(approved);
+    return true;
+  };
+
+  const requestApproval = async (toolName: string, detail: string, nextCtx: ExtensionContext): Promise<boolean> => {
+    if (pendingApproval) return false;
+    adopt(nextCtx);
+    const previousTask = task;
+    state = "waiting";
+    task = `Approval required: ${toolName}`;
+    const approvalId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const approvedPromise = new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        if (pendingApproval?.id === approvalId) {
+          pendingApproval = undefined;
+          resolve(false);
+        }
+      }, 10 * 60_000);
+      pendingApproval = {
+        id: approvalId,
+        toolName,
+        detail,
+        createdAt,
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+        decide: resolve,
+        timeout,
+      };
+    });
+    publishEvent("warning", task, detail, approvalId, { tool: toolName });
+    await heartbeat();
+    await publishRuntime("request.opened", { kind: "approval", tool: toolName, detail, createdAt, expiresAt: pendingApproval!.expiresAt }, { id: `request-opened:${approvalId}`, requestId: approvalId, turnId: activeTurnId });
+    const approved = await approvedPromise;
+
+    state = approved ? "running" : "idle";
+    task = previousTask;
+    await publishRuntime("request.resolved", { status: approved ? "approved" : "rejected" }, { id: `request-resolved:${approvalId}`, requestId: approvalId, turnId: activeTurnId }).catch(() => {});
+    publishEvent(approved ? "output" : "warning", approved ? `Approved: ${toolName}` : `Rejected: ${toolName}`, detail);
+    void heartbeat();
+    return approved;
+  };
+
+  const executeCommand = async (command: RemoteCommand) => {
+    if (!ctx) return;
+    try {
+      switch (command.action) {
+        case "prompt":
+        case "steer":
+        case "follow_up": {
+          if (!command.value?.trim()) throw new Error("Remote prompt was empty");
+          task = clip(command.value);
+          objective = clip(command.value, 500);
+          state = "running";
+          const delivery = command.action === "follow_up" ? "followUp" : "steer";
+          pi.sendUserMessage(command.value, ctx.isIdle() ? undefined : { deliverAs: delivery });
+          break;
+        }
+        case "pause":
+          settleApproval(false);
+          ctx.abort();
+          state = "paused";
+          task = "Paused remotely";
+          break;
+        case "resume":
+          state = "running";
+          task = "Resuming interrupted work";
+          pi.sendUserMessage("Continue from where you were interrupted.", ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+          break;
+        case "stop":
+          settleApproval(false);
+          ctx.abort();
+          state = "idle";
+          task = "Stopped remotely";
+          break;
+        case "approve":
+          if (!settleApproval(true)) {
+            state = "running";
+            task = "Remote approval received";
+            pi.sendUserMessage("Approved from Agent Deck. Proceed.", ctx.isIdle() ? undefined : { deliverAs: "steer" });
+          }
+          break;
+        case "reject":
+          if (!settleApproval(false)) {
+            ctx.abort();
+            state = "idle";
+            task = "Remote request rejected";
+            pi.sendUserMessage("Rejected from Agent Deck. Do not perform the pending action.", ctx.isIdle() ? undefined : { deliverAs: "steer" });
+          }
+          break;
+      }
+      publishEvent("output", `Remote command: ${command.action}`, command.value);
+    } catch (error) {
+      state = "error";
+      publishEvent("error", `Remote command failed: ${command.action}`, error instanceof Error ? error.message : String(error));
+    } finally {
+      await acknowledge(command.id).catch(() => {});
+      void heartbeat();
+    }
+  };
+
+  const pollCommands = async () => {
+    if (!ctx || polling) return;
+    polling = true;
+    try {
+      const result = await bridgeRequest<{ commands: RemoteCommand[] }>(`/agents/${encodeURIComponent(agentId())}/commands`);
+      for (const command of result.commands) await executeCommand(command);
+    } catch {
+      // Heartbeats own the visible connection status; command polling is best-effort.
+    } finally {
+      polling = false;
+    }
+  };
+
+  const instanceToken = crypto.randomUUID();
+
+  const stopLoops = () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (commandTimer) clearInterval(commandTimer);
+    heartbeatTimer = undefined;
+    commandTimer = undefined;
+  };
+
+  /**
+   * Adopts the newest context and guarantees the heartbeat and command loops are running. Every
+   * handler routes through here because `session_start` does not fire again after a `/reload`, so
+   * it is no longer the only place a connection can begin.
+   */
+  const adopt = (nextCtx: ExtensionContext) => {
+    ctx = nextCtx;
+    if (!heartbeatTimer) heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_INTERVAL_MS);
+    if (!commandTimer) commandTimer = setInterval(() => void pollCommands(), COMMAND_INTERVAL_MS);
+  };
+
+  // Take over from whatever instance a `/reload` is replacing: stop its loops so the two do not
+  // both heartbeat, and inherit its context so the session stays connected without waiting for the
+  // next event. Claiming ownership also tells the outgoing instance not to publish "offline".
+  // The handoff is process-scoped, matching this file's existing assumption of one Pi session per
+  // process (see the PI_SESSION_ID fallback in agentId). If that ever stops holding, key the slot
+  // by session id — a second concurrent session would otherwise adopt this one's context.
+  const previous = handoffSlot[RELOAD_HANDOFF];
+  previous?.stop();
+  handoffSlot[RELOAD_HANDOFF] = { owner: instanceToken, stop: stopLoops, context: () => ctx };
+  const inherited = previous?.context();
+  if (inherited) {
+    adopt(inherited);
+    state = inherited.isIdle() ? "idle" : "running";
+    task = lastUserTask(inherited);
+    void heartbeat();
+    void pollCommands();
+  }
+
+  pi.on("session_start", async (_event, nextCtx) => {
+    adopt(nextCtx);
+    state = nextCtx.isIdle() ? "idle" : "running";
+    task = lastUserTask(nextCtx);
+    objective = task == "Ready for a remote instruction" ? undefined : clip(task, 500);
+    await heartbeat();
+    void pollCommands();
+  });
+
+  pi.on("before_agent_start", (event, nextCtx) => {
+    adopt(nextCtx);
+    state = "running";
+    task = clip(event.prompt);
+    objective = clip(event.prompt, 500);
+    activeTurnId = crypto.randomUUID();
+    void publishRuntime("turn.started", { objective }, { turnId: activeTurnId }).catch(() => {});
+    publishEvent("thought", "Received instruction", task);
+    void heartbeat();
+  });
+
+  pi.on("agent_start", (_event, nextCtx) => {
+    adopt(nextCtx);
+    state = "running";
+    void heartbeat();
+  });
+
+  pi.on("tool_call", async (event, nextCtx) => {
+    adopt(nextCtx);
+    const input = event.input as Record<string, unknown>;
+    if (/ask.?user.?question/i.test(event.toolName)) {
+      const questions = Array.isArray(input.questions) ? input.questions as Array<Record<string, unknown>> : [];
+      const first = questions[0] ?? input;
+      const question = String(first.question ?? first.header ?? "Agent needs your answer");
+      const options = Array.isArray(first.options) ? first.options.map((option) => typeof option === "object" && option ? String((option as Record<string, unknown>).label ?? "") : String(option)).filter(Boolean) : [];
+      if (options.length === 0 || QUESTION_TIMEOUT_MS === 0) {
+        // No preset choices means nothing a phone or watch could safely answer with — show it and
+        // let the host terminal take it.
+        publishEvent("question", "Question", question, undefined, { tool: event.toolName, options });
+        return;
+      }
+      const questionId = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + QUESTION_TIMEOUT_MS).toISOString();
+      state = "waiting";
+      task = clip(question, 180);
+      void publishRuntime("user-input.requested", { kind: "user-input", question, options, createdAt: new Date().toISOString(), expiresAt }, { id: `user-input-requested:${questionId}`, requestId: questionId, turnId: activeTurnId }).catch(() => {});
+      publishEvent("question", "Question", question, questionId, { tool: event.toolName, options });
+      void heartbeat();
+      const answer = await bridge.waitForAnswer(agentId(), questionId, { timeoutMs: QUESTION_TIMEOUT_MS }).catch(() => undefined);
+      state = "running";
+      if (answer === undefined) {
+        task = clip(question, 180);
+        void heartbeat();
+        return; // Unanswered remotely — the tool asks on the host terminal as usual.
+      }
+      task = clip(`Answered: ${answer}`, 180);
+      void publishRuntime("user-input.resolved", { status: "answered", value: answer }, { id: `user-input-resolved:${questionId}`, requestId: questionId, turnId: activeTurnId }).catch(() => {});
+      publishEvent("output", "Answered from Agent Deck", answer);
+      void heartbeat();
+      return { block: true, reason: `The user answered from Agent Deck: ${answer}. Do not ask again — continue with that answer.` };
+    }
+    if (!requiresApproval(event.toolName, input, approvalMode)) return;
+    const detail = describeToolCall(event.toolName, input);
+    const approved = await requestApproval(event.toolName, detail, nextCtx);
+    if (!approved) return { block: true, reason: "Rejected or timed out in Agent Deck" };
+  });
+
+  pi.on("tool_execution_start", (event, nextCtx) => {
+    adopt(nextCtx);
+    state = "running";
+    const args = event.args as Record<string, unknown>;
+    const itemId = String((event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID());
+    const target = typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : undefined;
+    // The tool has not run yet, so the file still holds its old contents. Keep them to diff against
+    // once it completes, which turns a whole-file write into a real change instead of all additions.
+    if (mutatesFile(event.toolName, target)) {
+      const before = readFileForDiff(target);
+      if (before !== null) {
+        if (pendingFileEdits.size >= MAX_PENDING_FILE_EDITS) pendingFileEdits.delete(pendingFileEdits.keys().next().value!);
+        pendingFileEdits.set(itemId, { target, before });
+      }
+    }
+    void publishRuntime("item.started", { tool: event.toolName, summary: `Using ${event.toolName}`, detail: describeToolCall(event.toolName, args) }, { id: `item-started:${agentId()}:${itemId}`, itemId, turnId: activeTurnId }).catch(() => {});
+    publishEvent("tool", `Using ${event.toolName}`, describeToolCall(event.toolName, args), `tool:${agentId()}:${itemId}`, {
+      tool: event.toolName,
+      path: target,
+      command: typeof args.command === "string" ? clipMultiline(args.command, 8_000) : undefined,
+      diff: typeof args.old_string === "string" && typeof args.new_string === "string"
+        ? clipMultiline(`- ${args.old_string.replace(/\n/g, "\n- ")}\n+ ${args.new_string.replace(/\n/g, "\n+ ")}`, 16_000)
+        : /write|create/i.test(event.toolName) && typeof args.content === "string"
+          ? clipMultiline(`+ ${args.content.replace(/\n/g, "\n+ ")}`, 16_000)
+          : undefined,
+    });
+  });
+
+  pi.on("tool_execution_end", (event, nextCtx) => {
+    adopt(nextCtx);
+    const itemId = String((event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID());
+    const summary = `${event.toolName} ${event.isError ? "failed" : "completed"}`;
+    // Upgrade the coarse diff published at start to real unified hunks. The bridge merges by event
+    // id, so this replaces the placeholder rather than appending a second entry.
+    const pending = pendingFileEdits.get(itemId);
+    pendingFileEdits.delete(itemId);
+    const after = pending && !event.isError ? readFileForDiff(pending.target) : null;
+    const unified = pending && after !== null ? unifiedDiff(pending.before, after) : null;
+    void publishRuntime(event.isError ? "runtime.error" : "item.completed", event.isError ? { message: summary } : { tool: event.toolName, summary }, { id: `${event.isError ? "runtime-error" : "item-completed"}:${agentId()}:${itemId}`, itemId, turnId: activeTurnId }).catch(() => {});
+    publishEvent(event.isError ? "error" : "output", summary, undefined, `tool:${agentId()}:${itemId}`, {
+      tool: event.toolName,
+      ...(unified ? { diff: clipMultiline(unified, 16_000) } : {}),
+    });
+    void heartbeat();
+  });
+
+  pi.on("message_start", (event, nextCtx) => {
+    adopt(nextCtx);
+    if (event.message.role !== "assistant") return;
+    streamingEventId = crypto.randomUUID();
+    streamingReasoningEventId = crypto.randomUUID();
+    streamingText = "";
+    streamingReasoning = "";
+    lastStreamingPublishAt = 0;
+    lastReasoningPublishAt = 0;
+  });
+
+  pi.on("message_update", (event, nextCtx) => {
+    adopt(nextCtx);
+    const update = event.assistantMessageEvent;
+    const timestamp = Date.now();
+    if (update.type === "text_delta") {
+      streamingText += update.delta;
+      if (!streamingEventId || timestamp - lastStreamingPublishAt < 250) return;
+      lastStreamingPublishAt = timestamp;
+      publishEvent("output", "Responding…", streamingText, streamingEventId);
+    } else if (update.type === "thinking_delta") {
+      streamingReasoning += update.delta;
+      if (!streamingReasoningEventId || timestamp - lastReasoningPublishAt < 250) return;
+      lastReasoningPublishAt = timestamp;
+      publishEvent("thought", "Reasoning…", streamingReasoning, streamingReasoningEventId);
+    }
+  });
+
+  pi.on("message_end", (event, nextCtx) => {
+    adopt(nextCtx);
+    if (event.message.role !== "assistant") return;
+    const output = textContent(event.message.content);
+    const reasoning = reasoningContent(event.message.content);
+    if (reasoning) publishEvent("thought", "Reasoning", reasoning, streamingReasoningEventId);
+    if (output) {
+      publishEvent(
+        event.message.stopReason === "error" ? "error" : "output",
+        event.message.stopReason === "error" ? "Response failed" : "Response",
+        output,
+        streamingEventId,
+      );
+    }
+    streamingEventId = undefined;
+    streamingReasoningEventId = undefined;
+    streamingText = "";
+    streamingReasoning = "";
+  });
+
+  pi.on("agent_settled", (_event, nextCtx) => {
+    adopt(nextCtx);
+    state = "idle";
+    if (task === "Paused remotely") state = "paused";
+    const usage = usageTotals(nextCtx);
+    void publishRuntime("token-usage.updated", { contextTokens: usage.tokens, processedTokens: usage.tokens }, { turnId: activeTurnId }).catch(() => {});
+    void publishRuntime("turn.completed", { status: "completed", summary: task }, { turnId: activeTurnId }).catch(() => {});
+    activeTurnId = undefined;
+    void heartbeat();
+  });
+
+  pi.on("model_select", (_event, nextCtx) => {
+    adopt(nextCtx);
+    void heartbeat();
+  });
+
+  pi.on("session_info_changed", (_event, nextCtx) => {
+    adopt(nextCtx);
+    void heartbeat();
+  });
+
+  pi.on("session_shutdown", async (_event, nextCtx) => {
+    stopLoops();
+    settleApproval(false);
+    // A `/reload` tears the outgoing instance down *after* its replacement is live. Publishing
+    // "offline" for the shared agent id here is what dropped the session on the phone.
+    if (handoffSlot[RELOAD_HANDOFF]?.owner !== instanceToken) return;
+    handoffSlot[RELOAD_HANDOFF] = undefined;
+    // Deliberately not adopt(): this is a real shutdown, and the loops must stay stopped.
+    ctx = nextCtx;
+    state = "offline";
+    await publishRuntime("session.state.changed", { state: "offline", task: "Session ended" }).catch(() => {});
+    await heartbeat();
+    nextCtx.ui.setStatus("agent-deck", undefined);
+    ctx = undefined;
+  });
+
+  pi.registerCommand("deck-gate", {
+    description: "Set remote approval mode: off, destructive, or all",
+    handler: async (args, commandCtx) => {
+      const requested = args.trim() as ApprovalMode;
+      if (!["off", "destructive", "all"].includes(requested)) {
+        commandCtx.ui.notify(`Approval mode: ${approvalMode}. Usage: /deck-gate off|destructive|all`, "info");
+        return;
+      }
+      approvalMode = requested;
+      if (!usesRemoteApproval(approvalMode)) settleApproval(true);
+      adopt(commandCtx);
+      await heartbeat();
+      commandCtx.ui.notify(`Agent Deck approval mode: ${approvalMode}`, "info");
+    },
+  });
+
+  pi.registerCommand("deck-test-approval", {
+    description: "Send a harmless approval request to Agent Deck",
+    handler: async (_args, commandCtx) => {
+      const approved = await requestApproval("test", "Harmless end-to-end approval test", commandCtx);
+      state = "idle";
+      task = approved ? "Approval test completed" : "Approval test rejected";
+      void heartbeat();
+      commandCtx.ui.notify(approved ? "Remote approval received" : "Remote approval rejected or timed out", approved ? "info" : "warning");
+    },
+  });
+
+  pi.registerCommand("deck-status", {
+    description: "Show the Agent Deck bridge connection",
+    handler: async (_args, commandCtx) => {
+      adopt(commandCtx);
+      await heartbeat();
+      commandCtx.ui.notify(
+        connected ? `Agent Deck connected to ${bridge.baseUrl}` : `Agent Deck cannot reach ${bridge.baseUrl}`,
+        connected ? "info" : "warning",
+      );
+    },
+  });
+}

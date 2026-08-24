@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icons crop their layers to a mask that shows roughly the central 72 of the 108dp layer,
+  so art sized to the edge of the safe zone reads as cropped and oversized. This inset leaves the
+  mark comfortably inside the mask with margin on every side.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_art"
+    android:inset="27%" />

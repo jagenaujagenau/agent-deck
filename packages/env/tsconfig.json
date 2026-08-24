@@ -1,0 +1,3 @@
+{
+  "extends": "@agent-control-dashboard/config/tsconfig.base.json"
+}

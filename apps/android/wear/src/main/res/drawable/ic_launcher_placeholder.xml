@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Stands in until the real artwork is dropped at apps/android/icon-source.png and
+  `bun scripts/generate-app-icons.ts` repoints the foreground at the generated bitmap.
+  A vector keeps the build green without committing a fake bitmap to the repo.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- antennae -->
+    <path android:strokeColor="#38BDF8" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M32,30 L26,18" />
+    <path android:strokeColor="#38BDF8" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M76,30 L82,18" />
+    <path android:fillColor="#7DD3FC" android:pathData="M26,12m-5,0a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
+    <path android:fillColor="#7DD3FC" android:pathData="M82,12m-5,0a5,5 0 1,0 10,0a5,5 0 1,0 -10,0" />
+    <!-- head -->
+    <path android:fillColor="#2563EB"
+        android:pathData="M28,30 L80,30 A14,14 0 0,1 94,44 L94,66 A14,14 0 0,1 80,80 L28,80 A14,14 0 0,1 14,66 L14,44 A14,14 0 0,1 28,30 Z" />
+    <!-- visor -->
+    <path android:fillColor="#0B1120"
+        android:pathData="M32,42 L76,42 A8,8 0 0,1 84,50 L84,60 A8,8 0 0,1 76,68 L32,68 A8,8 0 0,1 24,60 L24,50 A8,8 0 0,1 32,42 Z" />
+    <!-- eyes -->
+    <path android:strokeColor="#22D3EE" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M38,58 A7,7 0 0,1 52,58" />
+    <path android:strokeColor="#22D3EE" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M58,58 A7,7 0 0,1 72,58" />
+    <!-- plinth -->
+    <path android:fillColor="#1D4ED8"
+        android:pathData="M22,86 L86,86 A5,5 0 0,1 91,91 L91,94 A5,5 0 0,1 86,99 L22,99 A5,5 0 0,1 17,94 L17,91 A5,5 0 0,1 22,86 Z" />
+</vector>
