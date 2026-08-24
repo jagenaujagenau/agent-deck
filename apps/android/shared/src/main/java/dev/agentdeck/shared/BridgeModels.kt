@@ -8,6 +8,27 @@ data class AgentChanges(val changes: List<AgentEvent> = emptyList())
 @Serializable
 data class AgentHistory(val events: List<AgentEvent> = emptyList())
 
+/**
+ * An incremental stream update: the agents whose rendered state changed, plus any that are gone.
+ * Everything absent from it is unchanged and must be carried over from the previous snapshot.
+ */
+@Serializable
+data class BridgeSnapshotPatch(
+    val sequence: Long = 0,
+    val bridge: BridgeInfo,
+    val summary: Summary,
+    val agents: List<Agent> = emptyList(),
+    val removed: List<String> = emptyList(),
+)
+
+/** Applies a patch to the snapshot it was computed against, preserving agent order where possible. */
+fun BridgeSnapshot.applyPatch(patch: BridgeSnapshotPatch): BridgeSnapshot {
+    val changed = patch.agents.associateBy { it.id }
+    val kept = agents.filterNot { it.id in patch.removed }.map { changed[it.id] ?: it }
+    val added = patch.agents.filter { incoming -> agents.none { it.id == incoming.id } }
+    return BridgeSnapshot(patch.sequence, patch.bridge, patch.summary, kept + added)
+}
+
 @Serializable
 data class SlashCommand(val name: String, val description: String? = null, val source: String = "user")
 

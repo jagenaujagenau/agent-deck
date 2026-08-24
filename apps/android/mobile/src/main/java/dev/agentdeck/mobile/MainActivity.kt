@@ -1202,18 +1202,25 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     val activity = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { agentCardActivity(agent) }
     val reasoningCount = remember(sessionAgent.events) { reasoningEvents(sessionAgent.events).size }
     // Prefer the bridge's full history; fall back to whatever the live window still holds while it loads.
-    val changeSource = if (sessionChanges.isNotEmpty()) sessionChanges else agent.events
-    val fileChanges = remember(changeSource) { agentFileChanges(changeSource) }
+    var changesLoaded by remember(agent.id) { mutableStateOf(false) }
+    LaunchedEffect(sessionChanges) { if (sessionChanges.isNotEmpty()) changesLoaded = true }
+    val fileChanges = remember(sessionChanges) { agentFileChanges(sessionChanges) }
     val terminalCount = remember(sessionAgent.events) { terminalEvents(sessionAgent.events).size }
     val hasAttention = pendingApproval != null || pendingQuestion != null
     val isPaused = agent.state == "paused"
     // Live events already merge over the fetched history, so a refetch is only needed to recover
-    // what has aged out of the snapshot's window since. Keying this on event count instead would
-    // refetch the session's whole history on every tool call.
+    // what has aged out of the snapshot's window since. Keying this on event count would refetch
+    // the whole history on every tool call; polling blindly would refetch it for idle sessions
+    // that cannot have changed. So: poll slowly, and only spend the fetch when activity moved.
+    val liveActivity by rememberUpdatedState("${agent.events.size}:${agent.events.firstOrNull()?.id}")
     LaunchedEffect(agent.id) {
+        var fetchedAt = ""
         while (true) {
-            onLoadHistory()
-            onLoadChanges()
+            if (liveActivity != fetchedAt) {
+                onLoadHistory()
+                onLoadChanges()
+                fetchedAt = liveActivity
+            }
             delay(20_000)
         }
     }
@@ -1307,7 +1314,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                     modifier = Modifier.weight(1f),
                 )
                 AgentViewMode.Reasoning -> ReasoningView(sessionAgent, Modifier.weight(1f).navigationBarsPadding())
-                AgentViewMode.Diff -> DiffView(fileChanges, Modifier.weight(1f).navigationBarsPadding())
+                AgentViewMode.Diff -> DiffView(fileChanges, changesLoaded, Modifier.weight(1f).navigationBarsPadding())
                 AgentViewMode.Terminal -> TerminalView(sessionAgent, busy, commandError, supports, onControl, Modifier.weight(1f))
             }
         }
@@ -1682,7 +1689,7 @@ private fun ReasoningView(agent: Agent, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun DiffView(files: List<AgentFileChange>, modifier: Modifier = Modifier) {
+private fun DiffView(files: List<AgentFileChange>, loaded: Boolean, modifier: Modifier = Modifier) {
     val additions = files.sumOf { it.additions }
     val deletions = files.sumOf { it.deletions }
     var allExpanded by rememberSaveable { mutableStateOf(true) }
@@ -1725,9 +1732,12 @@ private fun DiffView(files: List<AgentFileChange>, modifier: Modifier = Modifier
             ) {
                 Icon(Icons.Rounded.Difference, null, tint = Muted, modifier = Modifier.size(32.dp))
                 Spacer(Modifier.height(12.dp))
-                Text("No captured changes", fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text("Edits and writes exposed by this runtime will appear here.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center)
+                // Until the session's changes have been fetched, "none" is not yet known.
+                Text(if (loaded) "No captured changes" else "Loading changes…", fontWeight = FontWeight.SemiBold)
+                if (loaded) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Edits and writes exposed by this runtime will appear here.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center)
+                }
             }
         } else {
             LazyColumn(

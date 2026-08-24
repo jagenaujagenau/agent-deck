@@ -63,6 +63,14 @@ const now = () => new Date().toISOString();
 const makeId = () => crypto.randomUUID();
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 
+/**
+ * A stable identity for one agent's rendered state, used to decide whether a connected device needs
+ * to be told about it again. Comparing these is far cheaper than resending the agent.
+ */
+function agentFingerprint(agent: Record<string, unknown>): string {
+  return createHash("sha1").update(JSON.stringify(agent)).digest("base64");
+}
+
 /** Serialized to every connected device; both callers hand it straight to JSON. */
 type SnapshotPayload = {
   sequence: number;
@@ -79,8 +87,7 @@ type SnapshotPayload = {
  */
 const SNAPSHOT_EVENT_LIMIT = 24;
 const SNAPSHOT_DETAIL_LIMIT = 400;
-const HISTORY_TOOL_DETAIL_LIMIT = 240;
-const HISTORY_COMMAND_LIMIT = 2_000;
+const HISTORY_COMMAND_LIMIT = 600;
 
 function cardEvent(event: AgentEvent): AgentEvent {
   const detail = event.detail && event.detail.length > SNAPSHOT_DETAIL_LIMIT
@@ -204,11 +211,9 @@ class BridgeStore {
       kind: row.kind,
       summary: row.summary,
       // A tool event's detail is the rendered tool call, which no tab shows: the conversation
-      // excludes tool events and the terminal renders `command`. Keeping the head of it preserves
-      // debuggability while dropping the bulk of a session's payload.
-      detail: row.tool && row.detail && row.detail.length > HISTORY_TOOL_DETAIL_LIMIT
-        ? `${row.detail.slice(0, HISTORY_TOOL_DETAIL_LIMIT - 1).trimEnd()}…`
-        : row.detail ?? undefined,
+      // excludes tool events, the terminal renders `command`, and the diff comes from /changes.
+      // It was the single largest thing in this payload.
+      detail: row.tool ? undefined : row.detail ?? undefined,
       tool: row.tool ?? undefined,
       // The terminal card renders the command, so it is kept — but a multi-kilobyte heredoc is
       // already unreadable on a phone, and a session's worth of them is most of this payload.
@@ -1138,14 +1143,38 @@ bridgeApi.get("/commands/:id/receipt", (c) => {
 });
 bridgeApi.get("/analytics", async (c) => c.json(await store.analytics(c.req.query("range") ?? "month", c.req.query("project"), c.req.query("timeZone") ?? "UTC")));
 bridgeApi.get("/diagnostics/projection-parity", (c) => c.json({ agents: store.projectionParity() }));
+/**
+ * A snapshot is re-derived on every change, but most of it is unchanged: one agent moving from
+ * running to idle used to resend every other session with it. Each connection gets one full
+ * snapshot, then only the agents whose rendered state actually differs from what it was last sent.
+ */
 bridgeApi.get("/events", (c) => streamSSE(c, async (stream) => {
   let revision = -1;
   let lastPingAt = Date.now();
+  // What this connection has been told, per agent. Kept per connection because clients attach at
+  // different revisions and must not depend on each other's position in the stream.
+  let sent: Map<string, string> | undefined;
   while (true) {
     const currentRevision = store.getRevision();
     if (currentRevision !== revision) {
       revision = currentRevision;
-      await stream.writeSSE({ event: "snapshot", id: String(revision), data: JSON.stringify(store.snapshot()) });
+      const snapshot = store.snapshot();
+      const fingerprints = new Map(snapshot.agents.map((agent) => [String(agent.id), agentFingerprint(agent)]));
+      if (!sent) {
+        await stream.writeSSE({ event: "snapshot", id: String(revision), data: JSON.stringify(snapshot) });
+      } else {
+        const agents = snapshot.agents.filter((agent) => sent!.get(String(agent.id)) !== fingerprints.get(String(agent.id)));
+        const removed = [...sent.keys()].filter((id) => !fingerprints.has(id));
+        // A revision can bump without changing anything a device renders; say nothing then.
+        if (agents.length > 0 || removed.length > 0) {
+          await stream.writeSSE({
+            event: "patch",
+            id: String(revision),
+            data: JSON.stringify({ sequence: snapshot.sequence, bridge: snapshot.bridge, summary: snapshot.summary, agents, removed }),
+          });
+        }
+      }
+      sent = fingerprints;
     } else if (Date.now() - lastPingAt >= 15_000) {
       lastPingAt = Date.now();
       await stream.writeSSE({ event: "ping", data: String(lastPingAt) });

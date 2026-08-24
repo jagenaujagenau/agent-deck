@@ -95,6 +95,7 @@ class BridgeClient(
             if (!response.isSuccessful) error("Event stream returned ${response.code}")
             val source = response.body.source()
             var eventName = ""
+            var latest: BridgeSnapshot? = null
             val data = StringBuilder()
             while (currentCoroutineContext().isActive && !source.exhausted()) {
                 val line = source.readUtf8Line() ?: break
@@ -102,8 +103,19 @@ class BridgeClient(
                     line.startsWith("event:") -> eventName = line.substringAfter(':').trim()
                     line.startsWith("data:") -> data.append(line.substringAfter(':').trim())
                     line.isEmpty() -> {
-                        if (eventName == "snapshot" && data.isNotEmpty()) {
-                            onSnapshot(json.decodeFromString<BridgeSnapshot>(data.toString()))
+                        if (data.isNotEmpty()) when (eventName) {
+                            "snapshot" -> {
+                                val snapshot = json.decodeFromString<BridgeSnapshot>(data.toString())
+                                latest = snapshot
+                                onSnapshot(snapshot)
+                            }
+                            // A patch only makes sense against the snapshot it was computed from;
+                            // without one the connection is not yet synced, so wait for the full send.
+                            "patch" -> latest?.let { previous ->
+                                val merged = previous.applyPatch(json.decodeFromString<BridgeSnapshotPatch>(data.toString()))
+                                latest = merged
+                                onSnapshot(merged)
+                            }
                         }
                         eventName = ""
                         data.clear()
