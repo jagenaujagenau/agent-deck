@@ -112,3 +112,97 @@ Pick one:
     expect(prompt?.question).toBe("Pick one:");
   });
 });
+
+describe("questionAbove", () => {
+  /**
+   * Captured from Claude Code's startup trust prompt. The line immediately
+   * above the choices is a link label, and taking the nearest line put
+   * "Security guide" on the watch instead of the question.
+   */
+  const trust = `
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a
+ well-known open source project, or work from your team).
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ 1. Yes, I trust this folder
+   2. No, exit
+
+ Enter to confirm · Esc to cancel
+`;
+
+  test("skips a footnote sitting between the question and the choices", () => {
+    expect(parsePrompt(trust)?.question).toContain("Quick safety check");
+  });
+
+  test("a statement without a question mark still reads as the question", () => {
+    // The resume prompt asks nothing explicitly; the sentence explaining the
+    // choice is the closest thing to one.
+    const prompt = parsePrompt(`
+  This session is 16h 40m old.
+
+  Resuming the full session will consume a substantial portion of your usage limits.
+
+  ❯ 1. Resume from summary
+    2. Resume full session as-is
+`);
+    expect(prompt?.question).toContain("Resuming the full session");
+  });
+
+  test("a box drawn around the menu is not the question", () => {
+    const prompt = parsePrompt(`
+Do you want to proceed?
+╭──────────────────────╮
+❯ 1. Yes
+  2. No
+`);
+    expect(prompt?.question).toBe("Do you want to proceed?");
+  });
+});
+
+describe("menus that wrap", () => {
+  /**
+   * Claude Code's model picker, captured live. Option three's description runs
+   * onto a second line, and treating that as the end of the menu read this as
+   * two choices out of five - with option three's text taken for the question.
+   */
+  const models = `
+  Select model
+  Switch between Claude models. Your pick becomes the default for new sessions.
+
+    1. Default (recommended)  Opus 5 with 1M context · Best for everyday tasks
+  ❯ 2. Opus (1M context)      Opus 5 with 1M context · Best for everyday tasks
+    3. Fable                  Fable 5 · Most capable for your hardest and longest-running
+                              tasks
+    4. Sonnet                 Sonnet 5 · Efficient for routine tasks
+    5. Haiku                  Haiku 4.5 · Fastest for quick answers
+
+  Enter to set as default · Esc to cancel
+`;
+
+  test("a wrapped label does not truncate the menu", () => {
+    expect(parsePrompt(models)?.options.map((option) => option.number)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  test("the cursor is still found after a wrap", () => {
+    expect(parsePrompt(models)?.options.find((option) => option.selected)?.number).toBe(2);
+  });
+
+  test("a menu missing its first choices is refused, not shown in part", () => {
+    // Showing two of five would let someone press "2" for what the terminal has
+    // numbered differently - a wrong action taken confidently.
+    expect(
+      parsePrompt(`
+Pick one:
+  ❯ 3. Third
+    4. Fourth
+`),
+    ).toBeUndefined();
+  });
+
+  test("a menu that skips a number is refused", () => {
+    expect(parsePrompt("Pick:\n❯ 1. One\n  3. Three\n")).toBeUndefined();
+  });
+});

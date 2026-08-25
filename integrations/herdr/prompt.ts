@@ -66,8 +66,20 @@ export function parsePrompt(screen: string): TerminalPrompt | undefined {
   }
   if (end === -1) return undefined;
 
+  // Walk up through the menu, stepping over wrapped labels. A long option
+  // description continues on an indented line, and treating that as the end of
+  // the menu read Claude Code's model picker as two choices out of five - with
+  // the third's text taken for the question.
+  const indent = (line: string) => line.length - line.trimStart().length;
+  const menuIndent = indent(lines[end]!);
   let start = end;
-  while (start > 0 && OPTION.test(lines[start - 1]!)) start -= 1;
+  while (start > 0) {
+    const previous = lines[start - 1]!;
+    const isOption = OPTION.test(previous);
+    const isWrap = previous.trim() !== "" && indent(previous) > menuIndent;
+    if (!isOption && !isWrap) break;
+    start -= 1;
+  }
 
   const options: PromptOption[] = [];
   for (const line of lines.slice(start, end + 1)) {
@@ -83,14 +95,38 @@ export function parsePrompt(screen: string): TerminalPrompt | undefined {
   // One option is a statement, not a choice.
   if (options.length < 2) return undefined;
   if (!looksInteractive(lines, options)) return undefined;
+  // A partial menu is refused outright. Showing two of five choices would let
+  // someone press "2" for what the terminal has numbered differently, which is
+  // a wrong action taken confidently - worse than showing nothing at all.
+  if (!options.every((option, index) => option.number === index + 1)) return undefined;
 
-  // The question is the nearest prose above the menu. Runtimes explain
-  // themselves at length, so the last line before it is the one being asked.
-  const question = lines
-    .slice(0, start)
-    .reverse()
+  return { question: questionAbove(lines.slice(0, start)), options };
+}
+
+/** A horizontal rule, a box edge - drawn, not said. */
+const RULE = /^[\s─━│┌┐└┘├┤┬┴┼╭╮╯╰=_-]+$/;
+
+/**
+ * The line that is actually being asked, from the prose above a menu.
+ *
+ * Not simply the nearest one. Runtimes put a footnote or a link immediately
+ * above their choices - Claude Code's trust prompt ends with "Security guide" -
+ * and taking the closest line put that on the watch instead of the question.
+ * A line carrying a question mark wins; failing that, the nearest line long
+ * enough to be a sentence rather than a label.
+ */
+function questionAbove(above: ReadonlyArray<string>): string {
+  const candidates = above
     .map((line) => line.trim())
-    .find((line) => line !== "" && !/^[─-╿\-_=]+$/.test(line));
-
-  return { question: question ?? "The terminal is asking for a choice", options };
+    .filter((line) => line !== "" && !RULE.test(line))
+    .reverse()
+    // Far enough back to clear a footnote, near enough not to reach the last
+    // thing the agent said before the prompt appeared.
+    .slice(0, 8);
+  return (
+    candidates.find((line) => line.includes("?")) ??
+    candidates.find((line) => line.length >= 25) ??
+    candidates[0] ??
+    "The terminal is asking for a choice"
+  );
 }
