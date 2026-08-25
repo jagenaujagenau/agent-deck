@@ -33,7 +33,7 @@ export interface RateLimitWindow {
   account?: string;
 }
 
-export interface AnalyticsAgent {
+interface AnalyticsAgent {
   id: string;
   project: string;
   runtime: string;
@@ -58,7 +58,7 @@ export interface AnalyticsInput {
   };
 }
 
-export const RANGE_DAYS: Record<string, number> = {
+const RANGE_DAYS: Record<string, number> = {
   day: 1,
   week: 7,
   month: 30,

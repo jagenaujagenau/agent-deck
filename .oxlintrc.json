@@ -25,8 +25,6 @@
     "**/.nitro/**",
     "**/routeTree.gen.ts",
     "apps/android/**",
-    "packages/db/src/migrations/**",
-    "apps/web/src/components/ai-elements/**",
-    "apps/web/src/components/ui/**"
+    "packages/db/src/migrations/**"
   ]
 }

@@ -8,7 +8,7 @@ import { BridgeState } from "./State";
 import { BridgeStore } from "./Store";
 
 /** Path prefix the phone, watch, and hooks are already built against. */
-export const BRIDGE_PREFIX = "/bridge/v1";
+const BRIDGE_PREFIX = "/bridge/v1";
 
 const param = (name: string) => Effect.map(HttpRouter.params, (params) => params[name] ?? "");
 

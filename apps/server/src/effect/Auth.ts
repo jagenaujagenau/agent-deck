@@ -5,7 +5,7 @@ import { BridgeConfig } from "./Config";
 
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 
-export type Scope = "read" | "control";
+type Scope = "read" | "control";
 
 /**
  * Which credential a path accepts.

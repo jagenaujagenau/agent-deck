@@ -31,7 +31,6 @@
     "dev": "turbo dev",
     "dev:native": "turbo -F native dev",
     "dev:server": "turbo -F server dev",
-    "dev:web": "turbo -F web dev",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "knip": "knip",

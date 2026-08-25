@@ -8,9 +8,6 @@
     "apps/server": {
       "entry": ["scripts/*.ts", "src/**/*.test.ts"]
     },
-    "apps/web": {
-      "entry": ["src/routes/**/*.tsx"]
-    },
     "packages/agent-adapter": {
       "entry": ["src/**/*.test.ts"]
     }
