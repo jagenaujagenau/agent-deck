@@ -21,17 +21,22 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "turbo dev",
     "build": "turbo build",
     "check-types": "turbo check-types",
-    "dev:native": "turbo -F native dev",
-    "dev:web": "turbo -F web dev",
-    "dev:server": "turbo -F server dev",
+    "db:generate": "turbo -F @agent-control-dashboard/db db:generate",
+    "db:local": "turbo -F @agent-control-dashboard/db db:local",
+    "db:migrate": "turbo -F @agent-control-dashboard/db db:migrate",
     "db:push": "turbo -F @agent-control-dashboard/db db:push",
     "db:studio": "turbo -F @agent-control-dashboard/db db:studio",
-    "db:generate": "turbo -F @agent-control-dashboard/db db:generate",
-    "db:migrate": "turbo -F @agent-control-dashboard/db db:migrate",
-    "db:local": "turbo -F @agent-control-dashboard/db db:local"
+    "dev": "turbo dev",
+    "dev:native": "turbo -F native dev",
+    "dev:server": "turbo -F server dev",
+    "dev:web": "turbo -F web dev",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "knip": "knip",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
   },
   "dependencies": {
     "@agent-control-dashboard/env": "workspace:*",
@@ -41,6 +46,9 @@
   "devDependencies": {
     "@agent-control-dashboard/config": "workspace:*",
     "@types/bun": "catalog:",
+    "knip": "^6.32.2",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
     "turbo": "^2.6.3",
     "typescript": "catalog:"
   },

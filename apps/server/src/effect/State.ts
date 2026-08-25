@@ -130,9 +130,11 @@ export class BridgeState extends Context.Service<BridgeState, {
       const commandsRef = yield* Ref.make(new Map<string, Command>())
 
       /** Restores the live window from SQL so a restart does not blank the deck. */
-      const rows = yield* sql<{ id: string; data: string }>`SELECT id, data FROM bridge_agents`.pipe(Effect.orDie)
+      const agentRows = yield* sql<{ id: string; data: string }>`SELECT id, data FROM bridge_agents`.pipe(
+        Effect.orDie
+      )
       const restored = new Map<string, AgentRecord>()
-      for (const row of rows) {
+      for (const row of agentRows) {
         try {
           restored.set(row.id, JSON.parse(row.data) as AgentRecord)
         } catch {

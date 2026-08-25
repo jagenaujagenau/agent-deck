@@ -13,8 +13,8 @@ export const BRIDGE_PREFIX = "/bridge/v1"
 const param = (name: string) => Effect.map(HttpRouter.params, (params) => params[name] ?? "")
 
 const CONTROL_ACTIONS = ["pause", "resume", "stop", "approve", "reject", "prompt", "steer", "follow_up"] as const
-const REQUEST_STATUSES: ReadonlyArray<RuntimeRequestStatus> =
-  ["approved", "rejected", "answered", "expired", "unavailable"]
+const REQUEST_STATUSES: ReadonlySet<RuntimeRequestStatus> =
+  new Set(["approved", "rejected", "answered", "expired", "unavailable"])
 
 const error = (message: string, status: number) =>
   HttpServerResponse.json({ error: message }, { status })
@@ -153,7 +153,7 @@ export const BridgeRoutes = HttpRouter.addAll([
     const state = yield* BridgeState
     const config = yield* BridgeConfig
     const input = (yield* body()) as any
-    if (!REQUEST_STATUSES.includes(input?.status)) return yield* error("Invalid request status", 400)
+    if (!REQUEST_STATUSES.has(input?.status)) return yield* error("Invalid request status", 400)
     const request = yield* HttpServerRequest.HttpServerRequest
     const bearer = (request.headers["authorization"] ?? "").replace(/^Bearer\s+/i, "")
     const isMaster = Option.match(config.masterToken, {
@@ -195,7 +195,7 @@ export const BridgeRoutes = HttpRouter.addAll([
     const managed = yield* ManagedRuntime
     const config = yield* BridgeConfig
     const input = (yield* body()) as any
-    if (!REQUEST_STATUSES.includes(input?.status)) return yield* error("Invalid request status", 400)
+    if (!REQUEST_STATUSES.has(input?.status)) return yield* error("Invalid request status", 400)
     const request = yield* HttpServerRequest.HttpServerRequest
     const bearer = (request.headers["authorization"] ?? "").replace(/^Bearer\s+/i, "")
     const isMaster = Option.match(config.masterToken, {

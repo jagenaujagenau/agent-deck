@@ -59,3 +59,10 @@ apps/android/local.properties
 .gradle
 .kotlin
 *.apk
+
+# Compiled output next to TypeScript sources. Packages export their .ts directly,
+# so a .js here is a stray tsc run — and bun test would run it as a second, frozen
+# copy of the suite alongside the real one.
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.js.map
