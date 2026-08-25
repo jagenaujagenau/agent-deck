@@ -80,9 +80,9 @@ function diffLines(a: string[], b: string[], maxEdits: number): Op[] | null {
     trace.push(v.slice());
     for (let k = -d; k <= d; k += 2) {
       let x =
-        k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])
-          ? v[offset + k + 1]
-          : v[offset + k - 1] + 1;
+        k === -d || (k !== d && at(v, offset + k - 1) < at(v, offset + k + 1))
+          ? at(v, offset + k + 1)
+          : at(v, offset + k - 1) + 1;
       let y = x - k;
       while (x < n && y < m && a[x] === b[y]) {
         x += 1;
@@ -95,42 +95,57 @@ function diffLines(a: string[], b: string[], maxEdits: number): Op[] | null {
   return null;
 }
 
+/**
+ * Reads an index that the caller's own loop bounds guarantee is in range.
+ *
+ * `noUncheckedIndexedAccess` cannot see those bounds. Substituting a default
+ * would turn an indexing mistake into a quietly wrong diff, so this fails
+ * loudly instead.
+ */
+function at<T>(values: { readonly [index: number]: T | undefined }, index: number): T {
+  const value = values[index];
+  if (value === undefined) {
+    throw new RangeError(`unified diff read out of range at ${index}`);
+  }
+  return value;
+}
+
 function backtrack(a: string[], b: string[], trace: Int32Array[], d: number, offset: number): Op[] {
   const reversed: Op[] = [];
   let x = a.length;
   let y = b.length;
   for (let step = d; step > 0; step -= 1) {
-    const v = trace[step];
+    const v = at(trace, step);
     const k = x - y;
     const previousK =
-      k === -step || (k !== step && v[offset + k - 1] < v[offset + k + 1]) ? k + 1 : k - 1;
-    const previousX = v[offset + previousK];
+      k === -step || (k !== step && at(v, offset + k - 1) < at(v, offset + k + 1)) ? k + 1 : k - 1;
+    const previousX = at(v, offset + previousK);
     const previousY = previousX - previousK;
     while (x > previousX && y > previousY) {
       x -= 1;
       y -= 1;
-      reversed.push({ kind: "eq", text: a[x] });
+      reversed.push({ kind: "eq", text: at(a, x) });
     }
     if (x > previousX) {
       x -= 1;
-      reversed.push({ kind: "del", text: a[x] });
+      reversed.push({ kind: "del", text: at(a, x) });
     } else if (y > previousY) {
       y -= 1;
-      reversed.push({ kind: "ins", text: b[y] });
+      reversed.push({ kind: "ins", text: at(b, y) });
     }
   }
   while (x > 0 && y > 0) {
     x -= 1;
     y -= 1;
-    reversed.push({ kind: "eq", text: a[x] });
+    reversed.push({ kind: "eq", text: at(a, x) });
   }
   while (x > 0) {
     x -= 1;
-    reversed.push({ kind: "del", text: a[x] });
+    reversed.push({ kind: "del", text: at(a, x) });
   }
   while (y > 0) {
     y -= 1;
-    reversed.push({ kind: "ins", text: b[y] });
+    reversed.push({ kind: "ins", text: at(b, y) });
   }
   return reversed.reverse();
 }
@@ -147,12 +162,15 @@ function formatHunks(ops: Op[], context: number): string {
   }
 
   const changed = entries.flatMap((entry, index) => (entry.kind === "eq" ? [] : [index]));
-  if (changed.length === 0) return "";
+  // Destructured rather than length-checked so the reads below are known to
+  // be present: an unchanged file has no hunks to write.
+  const [firstChange] = changed;
+  if (firstChange === undefined) return "";
 
   // Two changes closer than 2x context share a hunk rather than repeating the lines between them.
   const groups: Array<[number, number]> = [];
-  let start = changed[0];
-  let end = changed[0];
+  let start = firstChange;
+  let end = firstChange;
   for (const index of changed.slice(1)) {
     if (index - end <= context * 2) end = index;
     else {
@@ -171,10 +189,22 @@ function formatHunks(ops: Op[], context: number): string {
     const oldCount = slice.filter((entry) => entry.kind !== "ins").length;
     const newCount = slice.filter((entry) => entry.kind !== "del").length;
     // A pure insertion sits *after* old line N, which unified format writes as position N with length 0.
+    // A group always spans at least its own changed entry, so the slice is never empty.
+    const head = at(slice, 0);
     const oldStart =
-      oldCount === 0 ? slice[0].oldLine - 1 : slice.find((entry) => entry.kind !== "ins")!.oldLine;
+      oldCount === 0
+        ? head.oldLine - 1
+        : at(
+            slice.filter((entry) => entry.kind !== "ins"),
+            0,
+          ).oldLine;
     const newStart =
-      newCount === 0 ? slice[0].newLine - 1 : slice.find((entry) => entry.kind !== "del")!.newLine;
+      newCount === 0
+        ? head.newLine - 1
+        : at(
+            slice.filter((entry) => entry.kind !== "del"),
+            0,
+          ).newLine;
     out.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
     for (const entry of slice)
       out.push(`${entry.kind === "del" ? "-" : entry.kind === "ins" ? "+" : " "}${entry.text}`);

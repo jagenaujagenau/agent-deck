@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { BridgeStore } from "../src/effect/Store.ts";
+import { BridgeStore } from "../src/effect/Store";
 
 const TOKEN = process.env.BRIDGE_TOKEN!;
 const BASE = "http://127.0.0.1:3000/bridge/v1";

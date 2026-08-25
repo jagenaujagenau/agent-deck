@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import type { AgentEvent } from "./Domain.ts";
+import type { AgentEvent } from "./Domain";
 
 /**
  * Reading a persisted row is a boundary: the JSON blob in `bridge_agents` was

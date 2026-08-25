@@ -8,11 +8,11 @@ import {
   type RuntimeProjection,
   type RuntimeRequestStatus,
 } from "@agent-control-dashboard/agent-adapter";
-import { mergeRecentEvents } from "../bridgeEvents.ts";
-import { scanClaudeUsage, scanCodexUsage, type TranscriptUsageRow } from "../transcriptUsage.ts";
-import { buildAnalytics, rangeCutoff, type ActivityRow, type UsageRow } from "./Analytics.ts";
-import { BridgeConfig } from "./Config.ts";
-import type { AgentEvent, AgentState, ControlAction, PendingApproval } from "./Domain.ts";
+import { mergeRecentEvents } from "../bridgeEvents";
+import { scanClaudeUsage, scanCodexUsage, type TranscriptUsageRow } from "../transcriptUsage";
+import { buildAnalytics, rangeCutoff, type ActivityRow, type UsageRow } from "./Analytics";
+import { BridgeConfig } from "./Config";
+import type { AgentEvent, AgentState, ControlAction, PendingApproval } from "./Domain";
 
 import { createHash, randomBytes, randomInt } from "node:crypto";
 

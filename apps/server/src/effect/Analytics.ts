@@ -1,4 +1,4 @@
-import type { TranscriptUsageRow } from "../transcriptUsage.ts";
+import type { TranscriptUsageRow } from "../transcriptUsage";
 
 /**
  * The analytics roll-up, as a pure function.

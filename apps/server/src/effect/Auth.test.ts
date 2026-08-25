@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { bearerOf, routePolicy } from "./Auth.ts";
+import { bearerOf, routePolicy } from "./Auth";
 
 const AGENT = "01a02e7b-3852-794f-b871-543c3c9147e9";
 const REQ = "req_123";

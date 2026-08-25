@@ -2,12 +2,12 @@ import { Effect, Layer } from "effect";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { Authorizer } from "./Auth.ts";
-import { BridgeConfig } from "./Config.ts";
-import { BridgeRoutes } from "./Http.ts";
-import { ManagedRuntime } from "./Managed.ts";
-import { BridgeState } from "./State.ts";
-import { BridgeStore } from "./Store.ts";
+import { Authorizer } from "./Auth";
+import { BridgeConfig } from "./Config";
+import { BridgeRoutes } from "./Http";
+import { ManagedRuntime } from "./Managed";
+import { BridgeState } from "./State";
+import { BridgeStore } from "./Store";
 
 /**
  * Refusal happens once, in front of every route, so a new route cannot

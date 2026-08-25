@@ -7,8 +7,8 @@ import {
   type ManagedSession,
   type RuntimeRequestStatus,
 } from "@agent-control-dashboard/agent-adapter";
-import type { AgentState } from "./Domain.ts";
-import { BridgeState, type AgentRecord, type Command } from "./State.ts";
+import type { AgentState } from "./Domain";
+import { BridgeState, type AgentRecord, type Command } from "./State";
 
 const now = () => new Date().toISOString();
 const makeId = () => crypto.randomUUID();

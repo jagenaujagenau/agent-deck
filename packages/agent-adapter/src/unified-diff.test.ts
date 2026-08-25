@@ -76,8 +76,13 @@ describe("unifiedDiff", () => {
       .filter((_, i) => i !== 100)
       .join("\n");
 
-    const lines = unifiedDiff(before, after)!.split("\n");
-    const [, oldCount, newCount] = lines[0].match(/@@ -\d+,(\d+) \+\d+,(\d+) @@/)!;
+    const diff = unifiedDiff(before, after);
+    if (diff === null) throw new Error("expected a diff for a single deleted line");
+    const lines = diff.split("\n");
+    const header = lines[0] ?? "";
+    const counts = header.match(/@@ -\d+,(\d+) \+\d+,(\d+) @@/);
+    if (counts === null) throw new Error(`expected a hunk header, got: ${header}`);
+    const [, oldCount, newCount] = counts;
     expect(lines.filter((l) => l.startsWith(" ") || l.startsWith("-")).length).toBe(
       Number(oldCount),
     );

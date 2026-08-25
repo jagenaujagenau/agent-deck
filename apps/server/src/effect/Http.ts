@@ -1,11 +1,11 @@
 import { Effect, Option, Stream, SubscriptionRef } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { RuntimeRequestStatus } from "@agent-control-dashboard/agent-adapter";
-import { BridgeConfig } from "./Config.ts";
-import { agentFingerprint } from "./Fingerprint.ts";
-import { ManagedRuntime } from "./Managed.ts";
-import { BridgeState } from "./State.ts";
-import { BridgeStore } from "./Store.ts";
+import { BridgeConfig } from "./Config";
+import { agentFingerprint } from "./Fingerprint";
+import { ManagedRuntime } from "./Managed";
+import { BridgeState } from "./State";
+import { BridgeStore } from "./Store";
 
 /** Path prefix the phone, watch, and hooks are already built against. */
 export const BRIDGE_PREFIX = "/bridge/v1";

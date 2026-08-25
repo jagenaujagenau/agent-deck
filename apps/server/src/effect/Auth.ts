@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Context, Effect, Layer, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { BridgeConfig } from "./Config.ts";
+import { BridgeConfig } from "./Config";
 
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 
