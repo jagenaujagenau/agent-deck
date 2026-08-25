@@ -113,4 +113,22 @@ describe("discoverSlashCommands", () => {
       "Ultra-compressed mode. Cuts token usage while keeping accuracy.",
     );
   });
+  test("frontmatter longer than one read still yields its description", () => {
+    // The exact shape that lost every plugin skill's description: a real
+    // description on line three, followed by a metadata block whose closing
+    // delimiter sits past the bytes this is willing to read.
+    const s = scratch();
+    const padding = Array.from(
+      { length: 400 },
+      (_, index) => `  key${index}: "${"x".repeat(40)}"`,
+    ).join("\n");
+    s.write(
+      join(s.roots.userDir, "skills", "huge", "SKILL.md"),
+      `---\nname: huge\ndescription: Still discoverable.\nmetadata:\n${padding}\n---\n\nBody.\n`,
+    );
+
+    const huge = discoverSlashCommands(s.roots).find((command) => command.name === "huge");
+    expect(huge).toBeDefined();
+    expect(huge!.description).toBe("Still discoverable.");
+  });
 });

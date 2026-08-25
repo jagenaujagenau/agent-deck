@@ -18,10 +18,14 @@ function frontmatter(file: string): Record<string, string> {
     return {};
   }
   if (!head.startsWith("---")) return {};
+  // A skill may carry a long metadata block, and its closing delimiter can sit
+  // past the window this is willing to read. Whatever is in the window is still
+  // worth parsing: refusing everything for want of the delimiter lost the
+  // description of every plugin skill with sizeable frontmatter, and that
+  // description is on the third line.
   const end = head.indexOf("\n---", 3);
-  if (end === -1) return {};
   const fields: Record<string, string> = {};
-  const lines = head.slice(3, end).split("\n");
+  const lines = head.slice(3, end === -1 ? undefined : end).split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     const match = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(lines[index].trim());
     if (!match) continue;
