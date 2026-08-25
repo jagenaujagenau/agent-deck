@@ -48,6 +48,45 @@ function run(args: string[], allowFailure = false, quiet = false) {
   return result.exitCode;
 }
 
+/**
+ * What the service is actually doing, as opposed to whether it exists.
+ *
+ * "Loaded" only means launchd holds the job; it stays true while the program
+ * crashes on every attempt. The installed plist once pointed at an entry point
+ * that had been deleted, and this reported a healthy bridge through 3,691
+ * consecutive failed launches - because a stray process happened to be holding
+ * the port. So a pid is what proves it is running, and the answer on the port
+ * has to identify itself as the bridge rather than merely arrive.
+ */
+async function status() {
+  const printed = Bun.spawnSync(["launchctl", "print", service]);
+  const loaded = printed.exitCode === 0;
+  const text = printed.stdout.toString();
+  const pid = Number(/\bpid = (\d+)/.exec(text)?.[1] ?? 0) || undefined;
+  const lastExitCode = Number(/last exit code = (\d+)/.exec(text)?.[1] ?? Number.NaN);
+  let healthy = false;
+  let version: string | undefined;
+  try {
+    const response = await fetch("http://127.0.0.1:3000/", { signal: AbortSignal.timeout(2_000) });
+    const body = (await response.json()) as { name?: string; version?: string };
+    // A foreign server on the port is not this bridge being healthy.
+    healthy = response.ok && body.name === "agent-deck-bridge";
+    version = body.version;
+  } catch {
+    /* Offline, or something else is holding the port. */
+  }
+  return {
+    loaded,
+    running: pid !== undefined,
+    healthy,
+    pid,
+    lastExitCode: Number.isFinite(lastExitCode) ? lastExitCode : undefined,
+    version,
+    plistPath,
+    logs: logDirectory,
+  };
+}
+
 switch (command) {
   case "install":
     mkdirSync(join(homedir(), "Library", "LaunchAgents"), { recursive: true });
@@ -71,15 +110,9 @@ switch (command) {
     console.log(`Uninstalled ${label}.`);
     break;
   case "status": {
-    const loaded = run(["launchctl", "print", service], true, true) === 0;
-    let healthy = false;
-    try {
-      healthy = (await fetch("http://127.0.0.1:3000/", { signal: AbortSignal.timeout(2_000) })).ok;
-    } catch {
-      /* Offline. */
-    }
-    console.log(JSON.stringify({ loaded, healthy, plistPath, logs: logDirectory }, null, 2));
-    if (!loaded || !healthy) process.exitCode = 1;
+    const current = await status();
+    console.log(JSON.stringify(current, null, 2));
+    if (!current.running || !current.healthy) process.exitCode = 1;
     break;
   }
   default:

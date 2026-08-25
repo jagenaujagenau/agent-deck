@@ -15,6 +15,7 @@ import { BridgeConfig } from "./Config";
 import { agentFingerprint } from "./Fingerprint";
 import { ManagedRuntime } from "./Managed";
 import { BridgeState } from "./State";
+import { BRIDGE_VERSION } from "./Version";
 import { BridgeStore } from "./Store";
 
 /** Path prefix the phone, watch, and hooks are already built against. */
@@ -58,11 +59,16 @@ const route = <E, R>(
 
 export const BridgeRoutes = HttpRouter.addAll([
   /**
-   * Liveness, outside the versioned prefix and outside auth. The service
-   * wrapper polls this to decide whether the bridge came up, and it has no
-   * credential to offer.
+   * Liveness and version, outside the versioned prefix and outside auth. The
+   * service wrapper polls this to decide whether the bridge came up, and the
+   * desktop app reads the version from it - neither has a credential to offer,
+   * and a version is not a secret.
    */
-  HttpRouter.route("GET", "/", Effect.succeed(HttpServerResponse.text("OK"))),
+  HttpRouter.route(
+    "GET",
+    "/",
+    HttpServerResponse.json({ status: "ok", name: "agent-deck-bridge", version: BRIDGE_VERSION }),
+  ),
   // ---- reads -------------------------------------------------------------
   route(
     "GET",
