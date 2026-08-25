@@ -99,6 +99,7 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
     com.google.android.gms.wearable.MessageClient.OnMessageReceivedListener {
     private val preferences = application.getSharedPreferences("bridge", 0)
     private val relayCache = application.getSharedPreferences("relay_cache", 0)
+    private val addresses = BridgeAddress(application)
     private val commandOutbox = WearCommandOutbox(application)
     private val repository = AgentRepository(BridgeClient(
         preferences.getString("url", BuildConfig.BRIDGE_URL) ?: BuildConfig.BRIDGE_URL,
@@ -193,12 +194,24 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
     fun loadHistory(agentId: String) = viewModelScope.launch {
         _historyLoading.value = agentId
         _historyFailed.value = null
-        // The watch asks for the tail rather than the whole session: the full
-        // history of a long run is most of a megabyte and takes seconds over
-        // wifi, and only the newest of each thing is shown here anyway.
-        runCatching { repository.history(agentId, limit = WATCH_HISTORY_LIMIT) }
-            .onSuccess { events -> _sessionEvents.update { it + (agentId to events) } }
-            .onFailure { _historyFailed.value = agentId }
+        // Credentials and the address arrive from the phone after this view
+        // model is built, so the client is pointed at them per fetch rather
+        // than once at startup - and at whichever address answers, since the
+        // phone's route to the bridge is not always the watch's.
+        val token = SecureTokenStore(getApplication()).get()
+        var loaded = false
+        for (candidate in addresses.candidates(BuildConfig.BRIDGE_URL)) {
+            repository.configure(candidate, token)
+            // The tail, not the whole session: a long run's full history is
+            // most of a megabyte, and only the newest of each is shown here.
+            val events = runCatching { repository.history(agentId, limit = WATCH_HISTORY_LIMIT) }
+                .getOrNull() ?: continue
+            addresses.remember(candidate)
+            _sessionEvents.update { it + (agentId to events) }
+            loaded = true
+            break
+        }
+        if (!loaded) _historyFailed.value = agentId
         _historyLoading.value = null
     }
 
@@ -471,16 +484,11 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
                 // The app's own name costs a row the agents need. What the dot
                 // says - whether the bridge is reachable - rides with the page
                 // title instead, and the clock above already ends the chrome.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(if (state is BridgeState.Ready) Signal else Danger),
-                    )
-                    Spacer(Modifier.width(7.dp))
-                    Text(page.label, color = pageColor, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                }
+                // No connection dot. It was green on every page whenever the
+                // app could draw a page at all, so it reported the one state a
+                // person can already see. A bridge that cannot be reached says
+                // so where it matters instead.
+                Text(page.label, color = pageColor, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                 Text("${agents.size} ${if (agents.size == 1) "agent" else "agents"}", color = Muted, fontSize = 11.sp)
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {

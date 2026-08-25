@@ -6,12 +6,21 @@ import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
 import dev.agentdeck.shared.SecureTokenStore
+import org.json.JSONObject
 
 class WearCredentialListenerService : WearableListenerService() {
     override fun onMessageReceived(event: MessageEvent) {
         if (event.path != CREDENTIAL_PATH) return
-        val token = event.data.toString(Charsets.UTF_8)
-        if (token.isNotBlank()) SecureTokenStore(this).put(token)
+        val body = event.data.toString(Charsets.UTF_8)
+        if (body.isBlank()) return
+        // Older phones sent the bare token; newer ones send it with the address
+        // the watch should use. Accept both so a stale phone build still pairs.
+        val payload = runCatching { JSONObject(body) }.getOrNull()
+        val token = payload?.optString("token")?.takeIf { it.isNotBlank() } ?: body
+        SecureTokenStore(this).put(token)
+        payload?.optString("url")?.takeIf { it.isNotBlank() }?.let { url ->
+            getSharedPreferences("bridge", MODE_PRIVATE).edit().putString("url", url).apply()
+        }
     }
 
     override fun onDataChanged(events: DataEventBuffer) {

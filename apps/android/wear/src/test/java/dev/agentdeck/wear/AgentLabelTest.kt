@@ -5,8 +5,14 @@ import org.junit.Test
 
 class AgentLabelTest {
     @Test
-    fun `drops the project the group header already shows`() {
-        assertEquals("Claude · 27d9", agentLabel("Claude · fx-ruby · 27d9", "fx-ruby"))
+    fun `drops the project the header shows and the id nobody reads`() {
+        assertEquals("Claude", agentLabel("Claude · fx-ruby · 27d9", "fx-ruby"))
+    }
+
+    @Test
+    fun `keeps a trailing word that is not an id`() {
+        // Only a hex stamp is an id; a real word is part of the name.
+        assertEquals("Claude · nightly", agentLabel("Claude · fx-ruby · nightly", "fx-ruby"))
     }
 
     @Test
@@ -21,12 +27,12 @@ class AgentLabelTest {
     }
 
     @Test
-    fun `a name that does not mention the project is untouched`() {
-        assertEquals("Codex · abc1", agentLabel("Codex · abc1", "other-project"))
+    fun `a bare id is still dropped when the project is elsewhere`() {
+        assertEquals("Codex", agentLabel("Codex · abc1", "other-project"))
     }
 
     @Test
-    fun `an unknown project leaves the name alone`() {
-        assertEquals("Claude · fx-ruby · 27d9", agentLabel("Claude · fx-ruby · 27d9", ""))
+    fun `an unknown project still loses the id`() {
+        assertEquals("Claude · fx-ruby", agentLabel("Claude · fx-ruby · 27d9", ""))
     }
 }
