@@ -6,6 +6,7 @@ import dev.agentdeck.shared.PendingApproval
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import dev.agentdeck.shared.agentCardActivity
 
 class AgentCardPolicyTest {
     private fun agent(

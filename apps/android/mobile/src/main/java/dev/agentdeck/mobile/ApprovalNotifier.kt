@@ -9,6 +9,7 @@ import android.content.Intent
 import android.net.Uri
 import dev.agentdeck.shared.Agent
 import java.time.Instant
+import dev.agentdeck.shared.supportsCapability
 
 /** Posts each concrete approval event once, durably across reconnects and process restarts. */
 internal object ApprovalNotifier {

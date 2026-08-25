@@ -105,8 +105,6 @@ internal fun matchSlashCommands(query: String, commands: List<SlashCommand>, lim
     return (byName.sortedBy { if (it.name.lowercase().startsWith(needle)) 0 else 1 } + byDescription).take(limit)
 }
 
-internal fun supportsCapability(capabilities: List<String>?, action: String): Boolean = capabilities?.contains(action) == true
-
 internal fun remoteMessageAction(state: String, supports: (String) -> Boolean): String? = when {
     state in listOf("running", "waiting") && supports("steer") -> "steer"
     state in listOf("running", "waiting") && supports("follow_up") -> "follow_up"

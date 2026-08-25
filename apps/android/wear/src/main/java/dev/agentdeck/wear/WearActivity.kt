@@ -33,6 +33,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.ScrollableState
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusable
+import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -55,6 +64,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import java.util.UUID
+import dev.agentdeck.shared.agentCardActivity
 
 private val Ink = Color(0xFF090C10)
 private val Surface = Color(0xFF171C22)
@@ -327,6 +337,7 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(pageScrollStates[pageIndex], flingBehavior = listFlingBehavior)
+                .rotaryScroll(pageScrollStates[pageIndex])
                 .padding(start = 12.dp, end = 12.dp, top = 28.dp, bottom = 34.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -375,6 +386,29 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
     }
 }
 
+/**
+ * Makes a scrollable respond to the rotating crown.
+ *
+ * A watch's crown is its primary scroll input, and a list that only answers to
+ * a fingertip makes the user cover the screen they are reading. Rotary events
+ * are only delivered to a focused component, so the focus is requested here
+ * rather than left to chance.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun Modifier.rotaryScroll(scroll: ScrollableState): Modifier {
+    val requester = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { runCatching { requester.requestFocus() } }
+    return this
+        .onRotaryScrollEvent { event ->
+            scope.launch { scroll.scrollBy(event.verticalScrollPixels) }
+            true
+        }
+        .focusRequester(requester)
+        .focusable()
+}
+
 @Composable
 private fun WearAgentCard(agent: Agent, onClick: () -> Unit) {
     val color = statusColor(agent.state)
@@ -390,7 +424,13 @@ private fun WearAgentCard(agent: Agent, onClick: () -> Unit) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(agent.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(agent.task, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    agentCardActivity(agent),
+                    color = Muted,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             Icon(Icons.Rounded.ChevronRight, null, tint = Muted, modifier = Modifier.size(18.dp).offset(x = 1.dp))
         }
@@ -409,8 +449,10 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, onB
         .filter { it.kind == "question" && it.options.isNotEmpty() }
         .maxByOrNull { it.createdAt }
         ?.takeIf { agent.state == "waiting" }
+    val detailScroll = rememberLazyListState()
     LazyColumn(
-        modifier = Modifier.fillMaxSize().background(Ink),
+        state = detailScroll,
+        modifier = Modifier.fillMaxSize().background(Ink).rotaryScroll(detailScroll),
         contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 26.dp, bottom = 34.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -428,7 +470,13 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, onB
                 Text(agent.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                 Text(agent.state.uppercase(), color = color, fontSize = 10.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(7.dp))
-                Text(agent.task, color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center, maxLines = 3)
+                Text(
+                    agentCardActivity(agent),
+                    color = Muted,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
+                )
             }
         }
         if (busy) item { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) }
@@ -436,6 +484,32 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, onB
             item { Text(message, color = Danger, fontSize = 11.sp, textAlign = TextAlign.Center) }
         }
         if (hasApproval) {
+            // What is being approved, before the button that approves it. A
+            // watch is the surface most likely to be tapped without thinking,
+            // so it is the last place to ask for a decision without its subject.
+            agent.pendingApproval?.let { approval ->
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = Amber.copy(alpha = 0.12f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(13.dp)) {
+                            Text(
+                                "APPROVAL REQUIRED",
+                                color = Amber,
+                                fontSize = 9.sp,
+                                letterSpacing = 1.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.height(5.dp))
+                            Text(approval.tool, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(3.dp))
+                            Text(approval.detail, color = Text, fontSize = 11.sp, maxLines = 6)
+                        }
+                    }
+                }
+            }
             item {
                 Button(
                     onClick = { haptics.performHapticFeedback(HapticFeedbackType.Confirm); onControl("approve") },

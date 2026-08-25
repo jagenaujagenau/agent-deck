@@ -3,6 +3,7 @@ package dev.agentdeck.mobile
 import dev.agentdeck.shared.AgentEvent
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import dev.agentdeck.shared.supportsCapability
 
 class AgentConversationTest {
     private fun event(id: String, kind: String, summary: String, detail: String? = null, second: Int = 0, command: String? = null) =

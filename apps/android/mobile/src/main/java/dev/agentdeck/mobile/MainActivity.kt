@@ -90,6 +90,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.roundToInt
 import java.text.NumberFormat
+import dev.agentdeck.shared.supportsCapability
+import dev.agentdeck.shared.agentCardActivity
 
 private val Ink = Color(0xFF090C10)
 private val Surface = Color(0xFF11161C)
