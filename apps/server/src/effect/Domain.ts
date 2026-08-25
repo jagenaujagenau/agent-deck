@@ -176,3 +176,42 @@ export const PairingRequest = Schema.Struct({
 export const RuntimeEventEnvelope = Schema.Struct({
   agentId: Schema.String,
 });
+
+/**
+ * An agent as it is stored, which is not quite an agent as it arrives.
+ *
+ * The row was written by whichever build of the bridge was running at the
+ * time, so it is decoded rather than trusted: a blob that no longer fits is
+ * one session missing from the deck, not a bridge that fails to start.
+ */
+export const StoredAgent = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  project: Schema.String,
+  model: Schema.String,
+  runtime: optionalField(Schema.String),
+  runtimeProtocol: optionalField(Schema.Literals(["canonical-v1"])),
+  state: AgentState,
+  task: Schema.String,
+  objective: optionalField(Schema.String),
+  progress: optionalField(Schema.Number),
+  tokens: Schema.Number,
+  processedTokens: optionalField(Schema.Number),
+  costUsd: Schema.Number,
+  lastSeenAt: Schema.String,
+  events: Schema.Array(AgentEvent),
+  capabilities: optionalField(Schema.Array(ControlAction)),
+  rateLimits: optionalField(Schema.Array(RateLimitWindow)),
+  pendingApproval: optionalField(PendingApproval),
+  isDemo: optionalField(Schema.Boolean),
+});
+
+/** A queued control command as it is stored. */
+export const StoredCommand = Schema.Struct({
+  id: Schema.String,
+  agentId: Schema.String,
+  action: ControlAction,
+  value: optionalField(Schema.String),
+  createdAt: Schema.String,
+  acknowledgedAt: optionalField(Schema.String),
+});

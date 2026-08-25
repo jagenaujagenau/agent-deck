@@ -285,3 +285,6 @@ export const buildAnalytics = (input: AnalyticsInput) => {
     },
   };
 };
+
+/** What the analytics endpoint answers with. */
+export type AnalyticsReport = ReturnType<typeof buildAnalytics>;

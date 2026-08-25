@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Ref, Schema, SubscriptionRef } from "effect";
+import { Context, Effect, Layer, Option, Ref, Schema, SubscriptionRef } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import {
   canonicalRuntimeEvent,
@@ -10,7 +10,13 @@ import {
 } from "@agent-control-dashboard/agent-adapter";
 import { mergeRecentEvents } from "../bridgeEvents";
 import { scanClaudeUsage, scanCodexUsage, type TranscriptUsageRow } from "../transcriptUsage";
-import { buildAnalytics, rangeCutoff, type ActivityRow, type UsageRow } from "./Analytics";
+import {
+  buildAnalytics,
+  rangeCutoff,
+  type ActivityRow,
+  type AnalyticsReport,
+  type UsageRow,
+} from "./Analytics";
 import { BridgeConfig } from "./Config";
 import type {
   AgentEvent,
@@ -21,6 +27,7 @@ import type {
   PendingApproval,
   RateLimitWindow,
 } from "./Domain";
+import { StoredAgent, StoredCommand } from "./Domain";
 
 import { createHash, randomBytes, randomInt } from "node:crypto";
 
@@ -87,6 +94,57 @@ const cardEvent = (event: AgentEvent) => {
  * failed; all three mean "no figure", and the previous behaviour of every one
  * was to fall back rather than display nonsense.
  */
+const decodeStoredAgent = Schema.decodeUnknownOption(StoredAgent);
+const decodeStoredCommand = Schema.decodeUnknownOption(StoredCommand);
+
+/**
+ * Turns a decoded row back into the record the bridge mutates.
+ *
+ * Decoding yields readonly collections, which is right for something read off
+ * disk and wrong for the live window that events are appended to, so the
+ * copy is made once here rather than at each append.
+ */
+const toAgentRecord = (stored: Schema.Schema.Type<typeof StoredAgent>): AgentRecord => ({
+  ...stored,
+  runtime: stored.runtime ?? undefined,
+  runtimeProtocol: stored.runtimeProtocol ?? undefined,
+  objective: stored.objective ?? undefined,
+  progress: stored.progress ?? undefined,
+  processedTokens: stored.processedTokens ?? undefined,
+  events: [...stored.events],
+  capabilities: stored.capabilities ? [...stored.capabilities] : undefined,
+  rateLimits: stored.rateLimits ?? undefined,
+  pendingApproval: stored.pendingApproval ?? undefined,
+  isDemo: stored.isDemo ?? undefined,
+});
+
+/** A command receipt row, as the device reads it back. */
+export interface CommandReceiptRow {
+  command_id: string;
+  status: string;
+  error: string | null;
+  result_sequence: number | null;
+  updated_at: string;
+}
+
+/** One session's heartbeat compared against what its runtime events project. */
+export interface ProjectionParityRow {
+  agentId: string;
+  runtime: string;
+  projectionSequence: number | null;
+  heartbeat: { state: AgentState; task: string; tokens: number; processedTokens: number };
+  projection: {
+    state: string;
+    task: string;
+    tokens: number | null;
+    processedTokens: number | null;
+  } | null;
+  stateMatches: boolean;
+}
+
+/** What a stored request row holds: a runtime event's payload, or an approval. */
+type RequestData = PendingApproval | CanonicalRuntimeEvent["payload"];
+
 const usageNumber = (value: number | null | undefined, fallback: number): number =>
   value != null && Number.isFinite(value) ? value : fallback;
 
@@ -141,15 +199,13 @@ export class BridgeState extends Context.Service<
       value?: unknown,
     ) => Effect.Effect<boolean>;
     readonly setSlashCommands: (agentId: string, commands: unknown) => Effect.Effect<void>;
-    readonly commandReceipt: (
-      commandId: string,
-    ) => Effect.Effect<Record<string, unknown> | undefined>;
+    readonly commandReceipt: (commandId: string) => Effect.Effect<CommandReceiptRow | undefined>;
     readonly analytics: (
       range: string,
       project?: string,
       timeZone?: string,
-    ) => Effect.Effect<Record<string, unknown>>;
-    readonly projectionParity: Effect.Effect<ReadonlyArray<Record<string, unknown>>>;
+    ) => Effect.Effect<AnalyticsReport>;
+    readonly projectionParity: Effect.Effect<ReadonlyArray<ProjectionParityRow>>;
     readonly pair: (
       code: string,
       deviceName: string,
@@ -180,7 +236,8 @@ export class BridgeState extends Context.Service<
       const restored = new Map<string, AgentRecord>();
       for (const row of agentRows) {
         try {
-          restored.set(row.id, JSON.parse(row.data) as AgentRecord);
+          const stored = decodeStoredAgent(JSON.parse(row.data));
+          if (Option.isSome(stored)) restored.set(row.id, toAgentRecord(stored.value));
         } catch {
           // A row written by an incompatible build is skipped rather than
           // taking the whole bridge down at startup.
@@ -195,7 +252,14 @@ export class BridgeState extends Context.Service<
       const restoredCommands = new Map<string, Command>();
       for (const row of commandRows) {
         try {
-          restoredCommands.set(row.id, JSON.parse(row.data) as Command);
+          const stored = decodeStoredCommand(JSON.parse(row.data));
+          if (Option.isSome(stored)) {
+            restoredCommands.set(row.id, {
+              ...stored.value,
+              value: stored.value.value ?? undefined,
+              acknowledgedAt: stored.value.acknowledgedAt ?? undefined,
+            });
+          }
         } catch {
           /* Same tolerance as agents. */
         }
@@ -280,25 +344,30 @@ export class BridgeState extends Context.Service<
       const recordFact = (
         agentId: string,
         type: CanonicalRuntimeEvent["type"],
-        payload: Record<string, unknown>,
+        payload: CanonicalRuntimeEvent["payload"],
         options: { id?: string; requestId?: string; itemId?: string } = {},
-      ) =>
-        appendRuntimeEvent({
+      ) => {
+        const event: CanonicalRuntimeEvent = {
           id: options.id ?? makeId(),
           agentId,
           type,
           createdAt: now(),
           payload,
-          ...(options.requestId ? { requestId: options.requestId } : {}),
-          ...(options.itemId ? { itemId: options.itemId } : {}),
-        } as CanonicalRuntimeEvent);
+        };
+        // Only the lifecycles that have them carry these, and the projector
+        // reading these back treats a present-but-undefined key differently
+        // from an absent one.
+        if (options.requestId !== undefined) event.requestId = options.requestId;
+        if (options.itemId !== undefined) event.itemId = options.itemId;
+        return appendRuntimeEvent(event);
+      };
 
       const upsertRequest = (
         agentId: string,
         requestId: string,
         kind: "approval" | "user-input",
         status: RuntimeRequestStatus,
-        data: Record<string, unknown>,
+        data: RequestData,
         createdAt: string,
         expiresAt?: string,
       ) =>
@@ -386,7 +455,7 @@ export class BridgeState extends Context.Service<
             agent.pendingApproval.id,
             "approval",
             "pending",
-            agent.pendingApproval as unknown as Record<string, unknown>,
+            agent.pendingApproval,
             agent.pendingApproval.createdAt,
             agent.pendingApproval.expiresAt,
           );
@@ -877,7 +946,7 @@ export class BridgeState extends Context.Service<
       );
 
       const commandReceipt = Effect.fn("BridgeState.commandReceipt")(function* (commandId: string) {
-        const rows = yield* sql<Record<string, unknown>>`
+        const rows = yield* sql<CommandReceiptRow>`
           SELECT command_id, status, error, result_sequence, updated_at
           FROM bridge_command_receipts WHERE command_id = ${commandId}`;
         return rows[0];
@@ -959,7 +1028,7 @@ export class BridgeState extends Context.Service<
             lastSeenAt: agent.lastSeenAt,
             rateLimits: agent.rateLimits as any,
           })),
-        }) as unknown as Record<string, unknown>;
+        });
       });
 
       const projectionParity = Effect.gen(function* () {
@@ -967,7 +1036,7 @@ export class BridgeState extends Context.Service<
         const canonical = [...agents.values()].filter(
           (agent) => agent.runtimeProtocol === "canonical-v1",
         );
-        const out: Array<Record<string, unknown>> = [];
+        const out: Array<ProjectionParityRow> = [];
         for (const agent of canonical) {
           const rows = yield* sql<{ sequence: number; data: string }>`
             SELECT sequence, data FROM bridge_runtime_projections WHERE agent_id = ${agent.id}`.pipe(
