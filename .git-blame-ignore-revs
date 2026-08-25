@@ -1,0 +1,6 @@
+# Commits that only reformat. Skip them when reading blame:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub reads this file automatically.)
+
+# Apply oxfmt across the repo
+a745757463a9d751cc62e4a9ea00cfc7b2b58edd
