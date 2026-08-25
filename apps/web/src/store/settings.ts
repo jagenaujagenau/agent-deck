@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { setChaosSettings } from '@/api/mock-api';
+import { create } from "zustand";
+import { setChaosSettings } from "@/api/mock-api";
 
 interface SettingsState {
   chaosEnabled: boolean;

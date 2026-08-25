@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { RemoteCommand } from "../../packages/agent-adapter/src/index";
-import { countQueuedMessages, drainRemoteMessages, isRemoteMessage, queuedMessageNotice, stopHookDecision, stopHookReason } from "./remote-messages";
+import {
+  countQueuedMessages,
+  drainRemoteMessages,
+  isRemoteMessage,
+  queuedMessageNotice,
+  stopHookDecision,
+  stopHookReason,
+} from "./remote-messages";
 
 function queue(commands: RemoteCommand[], options: { failAck?: string } = {}) {
   const acked: string[] = [];
@@ -45,7 +52,10 @@ describe("drainRemoteMessages", () => {
       command({ id: "a", createdAt: "2026-08-24T10:00:01Z", value: "check the tests too" }),
     ]);
 
-    expect(await drainRemoteMessages(q, "claude-1")).toEqual(["check the tests too", "then run the linter"]);
+    expect(await drainRemoteMessages(q, "claude-1")).toEqual([
+      "check the tests too",
+      "then run the linter",
+    ]);
     expect(q.acked).toEqual(["a", "b"]);
   });
 
@@ -73,8 +83,9 @@ describe("drainRemoteMessages", () => {
 
 describe("stop hook output", () => {
   test("a single message is delivered as the user's own words", () => {
-    expect(stopHookReason(["check the tests too"]))
-      .toBe("The user sent this from Agent Deck while you were working:\n\ncheck the tests too");
+    expect(stopHookReason(["check the tests too"])).toBe(
+      "The user sent this from Agent Deck while you were working:\n\ncheck the tests too",
+    );
   });
 
   test("several messages keep their order and stay individually readable", () => {

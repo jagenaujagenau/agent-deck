@@ -19,9 +19,7 @@ export function KanbanColumn({ stage, label, tasks }: KanbanColumnProps) {
   return (
     <div className="flex flex-col w-80 flex-shrink-0">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-muted-foreground">
-          {label}
-        </h2>
+        <h2 className="text-sm font-semibold text-muted-foreground">{label}</h2>
         <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
           {tasks.length}
         </span>
@@ -32,7 +30,7 @@ export function KanbanColumn({ stage, label, tasks }: KanbanColumnProps) {
         className={cn(
           "flex-1 space-y-2 overflow-y-auto pb-4 rounded-lg transition-colors",
           "min-h-[200px]",
-          isOver && "bg-accent/50"
+          isOver && "bg-accent/50",
         )}
       >
         {tasks.length === 0 ? (

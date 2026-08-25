@@ -1,13 +1,13 @@
-import { Effect, Layer } from "effect"
-import { BunHttpServer, BunRuntime } from "@effect/platform-bun"
-import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Authorizer } from "./Auth.ts"
-import { BridgeConfig } from "./Config.ts"
-import { BridgeRoutes } from "./Http.ts"
-import { ManagedRuntime } from "./Managed.ts"
-import { BridgeState } from "./State.ts"
-import { BridgeStore } from "./Store.ts"
+import { Effect, Layer } from "effect";
+import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
+import { SqliteClient } from "@effect/sql-sqlite-bun";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { Authorizer } from "./Auth.ts";
+import { BridgeConfig } from "./Config.ts";
+import { BridgeRoutes } from "./Http.ts";
+import { ManagedRuntime } from "./Managed.ts";
+import { BridgeState } from "./State.ts";
+import { BridgeStore } from "./Store.ts";
 
 /**
  * Refusal happens once, in front of every route, so a new route cannot
@@ -15,40 +15,44 @@ import { BridgeStore } from "./Store.ts"
  */
 const AuthMiddleware = HttpRouter.use(
   Effect.fnUntraced(function* (router) {
-    const auth = yield* Authorizer
+    const auth = yield* Authorizer;
     yield* router.addGlobalMiddleware((httpApp) =>
       Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
+        const request = yield* HttpServerRequest.HttpServerRequest;
         // The full path, prefix included — the deployed bridge matches against
         // Hono's `c.req.path`, which is not prefix-stripped. Several of its
         // anchored rules therefore never fire; see routePolicy.
-        const path = new URL(request.url, "http://bridge").pathname
+        const path = new URL(request.url, "http://bridge").pathname;
         // Pairing is how a device obtains a credential; it cannot present one.
-        if (path.endsWith("/pair")) return yield* httpApp
-        const allowed = yield* auth.authorize(request.method, path, request.headers["authorization"])
+        if (path.endsWith("/pair")) return yield* httpApp;
+        const allowed = yield* auth.authorize(
+          request.method,
+          path,
+          request.headers["authorization"],
+        );
         if (!allowed && auth.enforcing) {
           return yield* HttpServerResponse.json(
             { error: "Pair this device or provide a valid bridge token" },
-            { status: 401 }
-          )
+            { status: 401 },
+          );
         }
-        return yield* httpApp
-      })
-    )
-  })
-)
+        return yield* httpApp;
+      }),
+    );
+  }),
+);
 
 const MainLayer = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* BridgeConfig
-    const Sql = SqliteClient.layer({ filename: config.databaseUrl })
+    const config = yield* BridgeConfig;
+    const Sql = SqliteClient.layer({ filename: config.databaseUrl });
     return HttpRouter.serve(Layer.merge(BridgeRoutes, AuthMiddleware)).pipe(
       Layer.provide([ManagedRuntime.layer, BridgeStore.layer, Authorizer.layer]),
       Layer.provide(BridgeState.layer),
       Layer.provide(Sql),
-      Layer.provide(BunHttpServer.layer({ port: config.port }))
-    )
-  })
-)
+      Layer.provide(BunHttpServer.layer({ port: config.port })),
+    );
+  }),
+);
 
-Layer.launch(MainLayer).pipe(BunRuntime.runMain)
+Layer.launch(MainLayer).pipe(BunRuntime.runMain);

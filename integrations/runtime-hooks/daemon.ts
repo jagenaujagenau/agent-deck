@@ -1,9 +1,17 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { AgentDeckClient, type AgentState, type ControlAction } from "../../packages/agent-adapter/src/index";
+import {
+  AgentDeckClient,
+  type AgentState,
+  type ControlAction,
+} from "../../packages/agent-adapter/src/index";
 import { countQueuedMessages, queuedMessageNotice } from "./remote-messages";
-import { readConversationBacklog, readNewTranscript, type TranscriptMessage } from "./transcript-reasoning";
+import {
+  readConversationBacklog,
+  readNewTranscript,
+  type TranscriptMessage,
+} from "./transcript-reasoning";
 
 type DaemonState = {
   state: AgentState;
@@ -17,8 +25,20 @@ type DaemonState = {
   capabilities?: ControlAction[];
   transcriptPath?: string;
   transcriptOffset?: number;
-  rateLimits?: Array<{ id: string; label: string; usedPercent: number; resetsAt?: string; account?: string }>;
-  pendingApproval?: { id: string; tool: string; detail: string; createdAt: string; expiresAt: string };
+  rateLimits?: Array<{
+    id: string;
+    label: string;
+    usedPercent: number;
+    resetsAt?: string;
+    account?: string;
+  }>;
+  pendingApproval?: {
+    id: string;
+    tool: string;
+    detail: string;
+    createdAt: string;
+    expiresAt: string;
+  };
 };
 
 function requiredArgument(index: number): string {
@@ -38,12 +58,21 @@ let stopped = false;
 let lastStateFingerprint = "";
 
 function loadState(): DaemonState | undefined {
-  try { return JSON.parse(readFileSync(statePath, "utf8")) as DaemonState; } catch { return undefined; }
+  try {
+    return JSON.parse(readFileSync(statePath, "utf8")) as DaemonState;
+  } catch {
+    return undefined;
+  }
 }
 
 function ownerIsAlive(pid?: number) {
   if (!pid || pid === process.pid) return true;
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -55,8 +84,18 @@ function publishMessage(message: TranscriptMessage) {
   // The transcript is the terminal's own record, so publishing it verbatim is what keeps the app's
   // chat in sync. Ids are derived from transcript uuids, so re-publishing is a no-op at the bridge.
   return message.role === "user"
-    ? client.event(agentId, { kind: "user", summary: "Message", detail: message.text, id: message.id })
-    : client.event(agentId, { kind: "output", summary: "Response", detail: message.text, id: message.id });
+    ? client.event(agentId, {
+        kind: "user",
+        summary: "Message",
+        detail: message.text,
+        id: message.id,
+      })
+    : client.event(agentId, {
+        kind: "output",
+        summary: "Response",
+        detail: message.text,
+        id: message.id,
+      });
 }
 
 /** One pass over the whole transcript, so the app shows turns that predate the bridge ever seeing this session. */
@@ -81,7 +120,9 @@ async function streamReasoning() {
   }
   for (const message of messages) await publishMessage(message).catch(() => {});
   for (const block of reasoning) {
-    await client.event(agentId, { kind: "thought", summary: "Reasoning", detail: block.text, id: block.id }).catch(() => {});
+    await client
+      .event(agentId, { kind: "thought", summary: "Reasoning", detail: block.text, id: block.id })
+      .catch(() => {});
   }
 }
 
@@ -104,39 +145,55 @@ async function heartbeat() {
   // Messages only reach the model when a turn ends, so an idle session can be holding one. Surface
   // that instead of letting the phone imply it was delivered. Counted, never acknowledged — the
   // Stop hook owns draining — and never written to the state file, so it clears on delivery.
-  const queued = state.state === "offline" ? 0 : await countQueuedMessages(client, agentId).catch(() => 0);
+  const queued =
+    state.state === "offline" ? 0 : await countQueuedMessages(client, agentId).catch(() => 0);
   const notice = queuedMessageNotice(queued);
   // A canonical-v1 runtime's activity line is projected from its event stream, not from the
   // heartbeat payload, so the notice has to ride both or the phone never shows it.
   const displayTask = notice && state.state === "idle" ? notice : state.task;
-  const stateFingerprint = createHash("sha256").update(`${state.state}\u0000${displayTask}`).digest("hex").slice(0, 20);
+  const stateFingerprint = createHash("sha256")
+    .update(`${state.state}\u0000${displayTask}`)
+    .digest("hex")
+    .slice(0, 20);
   if (stateFingerprint !== lastStateFingerprint) {
-    await client.runtimeEvent({
-      id: `daemon-state:${agentId}:${stateFingerprint}`, agentId, type: "session.state.changed",
-      createdAt: new Date().toISOString(), payload: { state: state.state, task: displayTask },
-    }).then(() => { lastStateFingerprint = stateFingerprint; }).catch(() => {});
+    await client
+      .runtimeEvent({
+        id: `daemon-state:${agentId}:${stateFingerprint}`,
+        agentId,
+        type: "session.state.changed",
+        createdAt: new Date().toISOString(),
+        payload: { state: state.state, task: displayTask },
+      })
+      .then(() => {
+        lastStateFingerprint = stateFingerprint;
+      })
+      .catch(() => {});
   }
-  await client.heartbeat({
-    id: agentId,
-    name: state.name,
-    project,
-    model: state.model ?? (agentId.startsWith("claude-") ? "Claude Code" : "Codex"),
-    runtime: agentId.startsWith("claude-") ? "claude" : "codex",
-    runtimeProtocol: "canonical-v1",
-    state: state.state,
-    task: displayTask,
-    objective: state.objective,
-    tokens: state.tokens,
-    processedTokens: state.processedTokens,
-    capabilities: state.capabilities ?? ["approve", "reject", "steer", "prompt", "follow_up"],
-    rateLimits: state.rateLimits,
-    pendingApproval: state.pendingApproval,
-  }).catch(() => {});
+  await client
+    .heartbeat({
+      id: agentId,
+      name: state.name,
+      project,
+      model: state.model ?? (agentId.startsWith("claude-") ? "Claude Code" : "Codex"),
+      runtime: agentId.startsWith("claude-") ? "claude" : "codex",
+      runtimeProtocol: "canonical-v1",
+      state: state.state,
+      task: displayTask,
+      objective: state.objective,
+      tokens: state.tokens,
+      processedTokens: state.processedTokens,
+      capabilities: state.capabilities ?? ["approve", "reject", "steer", "prompt", "follow_up"],
+      rateLimits: state.rateLimits,
+      pendingApproval: state.pendingApproval,
+    })
+    .catch(() => {});
   if (state.state === "offline") stopped = true;
 }
 
 writeFileSync(pidPath, String(process.pid));
-const shutdown = () => { stopped = true; };
+const shutdown = () => {
+  stopped = true;
+};
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
@@ -152,9 +209,16 @@ try {
       await heartbeat();
       nextHeartbeat = Date.now() + HEARTBEAT_INTERVAL_MS;
     }
-    if (!stopped) await Bun.sleep(loadState()?.state === "running" ? REASONING_INTERVAL_MS : HEARTBEAT_INTERVAL_MS);
+    if (!stopped)
+      await Bun.sleep(
+        loadState()?.state === "running" ? REASONING_INTERVAL_MS : HEARTBEAT_INTERVAL_MS,
+      );
   }
   await heartbeat();
 } finally {
-  try { unlinkSync(pidPath); } catch { /* Already replaced or cleaned up. */ }
+  try {
+    unlinkSync(pidPath);
+  } catch {
+    /* Already replaced or cleaned up. */
+  }
 }

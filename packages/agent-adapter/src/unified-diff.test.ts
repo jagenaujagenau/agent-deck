@@ -7,7 +7,17 @@ describe("unifiedDiff", () => {
     const after = ["one", "two", "three", "four", "CHANGED", "six", "seven", "eight"].join("\n");
 
     expect(unifiedDiff(before, after)).toBe(
-      ["@@ -2,7 +2,7 @@", " two", " three", " four", "-five", "+CHANGED", " six", " seven", " eight"].join("\n"),
+      [
+        "@@ -2,7 +2,7 @@",
+        " two",
+        " three",
+        " four",
+        "-five",
+        "+CHANGED",
+        " six",
+        " seven",
+        " eight",
+      ].join("\n"),
     );
   });
 
@@ -16,7 +26,9 @@ describe("unifiedDiff", () => {
   });
 
   test("a brand new file is one hunk against an empty old side", () => {
-    expect(unifiedDiff("", "alpha\nbeta\n")).toBe(["@@ -0,0 +1,2 @@", "+alpha", "+beta"].join("\n"));
+    expect(unifiedDiff("", "alpha\nbeta\n")).toBe(
+      ["@@ -0,0 +1,2 @@", "+alpha", "+beta"].join("\n"),
+    );
   });
 
   test("a full rewrite of an existing file keeps the deletions visible", () => {
@@ -26,13 +38,25 @@ describe("unifiedDiff", () => {
 
   test("distant changes become separate hunks, near ones merge", () => {
     const before = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
-    const after = before.split("\n").map((line, i) => (i === 2 || i === 30 ? `${line} edited` : line)).join("\n");
+    const after = before
+      .split("\n")
+      .map((line, i) => (i === 2 || i === 30 ? `${line} edited` : line))
+      .join("\n");
 
-    const hunks = unifiedDiff(before, after)!.split("\n").filter((line) => line.startsWith("@@"));
+    const hunks = unifiedDiff(before, after)!
+      .split("\n")
+      .filter((line) => line.startsWith("@@"));
     expect(hunks).toEqual(["@@ -1,6 +1,6 @@", "@@ -28,7 +28,7 @@"]);
 
-    const near = before.split("\n").map((line, i) => (i === 2 || i === 5 ? `${line} edited` : line)).join("\n");
-    expect(unifiedDiff(before, near)!.split("\n").filter((line) => line.startsWith("@@"))).toEqual(["@@ -1,9 +1,9 @@"]);
+    const near = before
+      .split("\n")
+      .map((line, i) => (i === 2 || i === 5 ? `${line} edited` : line))
+      .join("\n");
+    expect(
+      unifiedDiff(before, near)!
+        .split("\n")
+        .filter((line) => line.startsWith("@@")),
+    ).toEqual(["@@ -1,9 +1,9 @@"]);
   });
 
   test("a pure insertion anchors at the line it follows with a zero-length old range", () => {
@@ -47,12 +71,19 @@ describe("unifiedDiff", () => {
 
   test("line counts in the header match the lines actually emitted", () => {
     const before = Array.from({ length: 200 }, (_, i) => `l${i}`).join("\n");
-    const after = before.split("\n").filter((_, i) => i !== 100).join("\n");
+    const after = before
+      .split("\n")
+      .filter((_, i) => i !== 100)
+      .join("\n");
 
     const lines = unifiedDiff(before, after)!.split("\n");
     const [, oldCount, newCount] = lines[0].match(/@@ -\d+,(\d+) \+\d+,(\d+) @@/)!;
-    expect(lines.filter((l) => l.startsWith(" ") || l.startsWith("-")).length).toBe(Number(oldCount));
-    expect(lines.filter((l) => l.startsWith(" ") || l.startsWith("+")).length).toBe(Number(newCount));
+    expect(lines.filter((l) => l.startsWith(" ") || l.startsWith("-")).length).toBe(
+      Number(oldCount),
+    );
+    expect(lines.filter((l) => l.startsWith(" ") || l.startsWith("+")).length).toBe(
+      Number(newCount),
+    );
   });
 
   test("bails out instead of burning the user's turn on a wholly dissimilar rewrite", () => {

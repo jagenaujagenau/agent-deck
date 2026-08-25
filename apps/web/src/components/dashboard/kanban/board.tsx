@@ -8,7 +8,13 @@ import { PlusIcon } from "lucide-react";
 import { useState, useEffect } from "react";
 import { NewTaskDialog } from "./new-task-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DndContext, DragOverlay, closestCorners, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import { toast } from "sonner";
 import type { TaskStage } from "@/types/task";
 
@@ -118,10 +124,7 @@ export function KanbanBoard({ onNewTask }: KanbanBoardProps = {}) {
         </DragOverlay>
       </DndContext>
 
-      <NewTaskDialog
-        open={showNewTaskDialog}
-        onOpenChange={setShowNewTaskDialog}
-      />
+      <NewTaskDialog open={showNewTaskDialog} onOpenChange={setShowNewTaskDialog} />
     </div>
   );
 }

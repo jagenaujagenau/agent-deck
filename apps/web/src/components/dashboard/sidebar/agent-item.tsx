@@ -24,7 +24,7 @@ export function AgentItem({ agent }: AgentItemProps) {
         className={cn(
           "group relative flex items-center gap-3 rounded-lg p-3 cursor-pointer transition-colors",
           "hover:bg-sidebar-accent",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
         )}
       >
         <div className="flex-1 min-w-0">
@@ -32,9 +32,7 @@ export function AgentItem({ agent }: AgentItemProps) {
             <h3 className="text-sm font-medium truncate">{agent.name}</h3>
             <StatusBadge status={agent.status} />
           </div>
-          <p className="text-xs text-muted-foreground line-clamp-2">
-            {agent.description}
-          </p>
+          <p className="text-xs text-muted-foreground line-clamp-2">{agent.description}</p>
         </div>
       </div>
     </AgentContextMenu>

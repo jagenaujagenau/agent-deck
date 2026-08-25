@@ -25,4 +25,6 @@ mkdirSync(extensions, { recursive: true });
 mkdirSync(packages, { recursive: true });
 ensureLink(extensionTarget, join(extensions, "agent-deck"));
 ensureLink(sdkTarget, join(packages, "agent-adapter"));
-console.log("Installed Agent Deck Pi extension and runtime SDK. Run /reload in active Pi sessions.");
+console.log(
+  "Installed Agent Deck Pi extension and runtime SDK. Run /reload in active Pi sessions.",
+);

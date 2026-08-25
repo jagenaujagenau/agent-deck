@@ -12,7 +12,11 @@ const MAX_COMMANDS = 400;
 
 function frontmatter(file: string): Record<string, string> {
   let head: string;
-  try { head = readFileSync(file, "utf8").slice(0, FRONTMATTER_BYTES); } catch { return {}; }
+  try {
+    head = readFileSync(file, "utf8").slice(0, FRONTMATTER_BYTES);
+  } catch {
+    return {};
+  }
   if (!head.startsWith("---")) return {};
   const end = head.indexOf("\n---", 3);
   if (end === -1) return {};
@@ -26,7 +30,10 @@ function frontmatter(file: string): Record<string, string> {
     if (/^[>|][-+]?$/.test(value)) {
       // A YAML block scalar: the value is the indented lines that follow, not the marker itself.
       const block: string[] = [];
-      while (index + 1 < lines.length && (lines[index + 1].trim() === "" || /^\s+\S/.test(lines[index + 1]))) {
+      while (
+        index + 1 < lines.length &&
+        (lines[index + 1].trim() === "" || /^\s+\S/.test(lines[index + 1]))
+      ) {
         index += 1;
         block.push(lines[index].trim());
       }
@@ -39,14 +46,21 @@ function frontmatter(file: string): Record<string, string> {
 
 function describe(file: string, fields: Record<string, string>): string | undefined {
   const description = fields.description?.trim();
-  if (description) return description.length > MAX_DESCRIPTION ? `${description.slice(0, MAX_DESCRIPTION - 1).trimEnd()}…` : description;
+  if (description)
+    return description.length > MAX_DESCRIPTION
+      ? `${description.slice(0, MAX_DESCRIPTION - 1).trimEnd()}…`
+      : description;
   return undefined;
 }
 
 function directories(parent: string): string[] {
   try {
     return readdirSync(parent).filter((entry) => {
-      try { return statSync(join(parent, entry)).isDirectory(); } catch { return false; }
+      try {
+        return statSync(join(parent, entry)).isDirectory();
+      } catch {
+        return false;
+      }
     });
   } catch {
     return [];
@@ -58,18 +72,30 @@ function commandsIn(root: string, source: SlashCommandSource): SlashCommand[] {
   const found: SlashCommand[] = [];
   const walk = (directory: string, prefix: string) => {
     let entries: string[];
-    try { entries = readdirSync(directory); } catch { return; }
+    try {
+      entries = readdirSync(directory);
+    } catch {
+      return;
+    }
     for (const entry of entries) {
       const path = join(directory, entry);
       let isDirectory = false;
-      try { isDirectory = statSync(path).isDirectory(); } catch { continue; }
+      try {
+        isDirectory = statSync(path).isDirectory();
+      } catch {
+        continue;
+      }
       if (isDirectory) {
         if (!prefix) walk(path, `${entry}:`);
         continue;
       }
       if (!entry.endsWith(".md")) continue;
       const fields = frontmatter(path);
-      found.push({ name: `${prefix}${basename(entry, ".md")}`, description: describe(path, fields), source });
+      found.push({
+        name: `${prefix}${basename(entry, ".md")}`,
+        description: describe(path, fields),
+        source,
+      });
     }
   };
   walk(root, "");
@@ -81,13 +107,23 @@ function skillsIn(root: string, source: SlashCommandSource, namespace = ""): Sla
     const file = join(root, directory, "SKILL.md");
     if (!existsSync(file)) return [];
     const fields = frontmatter(file);
-    return [{ name: `${namespace}${fields.name || directory}`, description: describe(file, fields), source }];
+    return [
+      {
+        name: `${namespace}${fields.name || directory}`,
+        description: describe(file, fields),
+        source,
+      },
+    ];
   });
 }
 
 function pluginSkills(manifestPath: string): SlashCommand[] {
   let manifest: { plugins?: Record<string, Array<{ installPath?: string }>> };
-  try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); } catch { return []; }
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch {
+    return [];
+  }
   return Object.entries(manifest.plugins ?? {}).flatMap(([key, installs]) => {
     // Keys are `<plugin>@<marketplace>`; the invocable prefix is the plugin alone.
     const plugin = key.split("@")[0];
@@ -102,7 +138,11 @@ function pluginSkills(manifestPath: string): SlashCommand[] {
  * prompt files and skills — never the client's own built-ins like `/clear`, which a remote message
  * has no way to trigger.
  */
-export function discoverSlashCommands(roots: { userDir: string; projectDir: string; pluginManifest: string }): SlashCommand[] {
+export function discoverSlashCommands(roots: {
+  userDir: string;
+  projectDir: string;
+  pluginManifest: string;
+}): SlashCommand[] {
   const discovered = [
     ...commandsIn(join(roots.projectDir, ".claude", "commands"), "project"),
     ...skillsIn(join(roots.projectDir, ".claude", "skills"), "project"),
@@ -112,6 +152,7 @@ export function discoverSlashCommands(roots: { userDir: string; projectDir: stri
   ];
   // Project definitions shadow user ones of the same name, exactly as the runtime resolves them.
   const byName = new Map<string, SlashCommand>();
-  for (const command of discovered) if (!byName.has(command.name)) byName.set(command.name, command);
+  for (const command of discovered)
+    if (!byName.has(command.name)) byName.set(command.name, command);
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)).slice(0, MAX_COMMANDS);
 }

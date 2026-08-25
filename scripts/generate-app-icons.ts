@@ -15,7 +15,9 @@ const MODULES = ["mobile", "wear"] as const;
 const DENSITIES = { mdpi: 108, hdpi: 162, xhdpi: 216, xxhdpi: 324, xxxhdpi: 432 } as const;
 
 if (!existsSync(SOURCE)) {
-  console.error(`No source icon at ${SOURCE}\n\nSave the artwork there (square PNG, transparent background preferred) and re-run.`);
+  console.error(
+    `No source icon at ${SOURCE}\n\nSave the artwork there (square PNG, transparent background preferred) and re-run.`,
+  );
   process.exit(1);
 }
 
@@ -25,7 +27,18 @@ for (const module of MODULES) {
     const target = join(res, `mipmap-${density}`, "ic_launcher_art.png");
     mkdirSync(dirname(target), { recursive: true });
     rmSync(target, { force: true });
-    const result = Bun.spawnSync(["sips", "-s", "format", "png", "-z", String(size), String(size), SOURCE, "--out", target]);
+    const result = Bun.spawnSync([
+      "sips",
+      "-s",
+      "format",
+      "png",
+      "-z",
+      String(size),
+      String(size),
+      SOURCE,
+      "--out",
+      target,
+    ]);
     if (!result.success) {
       console.error(`sips failed for ${module}/${density}: ${result.stderr.toString().trim()}`);
       process.exit(1);
@@ -35,9 +48,23 @@ for (const module of MODULES) {
 }
 // Point the foreground at the generated bitmap, replacing the placeholder vector.
 for (const module of MODULES) {
-  const foreground = resolve(import.meta.dir, "..", "apps", "android", module, "src", "main", "res", "drawable", "ic_launcher_foreground.xml");
+  const foreground = resolve(
+    import.meta.dir,
+    "..",
+    "apps",
+    "android",
+    module,
+    "src",
+    "main",
+    "res",
+    "drawable",
+    "ic_launcher_foreground.xml",
+  );
   const xml = await Bun.file(foreground).text();
-  await Bun.write(foreground, xml.replace("@drawable/ic_launcher_placeholder", "@mipmap/ic_launcher_art"));
+  await Bun.write(
+    foreground,
+    xml.replace("@drawable/ic_launcher_placeholder", "@mipmap/ic_launcher_art"),
+  );
 }
 console.log("\nForeground repointed at the generated artwork.");
 console.log("Rebuild with: cd apps/android && ./gradlew :mobile:installDebug");

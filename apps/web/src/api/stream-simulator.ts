@@ -1,5 +1,5 @@
-import { Effect } from 'effect';
-import { nanoid } from 'nanoid';
+import { Effect } from "effect";
+import { nanoid } from "nanoid";
 
 export interface StreamController {
   cancel: () => void;
@@ -20,17 +20,13 @@ export interface StreamChunk {
  */
 export const createMockStream = (
   response: string,
-): Effect.Effect<
-  ReadableStream<StreamChunk> & StreamController,
-  never,
-  never
-> =>
+): Effect.Effect<ReadableStream<StreamChunk> & StreamController, never, never> =>
   Effect.sync(() => {
     let paused = false;
     let cancelled = false;
     let resumeResolve: (() => void) | null = null;
 
-    const words = response.split(' ');
+    const words = response.split(" ");
     let wordIndex = 0;
 
     const stream = new ReadableStream<StreamChunk>({
@@ -56,20 +52,18 @@ export const createMockStream = (
 
           // Yield chunk
           const chunk: StreamChunk = {
-            content: words[i] + (i < words.length - 1 ? ' ' : ''),
+            content: words[i] + (i < words.length - 1 ? " " : ""),
             done: false,
           };
           controller.enqueue(chunk);
 
           // Simulate delay between words (50-150ms)
-          await new Promise((resolve) =>
-            setTimeout(resolve, 50 + Math.random() * 100),
-          );
+          await new Promise((resolve) => setTimeout(resolve, 50 + Math.random() * 100));
         }
 
         // Final chunk
         if (!cancelled) {
-          controller.enqueue({ content: '', done: true });
+          controller.enqueue({ content: "", done: true });
           controller.close();
         }
       },
@@ -110,15 +104,14 @@ export const generateMockResponse = (userMessage: string): string => {
     `I see you need help with "${userMessage}". Let me break this down into steps and work through it systematically.`,
   ];
 
-  const baseResponse =
-    responses[Math.floor(Math.random() * responses.length)];
+  const baseResponse = responses[Math.floor(Math.random() * responses.length)];
 
   // Add some variation
   const additional = [
-    ' First, I need to understand the context better.',
-    ' Let me check the current state of the codebase.',
-    ' I\'ll start by reviewing the relevant files.',
-    ' This requires careful consideration of the architecture.',
+    " First, I need to understand the context better.",
+    " Let me check the current state of the codebase.",
+    " I'll start by reviewing the relevant files.",
+    " This requires careful consideration of the architecture.",
   ];
 
   return baseResponse + additional[Math.floor(Math.random() * additional.length)];

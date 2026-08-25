@@ -47,11 +47,7 @@ export function DashboardLayout() {
         <KanbanBoard />
       </main>
       <ChatWindowManager />
-      <NewAgentDialog
-        open={showNewAgentDialog}
-        onOpenChange={setShowNewAgentDialog}
-      />
+      <NewAgentDialog open={showNewAgentDialog} onOpenChange={setShowNewAgentDialog} />
     </div>
   );
 }
-

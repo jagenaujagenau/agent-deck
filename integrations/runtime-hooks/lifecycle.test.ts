@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { canonicalLifecycleEvent, shouldRequestRemoteApproval, shouldUseAgentDeckApproval } from "./lifecycle";
+import {
+  canonicalLifecycleEvent,
+  shouldRequestRemoteApproval,
+  shouldUseAgentDeckApproval,
+} from "./lifecycle";
 
 describe("canonicalLifecycleEvent", () => {
   test.each([
@@ -27,9 +31,15 @@ describe("shouldUseAgentDeckApproval", () => {
 
   test("does not intercept a destructive auto-mode tool call", () => {
     const command = { command: "rm -rf build" };
-    expect(shouldRequestRemoteApproval("claude", "auto", "Bash", command, "destructive")).toBe(false);
-    expect(shouldRequestRemoteApproval("claude", "bypassPermissions", "Bash", command, "destructive")).toBe(false);
-    expect(shouldRequestRemoteApproval("claude", "default", "Bash", command, "destructive")).toBe(true);
+    expect(shouldRequestRemoteApproval("claude", "auto", "Bash", command, "destructive")).toBe(
+      false,
+    );
+    expect(
+      shouldRequestRemoteApproval("claude", "bypassPermissions", "Bash", command, "destructive"),
+    ).toBe(false);
+    expect(shouldRequestRemoteApproval("claude", "default", "Bash", command, "destructive")).toBe(
+      true,
+    );
   });
 
   test("keeps the remote gate in modes that may ask", () => {

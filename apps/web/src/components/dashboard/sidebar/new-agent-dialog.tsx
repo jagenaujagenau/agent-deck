@@ -64,9 +64,7 @@ export function NewAgentDialog({ open, onOpenChange }: NewAgentDialogProps) {
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Create New Agent</DialogTitle>
-            <DialogDescription>
-              Add a new coding agent to your dashboard.
-            </DialogDescription>
+            <DialogDescription>Add a new coding agent to your dashboard.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">

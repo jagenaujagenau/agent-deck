@@ -8,19 +8,11 @@ import { Separator } from "@/components/ui/separator";
 
 export function SettingsPanel() {
   const chaosEnabled = useSettingsStore((state) => state.chaosEnabled);
-  const taskUpdateFailureRate = useSettingsStore(
-    (state) => state.taskUpdateFailureRate
-  );
-  const agentActionFailureRate = useSettingsStore(
-    (state) => state.agentActionFailureRate
-  );
+  const taskUpdateFailureRate = useSettingsStore((state) => state.taskUpdateFailureRate);
+  const agentActionFailureRate = useSettingsStore((state) => state.agentActionFailureRate);
   const setChaosEnabled = useSettingsStore((state) => state.setChaosEnabled);
-  const setTaskUpdateFailureRate = useSettingsStore(
-    (state) => state.setTaskUpdateFailureRate
-  );
-  const setAgentActionFailureRate = useSettingsStore(
-    (state) => state.setAgentActionFailureRate
-  );
+  const setTaskUpdateFailureRate = useSettingsStore((state) => state.setTaskUpdateFailureRate);
+  const setAgentActionFailureRate = useSettingsStore((state) => state.setAgentActionFailureRate);
 
   return (
     <div className="p-4 space-y-6">
@@ -31,11 +23,7 @@ export function SettingsPanel() {
             <Label htmlFor="chaos-enabled" className="text-sm">
               Enable Chaos Mode
             </Label>
-            <Switch
-              id="chaos-enabled"
-              checked={chaosEnabled}
-              onCheckedChange={setChaosEnabled}
-            />
+            <Switch id="chaos-enabled" checked={chaosEnabled} onCheckedChange={setChaosEnabled} />
           </div>
 
           {chaosEnabled && (
@@ -53,9 +41,7 @@ export function SettingsPanel() {
                     max="1"
                     step="0.01"
                     value={taskUpdateFailureRate}
-                    onChange={(e) =>
-                      setTaskUpdateFailureRate(parseFloat(e.target.value) || 0)
-                    }
+                    onChange={(e) => setTaskUpdateFailureRate(parseFloat(e.target.value) || 0)}
                     className="h-8"
                   />
                   <span className="text-xs text-muted-foreground">
@@ -76,9 +62,7 @@ export function SettingsPanel() {
                     max="1"
                     step="0.01"
                     value={agentActionFailureRate}
-                    onChange={(e) =>
-                      setAgentActionFailureRate(parseFloat(e.target.value) || 0)
-                    }
+                    onChange={(e) => setAgentActionFailureRate(parseFloat(e.target.value) || 0)}
                     className="h-8"
                   />
                   <span className="text-xs text-muted-foreground">

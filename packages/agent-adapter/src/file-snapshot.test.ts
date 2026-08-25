@@ -1,8 +1,21 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync, readdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+  readdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { captureSnapshot, consumeSnapshot, mutatesFile, pruneSnapshots, readFileForDiff } from "./file-snapshot";
+import {
+  captureSnapshot,
+  consumeSnapshot,
+  mutatesFile,
+  pruneSnapshots,
+  readFileForDiff,
+} from "./file-snapshot";
 
 function scratch() {
   return mkdtempSync(join(tmpdir(), "agent-deck-snapshot-"));
@@ -73,7 +86,9 @@ describe("snapshots", () => {
     captureSnapshot(directory, "recent", join(directory, "fresh.ts"));
     captureSnapshot(directory, "stale", join(directory, "fresh.ts"));
 
-    const stalePath = readdirSync(directory).map((n) => join(directory, n)).find((p) => p.endsWith(".snapshot"))!;
+    const stalePath = readdirSync(directory)
+      .map((n) => join(directory, n))
+      .find((p) => p.endsWith(".snapshot"))!;
     const old = new Date(Date.now() - 3 * 60 * 60_000);
     utimesSync(stalePath, old, old);
 

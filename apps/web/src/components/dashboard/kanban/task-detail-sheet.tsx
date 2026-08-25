@@ -38,11 +38,7 @@ const priorityColors = {
   high: "bg-red-500/10 text-red-700 dark:text-red-400",
 };
 
-export function TaskDetailSheet({
-  task,
-  open,
-  onOpenChange,
-}: TaskDetailSheetProps) {
+export function TaskDetailSheet({ task, open, onOpenChange }: TaskDetailSheetProps) {
   const updateTask = useTasksStore((state) => state.updateTask);
   const deleteTask = useTasksStore((state) => state.deleteTask);
   const agents = useAgentsStore((state) => state.agents);
@@ -51,9 +47,7 @@ export function TaskDetailSheet({
   const [description, setDescription] = useState(task.description);
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [stage, setStage] = useState<TaskStage>(task.stage);
-  const [assignedAgentId, setAssignedAgentId] = useState(
-    task.assignedAgentId || ""
-  );
+  const [assignedAgentId, setAssignedAgentId] = useState(task.assignedAgentId || "");
 
   const handleSave = async () => {
     const updated = await updateTask(task.id, {
@@ -115,10 +109,7 @@ export function TaskDetailSheet({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="priority">Priority</Label>
-              <Select
-                value={priority}
-                onValueChange={(v) => setPriority(v as TaskPriority)}
-              >
+              <Select value={priority} onValueChange={(v) => setPriority(v as TaskPriority)}>
                 <SelectTrigger id="priority">
                   <SelectValue />
                 </SelectTrigger>
@@ -132,10 +123,7 @@ export function TaskDetailSheet({
 
             <div className="space-y-2">
               <Label htmlFor="stage">Stage</Label>
-              <Select
-                value={stage}
-                onValueChange={(v) => setStage(v as TaskStage)}
-              >
+              <Select value={stage} onValueChange={(v) => setStage(v as TaskStage)}>
                 <SelectTrigger id="stage">
                   <SelectValue />
                 </SelectTrigger>

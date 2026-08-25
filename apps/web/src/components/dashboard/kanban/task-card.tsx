@@ -24,13 +24,7 @@ export function TaskCard({ task }: TaskCardProps) {
   const agents = useAgentsStore((state) => state.agents);
   const [showDetailSheet, setShowDetailSheet] = useState(false);
 
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    isDragging,
-  } = useDraggable({
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
 
@@ -53,27 +47,20 @@ export function TaskCard({ task }: TaskCardProps) {
         {...attributes}
         className={cn(
           "p-4 cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow",
-          isDragging && "opacity-50"
+          isDragging && "opacity-50",
         )}
         onClick={() => setShowDetailSheet(true)}
       >
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-medium text-sm line-clamp-2">{task.title}</h3>
-            <Badge
-              className={cn(
-                "text-xs shrink-0",
-                priorityColors[task.priority]
-              )}
-            >
+            <Badge className={cn("text-xs shrink-0", priorityColors[task.priority])}>
               {task.priority}
             </Badge>
           </div>
 
           {task.description && (
-            <p className="text-xs text-muted-foreground line-clamp-2">
-              {task.description}
-            </p>
+            <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
           )}
 
           {assignedAgent && (
@@ -81,19 +68,13 @@ export function TaskCard({ task }: TaskCardProps) {
               <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium">
                 {assignedAgent.name.charAt(0).toUpperCase()}
               </div>
-              <span className="text-xs text-muted-foreground">
-                {assignedAgent.name}
-              </span>
+              <span className="text-xs text-muted-foreground">{assignedAgent.name}</span>
             </div>
           )}
         </div>
       </Card>
 
-      <TaskDetailSheet
-        task={task}
-        open={showDetailSheet}
-        onOpenChange={setShowDetailSheet}
-      />
+      <TaskDetailSheet task={task} open={showDetailSheet} onOpenChange={setShowDetailSheet} />
     </>
   );
 }

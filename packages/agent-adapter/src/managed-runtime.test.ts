@@ -5,8 +5,18 @@ function adapter(runtime: ManagedRuntimeAdapter["runtime"]): ManagedRuntimeAdapt
   return {
     runtime,
     capabilities: { interrupt: true, approvals: true, userInput: true, modelSwitch: false },
-    async start(input) { return { agentId: input.agentId, providerSessionId: `${runtime}-1`, project: input.project, model: input.model ?? runtime }; },
-    async send() {}, async interrupt() {}, async resolveRequest() {}, async stop() {},
+    async start(input) {
+      return {
+        agentId: input.agentId,
+        providerSessionId: `${runtime}-1`,
+        project: input.project,
+        model: input.model ?? runtime,
+      };
+    },
+    async send() {},
+    async interrupt() {},
+    async resolveRequest() {},
+    async stop() {},
     async *events() {},
   };
 }

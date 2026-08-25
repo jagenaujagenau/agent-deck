@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import { runEffect } from '@/lib/effect-runtime';
-import { mockClient } from '@/api/client';
-import type { Task, CreateTaskInput, UpdateTaskInput, TaskStage } from '@/types/task';
+import { create } from "zustand";
+import { runEffect } from "@/lib/effect-runtime";
+import { mockClient } from "@/api/client";
+import type { Task, CreateTaskInput, UpdateTaskInput, TaskStage } from "@/types/task";
 
 interface TasksState {
   tasks: Task[];
@@ -17,11 +17,13 @@ interface TasksState {
   updateTask: (id: string, input: UpdateTaskInput) => Promise<Task | null>;
   deleteTask: (id: string) => Promise<boolean>;
   moveTask: (id: string, newStage: TaskStage) => Promise<boolean>;
-  setOptimisticUpdate: (update: {
-    taskId: string;
-    fromStage: TaskStage;
-    toStage: TaskStage;
-  } | null) => void;
+  setOptimisticUpdate: (
+    update: {
+      taskId: string;
+      fromStage: TaskStage;
+      toStage: TaskStage;
+    } | null,
+  ) => void;
   rollbackOptimisticUpdate: () => void;
 }
 
@@ -38,7 +40,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       set({ tasks, loading: false });
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to fetch tasks',
+        error: error instanceof Error ? error.message : "Failed to fetch tasks",
         loading: false,
       });
     }
@@ -54,7 +56,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       return task;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to create task',
+        error: error instanceof Error ? error.message : "Failed to create task",
       });
       return null;
     }
@@ -70,7 +72,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       return task;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to update task',
+        error: error instanceof Error ? error.message : "Failed to update task",
       });
       return null;
     }
@@ -86,7 +88,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       return true;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to delete task',
+        error: error instanceof Error ? error.message : "Failed to delete task",
       });
       return false;
     }
@@ -101,15 +103,11 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       optimisticUpdate: { taskId: id, fromStage: task.stage, toStage: newStage },
     });
     set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === id ? { ...t, stage: newStage } : t,
-      ),
+      tasks: state.tasks.map((t) => (t.id === id ? { ...t, stage: newStage } : t)),
     }));
 
     try {
-      const updated = await runEffect(
-        mockClient.tasks.update(id, { stage: newStage }),
-      );
+      const updated = await runEffect(mockClient.tasks.update(id, { stage: newStage }));
       set((state) => ({
         tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
         optimisticUpdate: null,
@@ -118,12 +116,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     } catch (error) {
       // Rollback on error
       set((state) => ({
-        tasks: state.tasks.map((t) =>
-          t.id === id ? { ...t, stage: task.stage } : t,
-        ),
+        tasks: state.tasks.map((t) => (t.id === id ? { ...t, stage: task.stage } : t)),
         optimisticUpdate: null,
-        error:
-          error instanceof Error ? error.message : 'Failed to move task',
+        error: error instanceof Error ? error.message : "Failed to move task",
       }));
       return false;
     }
@@ -139,9 +134,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
 
     set({
       tasks: tasks.map((t) =>
-        t.id === optimisticUpdate.taskId
-          ? { ...t, stage: optimisticUpdate.fromStage }
-          : t,
+        t.id === optimisticUpdate.taskId ? { ...t, stage: optimisticUpdate.fromStage } : t,
       ),
       optimisticUpdate: null,
     });

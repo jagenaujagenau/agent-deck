@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { describeToolCall, normalizeApprovalMode, requiresApproval, usesRemoteApproval } from "./approval-policy";
+import {
+  describeToolCall,
+  normalizeApprovalMode,
+  requiresApproval,
+  usesRemoteApproval,
+} from "./approval-policy";
 
 describe("Pi remote approval policy", () => {
   test.each([
@@ -15,7 +20,9 @@ describe("Pi remote approval policy", () => {
   });
 
   test("does not interrupt ordinary inspection", () => {
-    expect(requiresApproval("bash", { command: "rg TODO src && git status" }, "destructive")).toBe(false);
+    expect(requiresApproval("bash", { command: "rg TODO src && git status" }, "destructive")).toBe(
+      false,
+    );
     expect(requiresApproval("read", { path: "README.md" }, "all")).toBe(false);
   });
 
@@ -42,6 +49,8 @@ describe("Pi remote approval policy", () => {
   });
 
   test("preserves the exact command for remote inspection", () => {
-    expect(describeToolCall("bash", { command: "git push origin main" })).toBe("git push origin main");
+    expect(describeToolCall("bash", { command: "git push origin main" })).toBe(
+      "git push origin main",
+    );
   });
 });

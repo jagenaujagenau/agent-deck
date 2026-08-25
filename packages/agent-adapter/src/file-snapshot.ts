@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 /** Files past this size are left undiffed; the snapshot is not worth the turn latency or the disk. */
@@ -13,7 +21,9 @@ const FILE_TOOLS = /^(edit|write|create|update|multiedit|notebookedit|applypatch
 
 /** Whether this tool call is expected to change a file on disk, and so is worth snapshotting. */
 export function mutatesFile(tool: string, target: string | undefined): target is string {
-  return typeof target === "string" && target.length > 0 && FILE_TOOLS.test(tool.replace(/[\s_-]/g, ""));
+  return (
+    typeof target === "string" && target.length > 0 && FILE_TOOLS.test(tool.replace(/[\s_-]/g, ""))
+  );
 }
 
 function snapshotFile(directory: string, key: string) {
@@ -33,7 +43,9 @@ export function captureSnapshot(directory: string, key: string, target: string):
       content = readFileSync(target, "utf8");
     }
     writeFileSync(snapshotFile(directory, key), content);
-  } catch { /* Snapshotting is best effort; the caller falls back to a coarse diff. */ }
+  } catch {
+    /* Snapshotting is best effort; the caller falls back to a coarse diff. */
+  }
 }
 
 /** Reads and removes a snapshot. Returns null when none was taken for this key. */
@@ -64,5 +76,7 @@ export function pruneSnapshots(directory: string, now = Date.now()): void {
       const path = join(directory, name);
       if (now - statSync(path).mtimeMs > SNAPSHOT_TTL_MS) rmSync(path, { force: true });
     }
-  } catch { /* Nothing to prune. */ }
+  } catch {
+    /* Nothing to prune. */
+  }
 }

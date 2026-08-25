@@ -11,7 +11,15 @@ export * from "./claude-sdk-runtime";
 export type AgentState = "idle" | "running" | "waiting" | "paused" | "error" | "offline";
 // `user` carries a message the person sent, which the bridge renders on the conversation side.
 export type EventKind = "thought" | "tool" | "output" | "warning" | "error" | "question" | "user";
-export type ControlAction = "pause" | "resume" | "stop" | "approve" | "reject" | "prompt" | "steer" | "follow_up";
+export type ControlAction =
+  | "pause"
+  | "resume"
+  | "stop"
+  | "approve"
+  | "reject"
+  | "prompt"
+  | "steer"
+  | "follow_up";
 
 export type AgentHeartbeat = {
   id: string;
@@ -34,9 +42,31 @@ export type AgentHeartbeat = {
   pendingApproval?: PendingApproval;
 };
 
-export type PendingApproval = { id: string; tool: string; detail: string; createdAt: string; expiresAt: string };
-export type RateLimitWindow = { id: string; label: string; usedPercent: number; resetsAt?: string; account?: string };
-export type AgentEventInput = { kind: EventKind; summary: string; detail?: string; id?: string; tool?: string; path?: string; command?: string; diff?: string; options?: string[] };
+export type PendingApproval = {
+  id: string;
+  tool: string;
+  detail: string;
+  createdAt: string;
+  expiresAt: string;
+};
+export type RateLimitWindow = {
+  id: string;
+  label: string;
+  usedPercent: number;
+  resetsAt?: string;
+  account?: string;
+};
+export type AgentEventInput = {
+  kind: EventKind;
+  summary: string;
+  detail?: string;
+  id?: string;
+  tool?: string;
+  path?: string;
+  command?: string;
+  diff?: string;
+  options?: string[];
+};
 
 export type RemoteCommand = {
   id: string;
@@ -69,7 +99,9 @@ export function runtimeToken(): string {
 export function answerText(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    const entries = Object.values(value as Record<string, unknown>).filter((entry): entry is string => typeof entry === "string");
+    const entries = Object.values(value as Record<string, unknown>).filter(
+      (entry): entry is string => typeof entry === "string",
+    );
     if (entries.length === 1) return entries[0];
   }
   return value === undefined || value === null ? undefined : JSON.stringify(value);
@@ -81,7 +113,11 @@ export class AgentDeckClient {
   private readonly timeoutMs: number;
 
   constructor(options: AdapterClientOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? process.env.AGENT_DECK_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
+    this.baseUrl = (
+      options.baseUrl ??
+      process.env.AGENT_DECK_URL ??
+      "http://127.0.0.1:3000"
+    ).replace(/\/$/, "");
     this.token = options.token ?? runtimeToken;
     this.timeoutMs = options.timeoutMs ?? 5_000;
   }
@@ -122,23 +158,34 @@ export class AgentDeckClient {
   }
 
   async commands(agentId: string): Promise<RemoteCommand[]> {
-    const result = await this.request<{ commands: RemoteCommand[] }>(`/agents/${encodeURIComponent(agentId)}/commands`);
+    const result = await this.request<{ commands: RemoteCommand[] }>(
+      `/agents/${encodeURIComponent(agentId)}/commands`,
+    );
     return result.commands;
   }
 
   acknowledge(agentId: string, commandId: string) {
-    return this.request(`/agents/${encodeURIComponent(agentId)}/commands/${encodeURIComponent(commandId)}/ack`, { method: "POST" });
+    return this.request(
+      `/agents/${encodeURIComponent(agentId)}/commands/${encodeURIComponent(commandId)}/ack`,
+      { method: "POST" },
+    );
   }
 
   requestStatus(agentId: string, requestId: string) {
-    return this.request<{ status: string; value?: unknown }>(`/agents/${encodeURIComponent(agentId)}/requests/${encodeURIComponent(requestId)}`);
+    return this.request<{ status: string; value?: unknown }>(
+      `/agents/${encodeURIComponent(agentId)}/requests/${encodeURIComponent(requestId)}`,
+    );
   }
 
   /**
    * Blocks until a durable request is answered from a device, or the deadline passes. Used by a
    * runtime that opened a question and cannot proceed until it has the user's choice.
    */
-  async waitForAnswer(agentId: string, requestId: string, options: { timeoutMs?: number; pollMs?: number } = {}): Promise<string | undefined> {
+  async waitForAnswer(
+    agentId: string,
+    requestId: string,
+    options: { timeoutMs?: number; pollMs?: number } = {},
+  ): Promise<string | undefined> {
     const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
     const pollMs = options.pollMs ?? 1_000;
     while (Date.now() < deadline) {
@@ -154,12 +201,17 @@ export class AgentDeckClient {
     return undefined;
   }
 
-  async waitForDecision(agentId: string, options: { timeoutMs?: number; pollMs?: number } = {}): Promise<boolean> {
+  async waitForDecision(
+    agentId: string,
+    options: { timeoutMs?: number; pollMs?: number } = {},
+  ): Promise<boolean> {
     const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
     const pollMs = options.pollMs ?? 1_000;
     while (Date.now() < deadline) {
       try {
-        const decision = (await this.commands(agentId)).find((command) => command.action === "approve" || command.action === "reject");
+        const decision = (await this.commands(agentId)).find(
+          (command) => command.action === "approve" || command.action === "reject",
+        );
         if (decision) {
           await this.acknowledge(agentId, decision.id);
           return decision.action === "approve";
@@ -174,7 +226,9 @@ export class AgentDeckClient {
 }
 
 export function clip(value: unknown, limit = 240): string {
-  const compact = String(value ?? "").replace(/\s+/g, " ").trim();
+  const compact = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
   return compact.length <= limit ? compact : `${compact.slice(0, limit - 1)}…`;
 }
 

@@ -1,4 +1,4 @@
-import { Config } from "effect"
+import { Config } from "effect";
 
 /**
  * Every runtime knob the bridge reads, in one place.
@@ -12,7 +12,7 @@ export const BridgeConfig = Config.all({
   /** Where the SQLite file lives. Matches the path the existing bridge uses. */
   databaseUrl: Config.string("DATABASE_URL").pipe(
     Config.withDefault("file:../../local.db"),
-    Config.map((url) => (url.startsWith("file:") ? url.slice(5) : url))
+    Config.map((url) => (url.startsWith("file:") ? url.slice(5) : url)),
   ),
   port: Config.port("PORT").pipe(Config.withDefault(3000)),
   /** Names the bridge in the snapshot devices render. */
@@ -22,7 +22,7 @@ export const BridgeConfig = Config.all({
    * `requireAuth` is what turns refusal on, so the two are read separately.
    */
   masterToken: Config.string("BRIDGE_TOKEN").pipe(Config.option),
-  requireAuth: Config.boolean("BRIDGE_REQUIRE_AUTH").pipe(Config.withDefault(false))
-})
+  requireAuth: Config.boolean("BRIDGE_REQUIRE_AUTH").pipe(Config.withDefault(false)),
+});
 
-export type BridgeConfig = typeof BridgeConfig extends Config.Config<infer A> ? A : never
+export type BridgeConfig = typeof BridgeConfig extends Config.Config<infer A> ? A : never;

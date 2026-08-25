@@ -34,9 +34,7 @@ function RouteComponent() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Login</CardTitle>
-          <CardDescription>
-            Mock login - enter any credentials to continue
-          </CardDescription>
+          <CardDescription>Mock login - enter any credentials to continue</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">

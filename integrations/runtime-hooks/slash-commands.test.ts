@@ -14,9 +14,17 @@ function scratch() {
     writeFileSync(path, body);
   };
   const skill = (base: string, name: string, description?: string) =>
-    write(join(base, name, "SKILL.md"), description === undefined ? `# ${name}` : `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}`);
+    write(
+      join(base, name, "SKILL.md"),
+      description === undefined
+        ? `# ${name}`
+        : `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}`,
+    );
   const manifestPath = join(root, "installed_plugins.json");
-  writeFileSync(manifestPath, JSON.stringify({ version: 2, plugins: { "figma@official": [{ installPath: pluginRoot }] } }));
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({ version: 2, plugins: { "figma@official": [{ installPath: pluginRoot }] } }),
+  );
   return {
     roots: { userDir, projectDir, pluginManifest: manifestPath },
     write,
@@ -29,7 +37,10 @@ function scratch() {
 describe("discoverSlashCommands", () => {
   test("finds prompt files and skills, with their descriptions", () => {
     const s = scratch();
-    s.write(join(s.roots.userDir, "commands", "review.md"), "---\ndescription: Review the diff\n---\nDo it");
+    s.write(
+      join(s.roots.userDir, "commands", "review.md"),
+      "---\ndescription: Review the diff\n---\nDo it",
+    );
     s.skill(join(s.roots.userDir, "skills"), "diagnose", "Debug hard failures");
 
     expect(discoverSlashCommands(s.roots)).toEqual([
@@ -68,12 +79,17 @@ describe("discoverSlashCommands", () => {
     const s = scratch();
     s.skill(join(s.roots.userDir, "skills"), "bare");
 
-    expect(discoverSlashCommands(s.roots)).toEqual([{ name: "bare", description: undefined, source: "user" }]);
+    expect(discoverSlashCommands(s.roots)).toEqual([
+      { name: "bare", description: undefined, source: "user" },
+    ]);
   });
 
   test("long descriptions are clipped so a phone can render the list", () => {
     const s = scratch();
-    s.write(join(s.roots.userDir, "commands", "verbose.md"), `---\ndescription: ${"x".repeat(400)}\n---\n`);
+    s.write(
+      join(s.roots.userDir, "commands", "verbose.md"),
+      `---\ndescription: ${"x".repeat(400)}\n---\n`,
+    );
 
     const description = discoverSlashCommands(s.roots)[0].description!;
     expect(description.length).toBeLessThanOrEqual(200);
@@ -82,7 +98,9 @@ describe("discoverSlashCommands", () => {
 
   test("missing directories and an unreadable manifest yield an empty list, not an error", () => {
     const s = scratch();
-    expect(discoverSlashCommands({ ...s.roots, pluginManifest: join(s.roots.userDir, "nope.json") })).toEqual([]);
+    expect(
+      discoverSlashCommands({ ...s.roots, pluginManifest: join(s.roots.userDir, "nope.json") }),
+    ).toEqual([]);
   });
   test("a YAML block scalar description is read as its text, not its marker", () => {
     const s = scratch();
@@ -91,7 +109,8 @@ describe("discoverSlashCommands", () => {
       "---\nname: caveman\ndescription: >\n  Ultra-compressed mode. Cuts token usage\n  while keeping accuracy.\n---\n\n# caveman",
     );
 
-    expect(discoverSlashCommands(s.roots)[0].description)
-      .toBe("Ultra-compressed mode. Cuts token usage while keeping accuracy.");
+    expect(discoverSlashCommands(s.roots)[0].description).toBe(
+      "Ultra-compressed mode. Cuts token usage while keeping accuracy.",
+    );
   });
 });

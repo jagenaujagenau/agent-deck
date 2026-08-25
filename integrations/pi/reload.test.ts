@@ -35,7 +35,10 @@ beforeEach(() => {
   originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     posts.push({ path: String(url), body: init?.body ? JSON.parse(String(init.body)) : {} });
-    return new Response(JSON.stringify({ commands: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ commands: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }) as typeof fetch;
 });
 

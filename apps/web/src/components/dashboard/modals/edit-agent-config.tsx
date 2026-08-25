@@ -30,11 +30,7 @@ interface EditAgentConfigDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function EditAgentConfigDialog({
-  agent,
-  open,
-  onOpenChange,
-}: EditAgentConfigDialogProps) {
+export function EditAgentConfigDialog({ agent, open, onOpenChange }: EditAgentConfigDialogProps) {
   const updateAgent = useAgentsStore((state) => state.updateAgent);
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description);
@@ -67,9 +63,7 @@ export function EditAgentConfigDialog({
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Edit Agent Configuration</DialogTitle>
-            <DialogDescription>
-              Update agent settings and configuration.
-            </DialogDescription>
+            <DialogDescription>Update agent settings and configuration.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">

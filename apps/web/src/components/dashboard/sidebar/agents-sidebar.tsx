@@ -55,10 +55,7 @@ export function AgentsSidebar({ searchInputRef: externalRef }: AgentsSidebarProp
         </TabsContent>
       </Tabs>
 
-      <NewAgentDialog
-        open={showNewAgentDialog}
-        onOpenChange={setShowNewAgentDialog}
-      />
+      <NewAgentDialog open={showNewAgentDialog} onOpenChange={setShowNewAgentDialog} />
     </aside>
   );
 }

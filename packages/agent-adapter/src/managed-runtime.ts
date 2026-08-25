@@ -7,7 +7,12 @@ export type ManagedRuntimeCapabilities = {
   modelSwitch: boolean;
 };
 
-export type ManagedSession = { agentId: string; providerSessionId: string; project: string; model: string };
+export type ManagedSession = {
+  agentId: string;
+  providerSessionId: string;
+  project: string;
+  model: string;
+};
 
 /**
  * Host-owned runtime seam. Native Claude/Codex/ACP implementations satisfy
@@ -16,10 +21,21 @@ export type ManagedSession = { agentId: string; providerSessionId: string; proje
 export interface ManagedRuntimeAdapter {
   readonly runtime: "claude" | "codex" | "acp";
   readonly capabilities: ManagedRuntimeCapabilities;
-  start(input: { agentId: string; project: string; cwd: string; model?: string; permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto" }): Promise<ManagedSession>;
+  start(input: {
+    agentId: string;
+    project: string;
+    cwd: string;
+    model?: string;
+    permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto";
+  }): Promise<ManagedSession>;
   send(session: ManagedSession, prompt: string): Promise<void>;
   interrupt(session: ManagedSession): Promise<void>;
-  resolveRequest(session: ManagedSession, requestId: string, status: RuntimeRequestStatus, value?: unknown): Promise<void>;
+  resolveRequest(
+    session: ManagedSession,
+    requestId: string,
+    status: RuntimeRequestStatus,
+    value?: unknown,
+  ): Promise<void>;
   stop(session: ManagedSession): Promise<void>;
   events(session: ManagedSession): AsyncIterable<CanonicalRuntimeEvent>;
 }
@@ -28,7 +44,8 @@ export class ManagedRuntimeRegistry {
   readonly #adapters = new Map<string, ManagedRuntimeAdapter>();
 
   register(adapter: ManagedRuntimeAdapter) {
-    if (this.#adapters.has(adapter.runtime)) throw new Error(`Managed runtime already registered: ${adapter.runtime}`);
+    if (this.#adapters.has(adapter.runtime))
+      throw new Error(`Managed runtime already registered: ${adapter.runtime}`);
     this.#adapters.set(adapter.runtime, adapter);
   }
 
@@ -38,5 +55,10 @@ export class ManagedRuntimeRegistry {
     return adapter;
   }
 
-  available() { return [...this.#adapters.values()].map((adapter) => ({ runtime: adapter.runtime, capabilities: adapter.capabilities })); }
+  available() {
+    return [...this.#adapters.values()].map((adapter) => ({
+      runtime: adapter.runtime,
+      capabilities: adapter.capabilities,
+    }));
+  }
 }

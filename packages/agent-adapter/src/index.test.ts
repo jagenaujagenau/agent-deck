@@ -29,7 +29,14 @@ describe("AgentDeckClient", () => {
       },
     });
     const client = new AgentDeckClient({ baseUrl: server.url.origin, token: "secret" });
-    await client.heartbeat({ id: "claude-1", name: "Claude", project: "deck", model: "opus", state: "running", task: "Testing" });
+    await client.heartbeat({
+      id: "claude-1",
+      name: "Claude",
+      project: "deck",
+      model: "opus",
+      state: "running",
+      task: "Testing",
+    });
     expect(captured.authorization).toBe("Bearer secret");
     expect(captured.body).toMatchObject({ id: "claude-1", tokens: 0, costUsd: 0 });
   });
@@ -44,7 +51,9 @@ describe("AgentDeckClient", () => {
         if (url.pathname.endsWith("/commands")) {
           polls += 1;
           if (polls === 1) return Response.json({ error: "restarting" }, { status: 503 });
-          return Response.json({ commands: polls < 3 ? [] : [{ id: "decision-1", action: "approve" }] });
+          return Response.json({
+            commands: polls < 3 ? [] : [{ id: "decision-1", action: "approve" }],
+          });
         }
         if (url.pathname.endsWith("/ack")) acknowledged = url.pathname;
         return Response.json({ ok: true });

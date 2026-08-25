@@ -68,9 +68,7 @@ export function NewTaskDialog({ open, onOpenChange }: NewTaskDialogProps) {
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Create New Task</DialogTitle>
-            <DialogDescription>
-              Add a new task to your Kanban board.
-            </DialogDescription>
+            <DialogDescription>Add a new task to your Kanban board.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">

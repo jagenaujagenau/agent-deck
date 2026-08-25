@@ -97,11 +97,7 @@ export function AgentContextMenu({ agent, children }: AgentContextMenuProps) {
         </ContextMenuContent>
       </ContextMenu>
 
-      <EditAgentConfigDialog
-        agent={agent}
-        open={showEditDialog}
-        onOpenChange={setShowEditDialog}
-      />
+      <EditAgentConfigDialog agent={agent} open={showEditDialog} onOpenChange={setShowEditDialog} />
       <AgentProfileModal
         agentId={agent.id}
         open={showProfileModal}

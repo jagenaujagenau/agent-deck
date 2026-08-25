@@ -1,30 +1,26 @@
-import { Effect } from 'effect';
+import { Effect } from "effect";
 
 export class AgentNotFoundError {
-  readonly _tag = 'AgentNotFoundError';
+  readonly _tag = "AgentNotFoundError";
   constructor(readonly agentId: string) {}
 }
 
 export class TaskNotFoundError {
-  readonly _tag = 'TaskNotFoundError';
+  readonly _tag = "TaskNotFoundError";
   constructor(readonly taskId: string) {}
 }
 
 export class RunNotFoundError {
-  readonly _tag = 'RunNotFoundError';
+  readonly _tag = "RunNotFoundError";
   constructor(readonly runId: string) {}
 }
 
 export class ApiFailureError {
-  readonly _tag = 'ApiFailureError';
+  readonly _tag = "ApiFailureError";
   constructor(readonly message: string) {}
 }
 
-export type ApiError =
-  | AgentNotFoundError
-  | TaskNotFoundError
-  | RunNotFoundError
-  | ApiFailureError;
+export type ApiError = AgentNotFoundError | TaskNotFoundError | RunNotFoundError | ApiFailureError;
 
 /**
  * Simulates a potential failure based on chaos settings
@@ -33,7 +29,7 @@ export type ApiError =
  */
 export const maybeFail = (
   failureRate: number,
-  message = 'Simulated API failure',
+  message = "Simulated API failure",
 ): Effect.Effect<void, ApiFailureError> =>
   Effect.gen(function* () {
     if (Math.random() < failureRate) {
@@ -44,5 +40,4 @@ export const maybeFail = (
 /**
  * Simulates network delay
  */
-export const simulateDelay = (ms: number): Effect.Effect<void> =>
-  Effect.sleep(`${ms} millis`);
+export const simulateDelay = (ms: number): Effect.Effect<void> => Effect.sleep(`${ms} millis`);

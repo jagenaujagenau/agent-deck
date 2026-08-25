@@ -18,11 +18,10 @@ interface EnvironmentVariablesContextType {
   setShowValues: (show: boolean) => void;
 }
 
-const EnvironmentVariablesContext =
-  createContext<EnvironmentVariablesContextType>({
-    showValues: false,
-    setShowValues: () => undefined,
-  });
+const EnvironmentVariablesContext = createContext<EnvironmentVariablesContextType>({
+  showValues: false,
+  setShowValues: () => undefined,
+});
 
 export type EnvironmentVariablesProps = HTMLAttributes<HTMLDivElement> & {
   showValues?: boolean;
@@ -38,8 +37,7 @@ export const EnvironmentVariables = ({
   children,
   ...props
 }: EnvironmentVariablesProps) => {
-  const [internalShowValues, setInternalShowValues] =
-    useState(defaultShowValues);
+  const [internalShowValues, setInternalShowValues] = useState(defaultShowValues);
   const showValues = controlledShowValues ?? internalShowValues;
 
   const setShowValues = (show: boolean) => {
@@ -49,10 +47,7 @@ export const EnvironmentVariables = ({
 
   return (
     <EnvironmentVariablesContext.Provider value={{ showValues, setShowValues }}>
-      <div
-        className={cn("rounded-lg border bg-background", className)}
-        {...props}
-      >
+      <div className={cn("rounded-lg border bg-background", className)} {...props}>
         {children}
       </div>
     </EnvironmentVariablesContext.Provider>
@@ -66,13 +61,7 @@ export const EnvironmentVariablesHeader = ({
   children,
   ...props
 }: EnvironmentVariablesHeaderProps) => (
-  <div
-    className={cn(
-      "flex items-center justify-between border-b px-4 py-3",
-      className
-    )}
-    {...props}
-  >
+  <div className={cn("flex items-center justify-between border-b px-4 py-3", className)} {...props}>
     {children}
   </div>
 );
@@ -129,11 +118,10 @@ interface EnvironmentVariableContextType {
   value: string;
 }
 
-const EnvironmentVariableContext =
-  createContext<EnvironmentVariableContextType>({
-    name: "",
-    value: "",
-  });
+const EnvironmentVariableContext = createContext<EnvironmentVariableContextType>({
+  name: "",
+  value: "",
+});
 
 export type EnvironmentVariableProps = HTMLAttributes<HTMLDivElement> & {
   name: string;
@@ -148,13 +136,7 @@ export const EnvironmentVariable = ({
   ...props
 }: EnvironmentVariableProps) => (
   <EnvironmentVariableContext.Provider value={{ name, value }}>
-    <div
-      className={cn(
-        "flex items-center justify-between gap-4 px-4 py-3",
-        className
-      )}
-      {...props}
-    >
+    <div className={cn("flex items-center justify-between gap-4 px-4 py-3", className)} {...props}>
       {children ?? (
         <>
           <div className="flex items-center gap-2">
@@ -205,16 +187,14 @@ export const EnvironmentVariableValue = ({
   const { value } = useContext(EnvironmentVariableContext);
   const { showValues } = useContext(EnvironmentVariablesContext);
 
-  const displayValue = showValues
-    ? value
-    : "•".repeat(Math.min(value.length, 20));
+  const displayValue = showValues ? value : "•".repeat(Math.min(value.length, 20));
 
   return (
     <span
       className={cn(
         "font-mono text-muted-foreground text-sm",
         !showValues && "select-none",
-        className
+        className,
       )}
       {...props}
     >
@@ -223,9 +203,7 @@ export const EnvironmentVariableValue = ({
   );
 };
 
-export type EnvironmentVariableCopyButtonProps = ComponentProps<
-  typeof Button
-> & {
+export type EnvironmentVariableCopyButtonProps = ComponentProps<typeof Button> & {
   onCopy?: () => void;
   onError?: (error: Error) => void;
   timeout?: number;

@@ -1,8 +1,8 @@
-import { create } from 'zustand';
-import { nanoid } from 'nanoid';
-import { runEffect } from '@/lib/effect-runtime';
-import { mockClient } from '@/api/client';
-import type { Message, StreamChunk } from '@/types/message';
+import { create } from "zustand";
+import { nanoid } from "nanoid";
+import { runEffect } from "@/lib/effect-runtime";
+import { mockClient } from "@/api/client";
+import type { Message, StreamChunk } from "@/types/message";
 
 interface StreamingState {
   isStreaming: boolean;
@@ -40,7 +40,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       }));
     } catch (error) {
-      console.error('Failed to fetch messages:', error);
+      console.error("Failed to fetch messages:", error);
     }
   },
 
@@ -87,8 +87,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const assistantMessage: Message = {
         id: messageId,
         agentId,
-        role: 'assistant',
-        content: '',
+        role: "assistant",
+        content: "",
         createdAt: new Date(),
       };
 
@@ -100,7 +100,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             {
               id: nanoid(),
               agentId,
-              role: 'user',
+              role: "user",
               content,
               createdAt: new Date(),
             },
@@ -111,7 +111,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Read stream
       const reader = stream.getReader();
-      let accumulatedContent = '';
+      let accumulatedContent = "";
 
       try {
         while (true) {
@@ -129,14 +129,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           set((state) => {
             const messages = state.messages[agentId] || [];
             const lastMessage = messages[messages.length - 1];
-            if (lastMessage && lastMessage.role === 'assistant') {
+            if (lastMessage && lastMessage.role === "assistant") {
               return {
                 messages: {
                   ...state.messages,
                   [agentId]: messages.map((m) =>
-                    m.id === messageId
-                      ? { ...m, content: accumulatedContent }
-                      : m,
+                    m.id === messageId ? { ...m, content: accumulatedContent } : m,
                   ),
                 },
               };
@@ -163,7 +161,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       onComplete?.();
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error("Failed to send message:", error);
       set((state) => ({
         streaming: {
           ...state.streaming,

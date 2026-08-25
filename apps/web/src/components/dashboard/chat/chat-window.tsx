@@ -5,13 +5,7 @@ import { Rnd } from "react-rnd";
 import type { Agent } from "@/types/agent";
 import { useWindowsStore, useChatStore } from "@/store";
 import { Button } from "@/components/ui/button";
-import {
-  XIcon,
-  MinusIcon,
-  SquareIcon,
-  PauseIcon,
-  PlayIcon,
-} from "lucide-react";
+import { XIcon, MinusIcon, SquareIcon, PauseIcon, PlayIcon } from "lucide-react";
 import { MessageList } from "./message-list";
 import { PromptInput } from "@/components/ai-elements/prompt-input";
 import { PromptInputTextarea } from "@/components/ai-elements/prompt-input";
@@ -26,9 +20,7 @@ interface ChatWindowProps {
 
 export function ChatWindow({ agent }: ChatWindowProps) {
   const window = useWindowsStore((state) => state.windows[agent.id]);
-  const updateWindowPosition = useWindowsStore(
-    (state) => state.updateWindowPosition
-  );
+  const updateWindowPosition = useWindowsStore((state) => state.updateWindowPosition);
   const focusWindow = useWindowsStore((state) => state.focusWindow);
   const closeWindow = useWindowsStore((state) => state.closeWindow);
   const minimizeWindow = useWindowsStore((state) => state.minimizeWindow);
@@ -68,7 +60,7 @@ export function ChatWindow({ agent }: ChatWindowProps) {
       undefined, // onChunk
       () => {
         fetchMessages(agent.id);
-      }
+      },
     );
   };
 
@@ -138,9 +130,7 @@ export function ChatWindow({ agent }: ChatWindowProps) {
         >
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">{agent.name}</h3>
-            {isStreaming && (
-              <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
-            )}
+            {isStreaming && <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />}
           </div>
           <div className="flex items-center gap-1">
             {isStreaming && (

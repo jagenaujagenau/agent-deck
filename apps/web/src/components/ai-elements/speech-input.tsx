@@ -3,13 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LoaderIcon, MicIcon, SquareIcon } from "lucide-react";
-import {
-  type ComponentProps,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ComponentProps, useCallback, useEffect, useRef, useState } from "react";
 
 interface SpeechRecognition extends EventTarget {
   continuous: boolean;
@@ -19,12 +13,8 @@ interface SpeechRecognition extends EventTarget {
   stop(): void;
   onstart: ((this: SpeechRecognition, ev: Event) => void) | null;
   onend: ((this: SpeechRecognition, ev: Event) => void) | null;
-  onresult:
-    | ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => void)
-    | null;
-  onerror:
-    | ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => void)
-    | null;
+  onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => void) | null;
+  onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => void) | null;
 }
 
 interface SpeechRecognitionEvent extends Event {
@@ -105,9 +95,7 @@ export const SpeechInput = ({
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [mode, setMode] = useState<SpeechInputMode>("none");
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(
-    null
-  );
+  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -123,8 +111,7 @@ export const SpeechInput = ({
       return;
     }
 
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const speechRecognition = new SpeechRecognition();
 
     speechRecognition.continuous = true;
@@ -172,9 +159,7 @@ export const SpeechInput = ({
   // Start MediaRecorder recording
   const startMediaRecorder = useCallback(async () => {
     if (!onAudioRecorded) {
-      console.warn(
-        "SpeechInput: onAudioRecorded callback is required for MediaRecorder fallback"
-      );
+      console.warn("SpeechInput: onAudioRecorded callback is required for MediaRecorder fallback");
       return;
     }
 
@@ -285,7 +270,7 @@ export const SpeechInput = ({
           isListening
             ? "bg-destructive text-white hover:bg-destructive/80 hover:text-white"
             : "bg-primary text-primary-foreground hover:bg-primary/80 hover:text-primary-foreground",
-          className
+          className,
         )}
         disabled={isDisabled}
         onClick={toggleListening}

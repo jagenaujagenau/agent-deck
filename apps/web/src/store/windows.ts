@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 
 export interface WindowPosition {
   x: number;
@@ -14,10 +14,7 @@ interface WindowsState {
   maxZIndex: number;
   openWindow: (agentId: string, position?: Partial<WindowPosition>) => void;
   closeWindow: (agentId: string) => void;
-  updateWindowPosition: (
-    agentId: string,
-    position: Partial<WindowPosition>,
-  ) => void;
+  updateWindowPosition: (agentId: string, position: Partial<WindowPosition>) => void;
   focusWindow: (agentId: string) => void;
   minimizeWindow: (agentId: string) => void;
   restoreWindow: (agentId: string) => void;

@@ -21,11 +21,7 @@ interface AgentProfileModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function AgentProfileModal({
-  agentId,
-  open,
-  onOpenChange,
-}: AgentProfileModalProps) {
+export function AgentProfileModal({ agentId, open, onOpenChange }: AgentProfileModalProps) {
   const agents = useAgentsStore((state) => state.agents);
   const agent = agents.find((a) => a.id === agentId);
   const [stats, setStats] = useState<AgentProfileStats | null>(null);
@@ -86,31 +82,19 @@ export function AgentProfileModal({
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 border rounded-lg">
                     <div className="text-2xl font-bold">{stats.totalRuns}</div>
-                    <div className="text-xs text-muted-foreground">
-                      Total Runs
-                    </div>
+                    <div className="text-xs text-muted-foreground">Total Runs</div>
                   </div>
                   <div className="p-4 border rounded-lg">
-                    <div className="text-2xl font-bold text-green-600">
-                      {stats.successfulRuns}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Successful
-                    </div>
+                    <div className="text-2xl font-bold text-green-600">{stats.successfulRuns}</div>
+                    <div className="text-xs text-muted-foreground">Successful</div>
                   </div>
                   <div className="p-4 border rounded-lg">
-                    <div className="text-2xl font-bold text-red-600">
-                      {stats.failedRuns}
-                    </div>
+                    <div className="text-2xl font-bold text-red-600">{stats.failedRuns}</div>
                     <div className="text-xs text-muted-foreground">Failed</div>
                   </div>
                   <div className="p-4 border rounded-lg">
-                    <div className="text-2xl font-bold">
-                      {stats.tasksCompleted}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Tasks Completed
-                    </div>
+                    <div className="text-2xl font-bold">{stats.tasksCompleted}</div>
+                    <div className="text-xs text-muted-foreground">Tasks Completed</div>
                   </div>
                 </div>
               </div>
@@ -119,17 +103,11 @@ export function AgentProfileModal({
                 <h3 className="text-sm font-semibold mb-4">Performance</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      Total Tokens Used:
-                    </span>
-                    <span className="font-medium">
-                      {stats.totalTokensUsed.toLocaleString()}
-                    </span>
+                    <span className="text-muted-foreground">Total Tokens Used:</span>
+                    <span className="font-medium">{stats.totalTokensUsed.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      Average Response Time:
-                    </span>
+                    <span className="text-muted-foreground">Average Response Time:</span>
                     <span className="font-medium">
                       {stats.averageResponseTime > 0
                         ? `${(stats.averageResponseTime / 1000).toFixed(2)}s`

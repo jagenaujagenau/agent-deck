@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash } from "node:crypto";
 
 /**
  * A stable identity for one agent's rendered state, used to decide whether a
@@ -6,4 +6,4 @@ import { createHash } from "node:crypto"
  * cheaper than resending the agent.
  */
 export const agentFingerprint = (agent: Record<string, unknown>): string =>
-  createHash("sha1").update(JSON.stringify(agent)).digest("base64")
+  createHash("sha1").update(JSON.stringify(agent)).digest("base64");

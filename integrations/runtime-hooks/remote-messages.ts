@@ -10,7 +10,11 @@ export type CommandQueue = {
 };
 
 export function isRemoteMessage(command: RemoteCommand): boolean {
-  return MESSAGE_ACTIONS.has(command.action) && typeof command.value === "string" && command.value.trim().length > 0;
+  return (
+    MESSAGE_ACTIONS.has(command.action) &&
+    typeof command.value === "string" &&
+    command.value.trim().length > 0
+  );
 }
 
 /**
@@ -68,6 +72,9 @@ export function queuedMessageNotice(count: number): string | undefined {
 }
 
 /** Counts undelivered messages without acknowledging any — only the Stop hook may drain. */
-export async function countQueuedMessages(queue: Pick<CommandQueue, "commands">, agentId: string): Promise<number> {
+export async function countQueuedMessages(
+  queue: Pick<CommandQueue, "commands">,
+  agentId: string,
+): Promise<number> {
   return (await queue.commands(agentId)).filter(isRemoteMessage).length;
 }

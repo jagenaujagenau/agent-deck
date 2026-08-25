@@ -1,4 +1,7 @@
-import { requiresApproval, type ApprovalMode } from "../../packages/agent-adapter/src/approval-policy";
+import {
+  requiresApproval,
+  type ApprovalMode,
+} from "../../packages/agent-adapter/src/approval-policy";
 
 const lifecycleNames = new Map([
   ["sessionstart", "SessionStart"],
@@ -24,7 +27,10 @@ export function shouldRequestRemoteApproval(
   toolInput: Record<string, unknown>,
   approvalMode: ApprovalMode,
 ): boolean {
-  return requiresApproval(toolName, toolInput, approvalMode) && (runtime !== "claude" || shouldUseAgentDeckApproval(permissionMode));
+  return (
+    requiresApproval(toolName, toolInput, approvalMode) &&
+    (runtime !== "claude" || shouldUseAgentDeckApproval(permissionMode))
+  );
 }
 
 export function canonicalLifecycleEvent(value: string): string {

@@ -14,7 +14,11 @@ export type UnifiedDiffOptions = {
  * true line numbers instead of a wall of `+`. Returns "" when nothing changed, and null when the
  * inputs are too large or too dissimilar to diff cheaply.
  */
-export function unifiedDiff(before: string, after: string, options: UnifiedDiffOptions = {}): string | null {
+export function unifiedDiff(
+  before: string,
+  after: string,
+  options: UnifiedDiffOptions = {},
+): string | null {
   const context = options.context ?? 3;
   const maxEdits = options.maxEdits ?? 2_000;
   const maxLines = options.maxLines ?? 20_000;
@@ -33,9 +37,14 @@ export function unifiedDiff(before: string, after: string, options: UnifiedDiffO
     suffix < a.length - prefix &&
     suffix < b.length - prefix &&
     a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
-  ) suffix += 1;
+  )
+    suffix += 1;
 
-  const middle = diffLines(a.slice(prefix, a.length - suffix), b.slice(prefix, b.length - suffix), maxEdits);
+  const middle = diffLines(
+    a.slice(prefix, a.length - suffix),
+    b.slice(prefix, b.length - suffix),
+    maxEdits,
+  );
   if (!middle) return null;
 
   const ops: Op[] = [
@@ -70,11 +79,15 @@ function diffLines(a: string[], b: string[], maxEdits: number): Op[] | null {
   for (let d = 0; d <= limit; d += 1) {
     trace.push(v.slice());
     for (let k = -d; k <= d; k += 2) {
-      let x = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])
-        ? v[offset + k + 1]
-        : v[offset + k - 1] + 1;
+      let x =
+        k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])
+          ? v[offset + k + 1]
+          : v[offset + k - 1] + 1;
       let y = x - k;
-      while (x < n && y < m && a[x] === b[y]) { x += 1; y += 1; }
+      while (x < n && y < m && a[x] === b[y]) {
+        x += 1;
+        y += 1;
+      }
       v[offset + k] = x;
       if (x >= n && y >= m) return backtrack(a, b, trace, d, offset);
     }
@@ -89,16 +102,36 @@ function backtrack(a: string[], b: string[], trace: Int32Array[], d: number, off
   for (let step = d; step > 0; step -= 1) {
     const v = trace[step];
     const k = x - y;
-    const previousK = k === -step || (k !== step && v[offset + k - 1] < v[offset + k + 1]) ? k + 1 : k - 1;
+    const previousK =
+      k === -step || (k !== step && v[offset + k - 1] < v[offset + k + 1]) ? k + 1 : k - 1;
     const previousX = v[offset + previousK];
     const previousY = previousX - previousK;
-    while (x > previousX && y > previousY) { x -= 1; y -= 1; reversed.push({ kind: "eq", text: a[x] }); }
-    if (x > previousX) { x -= 1; reversed.push({ kind: "del", text: a[x] }); }
-    else if (y > previousY) { y -= 1; reversed.push({ kind: "ins", text: b[y] }); }
+    while (x > previousX && y > previousY) {
+      x -= 1;
+      y -= 1;
+      reversed.push({ kind: "eq", text: a[x] });
+    }
+    if (x > previousX) {
+      x -= 1;
+      reversed.push({ kind: "del", text: a[x] });
+    } else if (y > previousY) {
+      y -= 1;
+      reversed.push({ kind: "ins", text: b[y] });
+    }
   }
-  while (x > 0 && y > 0) { x -= 1; y -= 1; reversed.push({ kind: "eq", text: a[x] }); }
-  while (x > 0) { x -= 1; reversed.push({ kind: "del", text: a[x] }); }
-  while (y > 0) { y -= 1; reversed.push({ kind: "ins", text: b[y] }); }
+  while (x > 0 && y > 0) {
+    x -= 1;
+    y -= 1;
+    reversed.push({ kind: "eq", text: a[x] });
+  }
+  while (x > 0) {
+    x -= 1;
+    reversed.push({ kind: "del", text: a[x] });
+  }
+  while (y > 0) {
+    y -= 1;
+    reversed.push({ kind: "ins", text: b[y] });
+  }
   return reversed.reverse();
 }
 
@@ -122,7 +155,11 @@ function formatHunks(ops: Op[], context: number): string {
   let end = changed[0];
   for (const index of changed.slice(1)) {
     if (index - end <= context * 2) end = index;
-    else { groups.push([start, end]); start = index; end = index; }
+    else {
+      groups.push([start, end]);
+      start = index;
+      end = index;
+    }
   }
   groups.push([start, end]);
 
@@ -134,10 +171,13 @@ function formatHunks(ops: Op[], context: number): string {
     const oldCount = slice.filter((entry) => entry.kind !== "ins").length;
     const newCount = slice.filter((entry) => entry.kind !== "del").length;
     // A pure insertion sits *after* old line N, which unified format writes as position N with length 0.
-    const oldStart = oldCount === 0 ? slice[0].oldLine - 1 : slice.find((entry) => entry.kind !== "ins")!.oldLine;
-    const newStart = newCount === 0 ? slice[0].newLine - 1 : slice.find((entry) => entry.kind !== "del")!.newLine;
+    const oldStart =
+      oldCount === 0 ? slice[0].oldLine - 1 : slice.find((entry) => entry.kind !== "ins")!.oldLine;
+    const newStart =
+      newCount === 0 ? slice[0].newLine - 1 : slice.find((entry) => entry.kind !== "del")!.newLine;
     out.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
-    for (const entry of slice) out.push(`${entry.kind === "del" ? "-" : entry.kind === "ins" ? "+" : " "}${entry.text}`);
+    for (const entry of slice)
+      out.push(`${entry.kind === "del" ? "-" : entry.kind === "ins" ? "+" : " "}${entry.text}`);
   }
   return out.join("\n");
 }

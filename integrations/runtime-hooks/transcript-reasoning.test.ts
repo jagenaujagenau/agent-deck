@@ -2,18 +2,30 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readConversationBacklog, readNewReasoning, type TranscriptCursor } from "./transcript-reasoning";
+import {
+  readConversationBacklog,
+  readNewReasoning,
+  type TranscriptCursor,
+} from "./transcript-reasoning";
 
 function transcript(...entries: unknown[]) {
   const path = join(mkdtempSync(join(tmpdir(), "agent-deck-transcript-")), "session.jsonl");
-  writeFileSync(path, entries.map((entry) => JSON.stringify(entry)).join("\n") + (entries.length ? "\n" : ""));
+  writeFileSync(
+    path,
+    entries.map((entry) => JSON.stringify(entry)).join("\n") + (entries.length ? "\n" : ""),
+  );
   return path;
 }
 
 const thinking = (uuid: string, text: string) => ({
   type: "assistant",
   uuid,
-  message: { content: [{ type: "thinking", thinking: text }, { type: "text", text: "visible" }] },
+  message: {
+    content: [
+      { type: "thinking", thinking: text },
+      { type: "text", text: "visible" },
+    ],
+  },
 });
 
 describe("readNewReasoning", () => {
@@ -43,11 +55,16 @@ describe("readNewReasoning", () => {
 
     // Em dashes and arrows are multi-byte: a character-indexed cursor would slice mid-sequence and
     // hand JSON.parse garbage from here on.
-    appendFileSync(path, `${JSON.stringify(thinking("b", "first — with arrows → and emoji 🎯"))}\n`);
+    appendFileSync(
+      path,
+      `${JSON.stringify(thinking("b", "first — with arrows → and emoji 🎯"))}\n`,
+    );
     appendFileSync(path, `${JSON.stringify(thinking("c", "second thought"))}\n`);
 
-    expect(readNewReasoning(path, cursor, "s").map((b) => b.text))
-      .toEqual(["first — with arrows → and emoji 🎯", "second thought"]);
+    expect(readNewReasoning(path, cursor, "s").map((b) => b.text)).toEqual([
+      "first — with arrows → and emoji 🎯",
+      "second thought",
+    ]);
   });
 
   test("a half-written final line is left for the next pass", () => {
@@ -90,7 +107,10 @@ describe("readNewReasoning", () => {
   });
 
   test("entries without thinking, and a missing file, yield nothing", () => {
-    const path = transcript({ type: "user", message: { content: "hi" } }, { type: "assistant", message: { content: [{ type: "text", text: "no thinking" }] } });
+    const path = transcript(
+      { type: "user", message: { content: "hi" } },
+      { type: "assistant", message: { content: [{ type: "text", text: "no thinking" }] } },
+    );
     const cursor: TranscriptCursor = { offset: 0 };
     expect(readNewReasoning(path, cursor, "s")).toEqual([]);
     expect(readNewReasoning(join(path, "missing.jsonl"), {}, "s")).toEqual([]);
@@ -101,11 +121,32 @@ describe("conversation sync", () => {
   test("reads what the terminal shows: typed messages and spoken replies, not tool traffic", () => {
     const path = transcript(
       { type: "user", uuid: "u1", message: { role: "user", content: "fix the flaky test" } },
-      { type: "assistant", uuid: "a1", message: { content: [{ type: "thinking", thinking: "hidden" }, { type: "text", text: "On it." }] } },
+      {
+        type: "assistant",
+        uuid: "a1",
+        message: {
+          content: [
+            { type: "thinking", thinking: "hidden" },
+            { type: "text", text: "On it." },
+          ],
+        },
+      },
       // A tool result is fed back as a user entry; it is not something the person said.
-      { type: "user", uuid: "u2", message: { role: "user", content: [{ type: "tool_result", content: "ok" }] } },
-      { type: "assistant", uuid: "a2", message: { content: [{ type: "tool_use", name: "Bash", input: {} }] } },
-      { type: "user", uuid: "u3", message: { role: "user", content: [{ type: "text", text: "thanks" }] } },
+      {
+        type: "user",
+        uuid: "u2",
+        message: { role: "user", content: [{ type: "tool_result", content: "ok" }] },
+      },
+      {
+        type: "assistant",
+        uuid: "a2",
+        message: { content: [{ type: "tool_use", name: "Bash", input: {} }] },
+      },
+      {
+        type: "user",
+        uuid: "u3",
+        message: { role: "user", content: [{ type: "text", text: "thanks" }] },
+      },
     );
 
     expect(readConversationBacklog(path, "s").map((m) => [m.role, m.text])).toEqual([
@@ -126,14 +167,25 @@ describe("conversation sync", () => {
   });
 
   test("message ids come from transcript uuids, so republishing cannot duplicate a turn", () => {
-    const path = transcript({ type: "user", uuid: "u1", message: { role: "user", content: "hello" } });
+    const path = transcript({
+      type: "user",
+      uuid: "u1",
+      message: { role: "user", content: "hello" },
+    });
     expect(readConversationBacklog(path, "key")[0].id).toBe("chat:key:u1");
-    expect(readConversationBacklog(path, "key")[0].id).toBe(readConversationBacklog(path, "key")[0].id);
+    expect(readConversationBacklog(path, "key")[0].id).toBe(
+      readConversationBacklog(path, "key")[0].id,
+    );
   });
 
   test("sidechain and meta entries are not part of the conversation", () => {
     const path = transcript(
-      { type: "user", uuid: "m1", isMeta: true, message: { role: "user", content: "<command-name>/clear</command-name>" } },
+      {
+        type: "user",
+        uuid: "m1",
+        isMeta: true,
+        message: { role: "user", content: "<command-name>/clear</command-name>" },
+      },
       { type: "user", uuid: "u1", message: { role: "user", content: "real message" } },
     );
     expect(readConversationBacklog(path, "s").map((m) => m.text)).toEqual(["real message"]);

@@ -1,7 +1,19 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { basename } from "node:path";
-import { AgentDeckClient, clip, type AgentState, type EventKind, type RemoteCommand } from "../../packages/agent-adapter/src/index";
-import { describeToolCall, normalizeApprovalMode, requiresApproval, usesRemoteApproval, type ApprovalMode } from "./approval-policy";
+import {
+  AgentDeckClient,
+  clip,
+  type AgentState,
+  type EventKind,
+  type RemoteCommand,
+} from "../../packages/agent-adapter/src/index";
+import {
+  describeToolCall,
+  normalizeApprovalMode,
+  requiresApproval,
+  usesRemoteApproval,
+  type ApprovalMode,
+} from "./approval-policy";
 import { mutatesFile, readFileForDiff } from "../../packages/agent-adapter/src/file-snapshot";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
 
@@ -12,14 +24,21 @@ const COMMAND_INTERVAL_MS = 2_000;
  * prompt cannot appear while this blocks, so a long window hides the question from whoever is at the
  * terminal. Keep it short by default; raise it when nobody is at the machine, or 0 to never wait.
  */
-const QUESTION_TIMEOUT_MS = Math.max(0, Number(process.env.AGENT_DECK_QUESTION_TIMEOUT_MS ?? 30_000) || 0);
+const QUESTION_TIMEOUT_MS = Math.max(
+  0,
+  Number(process.env.AGENT_DECK_QUESTION_TIMEOUT_MS ?? 30_000) || 0,
+);
 
 /**
  * `/reload` builds a fresh module scope, so the outgoing extension instance is unreachable through
  * module state. A well-known global is the only channel left for handing the live session over.
  */
 const RELOAD_HANDOFF = Symbol.for("agent-deck.pi.reload-handoff");
-type ReloadHandoff = { owner: string; stop: () => void; context: () => ExtensionContext | undefined };
+type ReloadHandoff = {
+  owner: string;
+  stop: () => void;
+  context: () => ExtensionContext | undefined;
+};
 const handoffSlot = globalThis as typeof globalThis & { [RELOAD_HANDOFF]?: ReloadHandoff };
 
 const bridge = new AgentDeckClient();
@@ -30,18 +49,26 @@ const MAX_PENDING_FILE_EDITS = 64;
 type UsageTotals = { tokens: number; costUsd: number };
 
 function clipMultiline(value: unknown, limit = 64_000): string {
-  const text = String(value ?? "").replace(/\r\n?/g, "\n").trim();
+  const text = String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .trim();
   return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-function contentOfType(content: unknown, type: "text" | "thinking", field: "text" | "thinking"): string {
+function contentOfType(
+  content: unknown,
+  type: "text" | "thinking",
+  field: "text" | "thinking",
+): string {
   if (typeof content === "string") return type === "text" ? content : "";
   if (!Array.isArray(content)) return "";
-  return content.flatMap((part) => {
-    if (!part || typeof part !== "object") return [];
-    const item = part as Record<string, unknown>;
-    return item.type === type && typeof item[field] === "string" ? [item[field] as string] : [];
-  }).join("\n");
+  return content
+    .flatMap((part) => {
+      if (!part || typeof part !== "object") return [];
+      const item = part as Record<string, unknown>;
+      return item.type === type && typeof item[field] === "string" ? [item[field] as string] : [];
+    })
+    .join("\n");
 }
 
 const textContent = (content: unknown) => contentOfType(content, "text", "text");
@@ -89,17 +116,20 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
   let streamingReasoning = "";
   let lastStreamingPublishAt = 0;
   let lastReasoningPublishAt = 0;
-  let pendingApproval: {
-    id: string;
-    toolName: string;
-    detail: string;
-    createdAt: string;
-    expiresAt: string;
-    decide: (approved: boolean) => void;
-    timeout: ReturnType<typeof setTimeout>;
-  } | undefined;
+  let pendingApproval:
+    | {
+        id: string;
+        toolName: string;
+        detail: string;
+        createdAt: string;
+        expiresAt: string;
+        decide: (approved: boolean) => void;
+        timeout: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
 
-  const agentId = () => ctx?.sessionManager.getSessionId() ?? process.env.PI_SESSION_ID ?? "pi-unknown";
+  const agentId = () =>
+    ctx?.sessionManager.getSessionId() ?? process.env.PI_SESSION_ID ?? "pi-unknown";
 
   const modelName = () => {
     const model = ctx?.model;
@@ -125,45 +155,86 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
           tokens: usage.tokens,
           processedTokens: usage.tokens,
           costUsd: usage.costUsd,
-          capabilities: ["pause", "resume", "stop", ...(usesRemoteApproval(approvalMode) ? ["approve", "reject"] : []), "prompt", "steer", "follow_up"],
-          pendingApproval: pendingApproval ? {
-            id: pendingApproval.id,
-            tool: pendingApproval.toolName,
-            detail: pendingApproval.detail,
-            createdAt: pendingApproval.createdAt,
-            expiresAt: pendingApproval.expiresAt,
-          } : undefined,
+          capabilities: [
+            "pause",
+            "resume",
+            "stop",
+            ...(usesRemoteApproval(approvalMode) ? ["approve", "reject"] : []),
+            "prompt",
+            "steer",
+            "follow_up",
+          ],
+          pendingApproval: pendingApproval
+            ? {
+                id: pendingApproval.id,
+                tool: pendingApproval.toolName,
+                detail: pendingApproval.detail,
+                createdAt: pendingApproval.createdAt,
+                expiresAt: pendingApproval.expiresAt,
+              }
+            : undefined,
         }),
       });
       connected = true;
-      ctx.ui.setStatus("agent-deck", ctx.ui.theme.fg("success", `● Agent Deck · gate ${approvalMode}`));
+      ctx.ui.setStatus(
+        "agent-deck",
+        ctx.ui.theme.fg("success", `● Agent Deck · gate ${approvalMode}`),
+      );
     } catch {
       if (connected) connected = false;
-      ctx.ui.setStatus("agent-deck", ctx.ui.theme.fg("warning", `○ Agent Deck · gate ${approvalMode}`));
+      ctx.ui.setStatus(
+        "agent-deck",
+        ctx.ui.theme.fg("warning", `○ Agent Deck · gate ${approvalMode}`),
+      );
     }
   };
 
-  const publishRuntime = (type: string, payload: Record<string, unknown>, refs: { id?: string; turnId?: string; itemId?: string; requestId?: string } = {}) => {
+  const publishRuntime = (
+    type: string,
+    payload: Record<string, unknown>,
+    refs: { id?: string; turnId?: string; itemId?: string; requestId?: string } = {},
+  ) => {
     if (!ctx) return Promise.resolve();
     return bridgeRequest(`/agents/${encodeURIComponent(agentId())}/runtime-events`, {
       method: "POST",
       body: JSON.stringify({
-        id: refs.id ?? crypto.randomUUID(), agentId: agentId(), type, createdAt: new Date().toISOString(), payload,
-        ...(refs.turnId ? { turnId: refs.turnId } : {}), ...(refs.itemId ? { itemId: refs.itemId } : {}), ...(refs.requestId ? { requestId: refs.requestId } : {}),
+        id: refs.id ?? crypto.randomUUID(),
+        agentId: agentId(),
+        type,
+        createdAt: new Date().toISOString(),
+        payload,
+        ...(refs.turnId ? { turnId: refs.turnId } : {}),
+        ...(refs.itemId ? { itemId: refs.itemId } : {}),
+        ...(refs.requestId ? { requestId: refs.requestId } : {}),
       }),
     });
   };
 
-  const publishEvent = (kind: EventKind, summary: string, detail?: string, id?: string, extra: Record<string, unknown> = {}) => {
+  const publishEvent = (
+    kind: EventKind,
+    summary: string,
+    detail?: string,
+    id?: string,
+    extra: Record<string, unknown> = {},
+  ) => {
     if (!ctx) return;
     void bridgeRequest(`/agents/${encodeURIComponent(agentId())}/events`, {
       method: "POST",
-      body: JSON.stringify({ id, kind, summary: clip(summary, 120), detail: detail ? clipMultiline(detail) : undefined, ...extra }),
+      body: JSON.stringify({
+        id,
+        kind,
+        summary: clip(summary, 120),
+        detail: detail ? clipMultiline(detail) : undefined,
+        ...extra,
+      }),
     }).catch(() => {});
   };
 
   const acknowledge = async (commandId: string) => {
-    await bridgeRequest(`/agents/${encodeURIComponent(agentId())}/commands/${encodeURIComponent(commandId)}/ack`, { method: "POST" });
+    await bridgeRequest(
+      `/agents/${encodeURIComponent(agentId())}/commands/${encodeURIComponent(commandId)}/ack`,
+      { method: "POST" },
+    );
   };
 
   const settleApproval = (approved: boolean) => {
@@ -175,7 +246,11 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     return true;
   };
 
-  const requestApproval = async (toolName: string, detail: string, nextCtx: ExtensionContext): Promise<boolean> => {
+  const requestApproval = async (
+    toolName: string,
+    detail: string,
+    nextCtx: ExtensionContext,
+  ): Promise<boolean> => {
     if (pendingApproval) return false;
     adopt(nextCtx);
     const previousTask = task;
@@ -202,13 +277,31 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     });
     publishEvent("warning", task, detail, approvalId, { tool: toolName });
     await heartbeat();
-    await publishRuntime("request.opened", { kind: "approval", tool: toolName, detail, createdAt, expiresAt: pendingApproval!.expiresAt }, { id: `request-opened:${approvalId}`, requestId: approvalId, turnId: activeTurnId });
+    await publishRuntime(
+      "request.opened",
+      {
+        kind: "approval",
+        tool: toolName,
+        detail,
+        createdAt,
+        expiresAt: pendingApproval!.expiresAt,
+      },
+      { id: `request-opened:${approvalId}`, requestId: approvalId, turnId: activeTurnId },
+    );
     const approved = await approvedPromise;
 
     state = approved ? "running" : "idle";
     task = previousTask;
-    await publishRuntime("request.resolved", { status: approved ? "approved" : "rejected" }, { id: `request-resolved:${approvalId}`, requestId: approvalId, turnId: activeTurnId }).catch(() => {});
-    publishEvent(approved ? "output" : "warning", approved ? `Approved: ${toolName}` : `Rejected: ${toolName}`, detail);
+    await publishRuntime(
+      "request.resolved",
+      { status: approved ? "approved" : "rejected" },
+      { id: `request-resolved:${approvalId}`, requestId: approvalId, turnId: activeTurnId },
+    ).catch(() => {});
+    publishEvent(
+      approved ? "output" : "warning",
+      approved ? `Approved: ${toolName}` : `Rejected: ${toolName}`,
+      detail,
+    );
     void heartbeat();
     return approved;
   };
@@ -237,7 +330,10 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
         case "resume":
           state = "running";
           task = "Resuming interrupted work";
-          pi.sendUserMessage("Continue from where you were interrupted.", ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+          pi.sendUserMessage(
+            "Continue from where you were interrupted.",
+            ctx.isIdle() ? undefined : { deliverAs: "followUp" },
+          );
           break;
         case "stop":
           settleApproval(false);
@@ -249,7 +345,10 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
           if (!settleApproval(true)) {
             state = "running";
             task = "Remote approval received";
-            pi.sendUserMessage("Approved from Agent Deck. Proceed.", ctx.isIdle() ? undefined : { deliverAs: "steer" });
+            pi.sendUserMessage(
+              "Approved from Agent Deck. Proceed.",
+              ctx.isIdle() ? undefined : { deliverAs: "steer" },
+            );
           }
           break;
         case "reject":
@@ -257,14 +356,21 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
             ctx.abort();
             state = "idle";
             task = "Remote request rejected";
-            pi.sendUserMessage("Rejected from Agent Deck. Do not perform the pending action.", ctx.isIdle() ? undefined : { deliverAs: "steer" });
+            pi.sendUserMessage(
+              "Rejected from Agent Deck. Do not perform the pending action.",
+              ctx.isIdle() ? undefined : { deliverAs: "steer" },
+            );
           }
           break;
       }
       publishEvent("output", `Remote command: ${command.action}`, command.value);
     } catch (error) {
       state = "error";
-      publishEvent("error", `Remote command failed: ${command.action}`, error instanceof Error ? error.message : String(error));
+      publishEvent(
+        "error",
+        `Remote command failed: ${command.action}`,
+        error instanceof Error ? error.message : String(error),
+      );
     } finally {
       await acknowledge(command.id).catch(() => {});
       void heartbeat();
@@ -275,7 +381,9 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     if (!ctx || polling) return;
     polling = true;
     try {
-      const result = await bridgeRequest<{ commands: RemoteCommand[] }>(`/agents/${encodeURIComponent(agentId())}/commands`);
+      const result = await bridgeRequest<{ commands: RemoteCommand[] }>(
+        `/agents/${encodeURIComponent(agentId())}/commands`,
+      );
       for (const command of result.commands) await executeCommand(command);
     } catch {
       // Heartbeats own the visible connection status; command polling is best-effort.
@@ -300,7 +408,8 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
    */
   const adopt = (nextCtx: ExtensionContext) => {
     ctx = nextCtx;
-    if (!heartbeatTimer) heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_INTERVAL_MS);
+    if (!heartbeatTimer)
+      heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_INTERVAL_MS);
     if (!commandTimer) commandTimer = setInterval(() => void pollCommands(), COMMAND_INTERVAL_MS);
   };
 
@@ -352,24 +461,43 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     adopt(nextCtx);
     const input = event.input as Record<string, unknown>;
     if (/ask.?user.?question/i.test(event.toolName)) {
-      const questions = Array.isArray(input.questions) ? input.questions as Array<Record<string, unknown>> : [];
+      const questions = Array.isArray(input.questions)
+        ? (input.questions as Array<Record<string, unknown>>)
+        : [];
       const first = questions[0] ?? input;
       const question = String(first.question ?? first.header ?? "Agent needs your answer");
-      const options = Array.isArray(first.options) ? first.options.map((option) => typeof option === "object" && option ? String((option as Record<string, unknown>).label ?? "") : String(option)).filter(Boolean) : [];
+      const options = Array.isArray(first.options)
+        ? first.options
+            .map((option) =>
+              typeof option === "object" && option
+                ? String((option as Record<string, unknown>).label ?? "")
+                : String(option),
+            )
+            .filter(Boolean)
+        : [];
       if (options.length === 0 || QUESTION_TIMEOUT_MS === 0) {
         // No preset choices means nothing a phone or watch could safely answer with — show it and
         // let the host terminal take it.
-        publishEvent("question", "Question", question, undefined, { tool: event.toolName, options });
+        publishEvent("question", "Question", question, undefined, {
+          tool: event.toolName,
+          options,
+        });
         return;
       }
       const questionId = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + QUESTION_TIMEOUT_MS).toISOString();
       state = "waiting";
       task = clip(question, 180);
-      void publishRuntime("user-input.requested", { kind: "user-input", question, options, createdAt: new Date().toISOString(), expiresAt }, { id: `user-input-requested:${questionId}`, requestId: questionId, turnId: activeTurnId }).catch(() => {});
+      void publishRuntime(
+        "user-input.requested",
+        { kind: "user-input", question, options, createdAt: new Date().toISOString(), expiresAt },
+        { id: `user-input-requested:${questionId}`, requestId: questionId, turnId: activeTurnId },
+      ).catch(() => {});
       publishEvent("question", "Question", question, questionId, { tool: event.toolName, options });
       void heartbeat();
-      const answer = await bridge.waitForAnswer(agentId(), questionId, { timeoutMs: QUESTION_TIMEOUT_MS }).catch(() => undefined);
+      const answer = await bridge
+        .waitForAnswer(agentId(), questionId, { timeoutMs: QUESTION_TIMEOUT_MS })
+        .catch(() => undefined);
       state = "running";
       if (answer === undefined) {
         task = clip(question, 180);
@@ -377,10 +505,17 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
         return; // Unanswered remotely — the tool asks on the host terminal as usual.
       }
       task = clip(`Answered: ${answer}`, 180);
-      void publishRuntime("user-input.resolved", { status: "answered", value: answer }, { id: `user-input-resolved:${questionId}`, requestId: questionId, turnId: activeTurnId }).catch(() => {});
+      void publishRuntime(
+        "user-input.resolved",
+        { status: "answered", value: answer },
+        { id: `user-input-resolved:${questionId}`, requestId: questionId, turnId: activeTurnId },
+      ).catch(() => {});
       publishEvent("output", "Answered from Agent Deck", answer);
       void heartbeat();
-      return { block: true, reason: `The user answered from Agent Deck: ${answer}. Do not ask again — continue with that answer.` };
+      return {
+        block: true,
+        reason: `The user answered from Agent Deck: ${answer}. Do not ask again — continue with that answer.`,
+      };
     }
     if (!requiresApproval(event.toolName, input, approvalMode)) return;
     const detail = describeToolCall(event.toolName, input);
@@ -392,33 +527,61 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     adopt(nextCtx);
     state = "running";
     const args = event.args as Record<string, unknown>;
-    const itemId = String((event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID());
-    const target = typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : undefined;
+    const itemId = String(
+      (event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID(),
+    );
+    const target =
+      typeof args.file_path === "string"
+        ? args.file_path
+        : typeof args.path === "string"
+          ? args.path
+          : undefined;
     // The tool has not run yet, so the file still holds its old contents. Keep them to diff against
     // once it completes, which turns a whole-file write into a real change instead of all additions.
     if (mutatesFile(event.toolName, target)) {
       const before = readFileForDiff(target);
       if (before !== null) {
-        if (pendingFileEdits.size >= MAX_PENDING_FILE_EDITS) pendingFileEdits.delete(pendingFileEdits.keys().next().value!);
+        if (pendingFileEdits.size >= MAX_PENDING_FILE_EDITS)
+          pendingFileEdits.delete(pendingFileEdits.keys().next().value!);
         pendingFileEdits.set(itemId, { target, before });
       }
     }
-    void publishRuntime("item.started", { tool: event.toolName, summary: `Using ${event.toolName}`, detail: describeToolCall(event.toolName, args) }, { id: `item-started:${agentId()}:${itemId}`, itemId, turnId: activeTurnId }).catch(() => {});
-    publishEvent("tool", `Using ${event.toolName}`, describeToolCall(event.toolName, args), `tool:${agentId()}:${itemId}`, {
-      tool: event.toolName,
-      path: target,
-      command: typeof args.command === "string" ? clipMultiline(args.command, 8_000) : undefined,
-      diff: typeof args.old_string === "string" && typeof args.new_string === "string"
-        ? clipMultiline(`- ${args.old_string.replace(/\n/g, "\n- ")}\n+ ${args.new_string.replace(/\n/g, "\n+ ")}`, 16_000)
-        : /write|create/i.test(event.toolName) && typeof args.content === "string"
-          ? clipMultiline(`+ ${args.content.replace(/\n/g, "\n+ ")}`, 16_000)
-          : undefined,
-    });
+    void publishRuntime(
+      "item.started",
+      {
+        tool: event.toolName,
+        summary: `Using ${event.toolName}`,
+        detail: describeToolCall(event.toolName, args),
+      },
+      { id: `item-started:${agentId()}:${itemId}`, itemId, turnId: activeTurnId },
+    ).catch(() => {});
+    publishEvent(
+      "tool",
+      `Using ${event.toolName}`,
+      describeToolCall(event.toolName, args),
+      `tool:${agentId()}:${itemId}`,
+      {
+        tool: event.toolName,
+        path: target,
+        command: typeof args.command === "string" ? clipMultiline(args.command, 8_000) : undefined,
+        diff:
+          typeof args.old_string === "string" && typeof args.new_string === "string"
+            ? clipMultiline(
+                `- ${args.old_string.replace(/\n/g, "\n- ")}\n+ ${args.new_string.replace(/\n/g, "\n+ ")}`,
+                16_000,
+              )
+            : /write|create/i.test(event.toolName) && typeof args.content === "string"
+              ? clipMultiline(`+ ${args.content.replace(/\n/g, "\n+ ")}`, 16_000)
+              : undefined,
+      },
+    );
   });
 
   pi.on("tool_execution_end", (event, nextCtx) => {
     adopt(nextCtx);
-    const itemId = String((event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID());
+    const itemId = String(
+      (event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID(),
+    );
     const summary = `${event.toolName} ${event.isError ? "failed" : "completed"}`;
     // Upgrade the coarse diff published at start to real unified hunks. The bridge merges by event
     // id, so this replaces the placeholder rather than appending a second entry.
@@ -426,11 +589,25 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     pendingFileEdits.delete(itemId);
     const after = pending && !event.isError ? readFileForDiff(pending.target) : null;
     const unified = pending && after !== null ? unifiedDiff(pending.before, after) : null;
-    void publishRuntime(event.isError ? "runtime.error" : "item.completed", event.isError ? { message: summary } : { tool: event.toolName, summary }, { id: `${event.isError ? "runtime-error" : "item-completed"}:${agentId()}:${itemId}`, itemId, turnId: activeTurnId }).catch(() => {});
-    publishEvent(event.isError ? "error" : "output", summary, undefined, `tool:${agentId()}:${itemId}`, {
-      tool: event.toolName,
-      ...(unified ? { diff: clipMultiline(unified, 16_000) } : {}),
-    });
+    void publishRuntime(
+      event.isError ? "runtime.error" : "item.completed",
+      event.isError ? { message: summary } : { tool: event.toolName, summary },
+      {
+        id: `${event.isError ? "runtime-error" : "item-completed"}:${agentId()}:${itemId}`,
+        itemId,
+        turnId: activeTurnId,
+      },
+    ).catch(() => {});
+    publishEvent(
+      event.isError ? "error" : "output",
+      summary,
+      undefined,
+      `tool:${agentId()}:${itemId}`,
+      {
+        tool: event.toolName,
+        ...(unified ? { diff: clipMultiline(unified, 16_000) } : {}),
+      },
+    );
     void heartbeat();
   });
 
@@ -487,8 +664,16 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     state = "idle";
     if (task === "Paused remotely") state = "paused";
     const usage = usageTotals(nextCtx);
-    void publishRuntime("token-usage.updated", { contextTokens: usage.tokens, processedTokens: usage.tokens }, { turnId: activeTurnId }).catch(() => {});
-    void publishRuntime("turn.completed", { status: "completed", summary: task }, { turnId: activeTurnId }).catch(() => {});
+    void publishRuntime(
+      "token-usage.updated",
+      { contextTokens: usage.tokens, processedTokens: usage.tokens },
+      { turnId: activeTurnId },
+    ).catch(() => {});
+    void publishRuntime(
+      "turn.completed",
+      { status: "completed", summary: task },
+      { turnId: activeTurnId },
+    ).catch(() => {});
     activeTurnId = undefined;
     void heartbeat();
   });
@@ -513,7 +698,10 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     // Deliberately not adopt(): this is a real shutdown, and the loops must stay stopped.
     ctx = nextCtx;
     state = "offline";
-    await publishRuntime("session.state.changed", { state: "offline", task: "Session ended" }).catch(() => {});
+    await publishRuntime("session.state.changed", {
+      state: "offline",
+      task: "Session ended",
+    }).catch(() => {});
     await heartbeat();
     nextCtx.ui.setStatus("agent-deck", undefined);
     ctx = undefined;
@@ -524,7 +712,10 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     handler: async (args, commandCtx) => {
       const requested = args.trim() as ApprovalMode;
       if (!["off", "destructive", "all"].includes(requested)) {
-        commandCtx.ui.notify(`Approval mode: ${approvalMode}. Usage: /deck-gate off|destructive|all`, "info");
+        commandCtx.ui.notify(
+          `Approval mode: ${approvalMode}. Usage: /deck-gate off|destructive|all`,
+          "info",
+        );
         return;
       }
       approvalMode = requested;
@@ -538,11 +729,18 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
   pi.registerCommand("deck-test-approval", {
     description: "Send a harmless approval request to Agent Deck",
     handler: async (_args, commandCtx) => {
-      const approved = await requestApproval("test", "Harmless end-to-end approval test", commandCtx);
+      const approved = await requestApproval(
+        "test",
+        "Harmless end-to-end approval test",
+        commandCtx,
+      );
       state = "idle";
       task = approved ? "Approval test completed" : "Approval test rejected";
       void heartbeat();
-      commandCtx.ui.notify(approved ? "Remote approval received" : "Remote approval rejected or timed out", approved ? "info" : "warning");
+      commandCtx.ui.notify(
+        approved ? "Remote approval received" : "Remote approval rejected or timed out",
+        approved ? "info" : "warning",
+      );
     },
   });
 
@@ -552,7 +750,9 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
       adopt(commandCtx);
       await heartbeat();
       commandCtx.ui.notify(
-        connected ? `Agent Deck connected to ${bridge.baseUrl}` : `Agent Deck cannot reach ${bridge.baseUrl}`,
+        connected
+          ? `Agent Deck connected to ${bridge.baseUrl}`
+          : `Agent Deck cannot reach ${bridge.baseUrl}`,
         connected ? "info" : "warning",
       );
     },

@@ -19,7 +19,7 @@ export function AgentsList({ searchInputRef }: AgentsListProps) {
   const filteredAgents = agents.filter(
     (agent) =>
       agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      agent.description.toLowerCase().includes(searchQuery.toLowerCase())
+      agent.description.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   if (loading && agents.length === 0) {
@@ -50,9 +50,7 @@ export function AgentsList({ searchInputRef }: AgentsListProps) {
       <div className="flex-1 overflow-auto p-2">
         {filteredAgents.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-8 text-muted-foreground">
-            <p className="text-sm">
-              {searchQuery ? "No agents found" : "No agents yet"}
-            </p>
+            <p className="text-sm">{searchQuery ? "No agents found" : "No agents yet"}</p>
             <p className="text-xs mt-2">
               {searchQuery
                 ? "Try a different search term"

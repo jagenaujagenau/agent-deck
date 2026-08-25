@@ -15,7 +15,11 @@ export type TranscriptCursor = { offset?: number };
  * The first pass seeds the cursor at the current end of file and returns nothing: replaying a long
  * session's whole backlog at once would evict its other activity from the bridge's history.
  */
-export function readNewReasoning(transcriptPath: string, cursor: TranscriptCursor, sessionKey: string): ReasoningBlock[] {
+export function readNewReasoning(
+  transcriptPath: string,
+  cursor: TranscriptCursor,
+  sessionKey: string,
+): ReasoningBlock[] {
   return readNewTranscript(transcriptPath, cursor, sessionKey).reasoning;
 }
 
@@ -26,17 +30,35 @@ export function readNewReasoning(transcriptPath: string, cursor: TranscriptCurso
  *
  * Conversational turns number in the dozens, not thousands, so the whole file is worth one pass.
  */
-export function readConversationBacklog(transcriptPath: string, sessionKey: string): TranscriptMessage[] {
+export function readConversationBacklog(
+  transcriptPath: string,
+  sessionKey: string,
+): TranscriptMessage[] {
   let size: number;
-  try { size = statSync(transcriptPath).size; } catch { return []; }
+  try {
+    size = statSync(transcriptPath).size;
+  } catch {
+    return [];
+  }
   return readNewTranscript(transcriptPath, { offset: 0 }, sessionKey, size).messages;
 }
 
-export function readNewTranscript(transcriptPath: string, cursor: TranscriptCursor, sessionKey: string, forcedSize?: number): { reasoning: ReasoningBlock[]; messages: TranscriptMessage[] } {
+export function readNewTranscript(
+  transcriptPath: string,
+  cursor: TranscriptCursor,
+  sessionKey: string,
+  forcedSize?: number,
+): { reasoning: ReasoningBlock[]; messages: TranscriptMessage[] } {
   const empty = { reasoning: [] as ReasoningBlock[], messages: [] as TranscriptMessage[] };
   let size: number;
   if (forcedSize !== undefined) size = forcedSize;
-  else { try { size = statSync(transcriptPath).size; } catch { return empty; } }
+  else {
+    try {
+      size = statSync(transcriptPath).size;
+    } catch {
+      return empty;
+    }
+  }
 
   const previous = cursor.offset;
   if (previous === undefined || previous > size) {
@@ -50,7 +72,11 @@ export function readNewTranscript(transcriptPath: string, cursor: TranscriptCurs
   // decoded string would cut on UTF-16 units and desynchronise on the first non-ASCII character.
   let chunk: string;
   let handle: number;
-  try { handle = openSync(transcriptPath, "r"); } catch { return empty; }
+  try {
+    handle = openSync(transcriptPath, "r");
+  } catch {
+    return empty;
+  }
   try {
     const buffer = Buffer.allocUnsafe(size - previous);
     const read = readSync(handle, buffer, 0, buffer.length, previous);
@@ -64,26 +90,41 @@ export function readNewTranscript(transcriptPath: string, cursor: TranscriptCurs
   const lines = chunk.split("\n");
   // A trailing fragment means the runtime is mid-write; leave it for the next pass.
   const complete = chunk.endsWith("\n") ? lines : lines.slice(0, -1);
-  cursor.offset = previous + complete.reduce((total, line) => total + Buffer.byteLength(line, "utf8") + 1, 0);
+  cursor.offset =
+    previous + complete.reduce((total, line) => total + Buffer.byteLength(line, "utf8") + 1, 0);
 
   const blocks: ReasoningBlock[] = [];
   const messages: TranscriptMessage[] = [];
   for (const line of complete) {
     if (!line.trim()) continue;
-    let entry: { type?: string; uuid?: string; isMeta?: boolean; message?: { role?: string; content?: unknown } };
-    try { entry = JSON.parse(line); } catch { continue; }
+    let entry: {
+      type?: string;
+      uuid?: string;
+      isMeta?: boolean;
+      message?: { role?: string; content?: unknown };
+    };
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
     if (entry.isMeta) continue;
     const key = entry.uuid ?? `${cursor.offset}`;
     if (entry.type === "user") {
       // A user entry is either something the person typed, or a tool result being fed back. Only
       // the former belongs in a conversation.
       const content = entry.message?.content;
-      const text = typeof content === "string"
-        ? content
-        : Array.isArray(content)
-          ? content.filter((part) => (part as { type?: string }).type === "text").map((part) => String((part as { text?: unknown }).text ?? "")).join("\n")
-          : "";
-      if (text.trim()) messages.push({ id: `chat:${sessionKey}:${key}`, role: "user", text: text.trim() });
+      const text =
+        typeof content === "string"
+          ? content
+          : Array.isArray(content)
+            ? content
+                .filter((part) => (part as { type?: string }).type === "text")
+                .map((part) => String((part as { text?: unknown }).text ?? ""))
+                .join("\n")
+            : "";
+      if (text.trim())
+        messages.push({ id: `chat:${sessionKey}:${key}`, role: "user", text: text.trim() });
       continue;
     }
     if (entry.type !== "assistant" || !Array.isArray(entry.message?.content)) continue;
@@ -93,9 +134,15 @@ export function readNewTranscript(transcriptPath: string, cursor: TranscriptCurs
       if (part?.type === "thinking" && typeof part.thinking === "string" && part.thinking.trim()) {
         blocks.push({ id: `reasoning:${sessionKey}:${key}:${index}`, text: part.thinking });
       }
-      if (part?.type === "text" && typeof part.text === "string" && part.text.trim()) spoken.push(part.text);
+      if (part?.type === "text" && typeof part.text === "string" && part.text.trim())
+        spoken.push(part.text);
     });
-    if (spoken.length) messages.push({ id: `chat:${sessionKey}:${key}`, role: "assistant", text: spoken.join("\n\n").trim() });
+    if (spoken.length)
+      messages.push({
+        id: `chat:${sessionKey}:${key}`,
+        role: "assistant",
+        text: spoken.join("\n\n").trim(),
+      });
   }
   return { reasoning: blocks.slice(-MAX_PER_PASS), messages };
 }

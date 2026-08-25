@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import { runEffect } from '@/lib/effect-runtime';
-import { mockClient } from '@/api/client';
-import type { Agent, CreateAgentInput, UpdateAgentInput } from '@/types/agent';
+import { create } from "zustand";
+import { runEffect } from "@/lib/effect-runtime";
+import { mockClient } from "@/api/client";
+import type { Agent, CreateAgentInput, UpdateAgentInput } from "@/types/agent";
 
 interface AgentsState {
   agents: Agent[];
@@ -29,7 +29,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       set({ agents, loading: false });
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to fetch agents',
+        error: error instanceof Error ? error.message : "Failed to fetch agents",
         loading: false,
       });
     }
@@ -45,7 +45,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       return agent;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to create agent',
+        error: error instanceof Error ? error.message : "Failed to create agent",
       });
       return null;
     }
@@ -61,7 +61,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       return agent;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to update agent',
+        error: error instanceof Error ? error.message : "Failed to update agent",
       });
       return null;
     }
@@ -77,7 +77,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       return true;
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to delete agent',
+        error: error instanceof Error ? error.message : "Failed to delete agent",
       });
       return false;
     }
@@ -90,7 +90,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       await get().fetchAgents(); // Refresh to get updated status
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to run agent',
+        error: error instanceof Error ? error.message : "Failed to run agent",
       });
     }
   },
@@ -102,7 +102,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       await get().fetchAgents();
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to stop agent',
+        error: error instanceof Error ? error.message : "Failed to stop agent",
       });
     }
   },
@@ -114,7 +114,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       await get().fetchAgents();
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Failed to pause agent',
+        error: error instanceof Error ? error.message : "Failed to pause agent",
       });
     }
   },
@@ -126,8 +126,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       await get().fetchAgents();
     } catch (error) {
       set({
-        error:
-          error instanceof Error ? error.message : 'Failed to resume agent',
+        error: error instanceof Error ? error.message : "Failed to resume agent",
       });
     }
   },

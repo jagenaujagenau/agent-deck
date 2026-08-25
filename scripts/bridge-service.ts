@@ -14,7 +14,8 @@ const logDirectory = join(homedir(), "Library", "Logs", "AgentDeck");
 const bun = Bun.which("bun") ?? process.execPath;
 const command = process.argv[2] ?? "status";
 
-const xml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const xml = (value: string) =>
+  value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -39,7 +40,10 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 function run(args: string[], allowFailure = false, quiet = false) {
-  const result = Bun.spawnSync(args, { stdout: quiet ? "ignore" : "inherit", stderr: quiet ? "ignore" : "inherit" });
+  const result = Bun.spawnSync(args, {
+    stdout: quiet ? "ignore" : "inherit",
+    stderr: quiet ? "ignore" : "inherit",
+  });
   if (!allowFailure && result.exitCode !== 0) process.exit(result.exitCode);
   return result.exitCode;
 }
@@ -59,13 +63,21 @@ switch (command) {
     break;
   case "uninstall":
     run(["launchctl", "bootout", service], true);
-    try { unlinkSync(plistPath); } catch { /* Already absent. */ }
+    try {
+      unlinkSync(plistPath);
+    } catch {
+      /* Already absent. */
+    }
     console.log(`Uninstalled ${label}.`);
     break;
   case "status": {
     const loaded = run(["launchctl", "print", service], true, true) === 0;
     let healthy = false;
-    try { healthy = (await fetch("http://127.0.0.1:3000/", { signal: AbortSignal.timeout(2_000) })).ok; } catch { /* Offline. */ }
+    try {
+      healthy = (await fetch("http://127.0.0.1:3000/", { signal: AbortSignal.timeout(2_000) })).ok;
+    } catch {
+      /* Offline. */
+    }
     console.log(JSON.stringify({ loaded, healthy, plistPath, logs: logDirectory }, null, 2));
     if (!loaded || !healthy) process.exitCode = 1;
     break;

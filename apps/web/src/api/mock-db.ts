@@ -1,8 +1,8 @@
-import { nanoid } from 'nanoid';
-import type { Agent, CreateAgentInput } from '@/types/agent';
-import type { Task, CreateTaskInput } from '@/types/task';
-import type { Run, CreateRunInput } from '@/types/run';
-import type { Message, CreateMessageInput } from '@/types/message';
+import { nanoid } from "nanoid";
+import type { Agent, CreateAgentInput } from "@/types/agent";
+import type { Task, CreateTaskInput } from "@/types/task";
+import type { Run, CreateRunInput } from "@/types/run";
+import type { Message, CreateMessageInput } from "@/types/message";
 
 class MockDatabase {
   private agents: Map<string, Agent> = new Map();
@@ -19,30 +19,30 @@ class MockDatabase {
     // Seed some initial agents
     const agent1: Agent = {
       id: nanoid(),
-      name: 'Code Reviewer',
-      description: 'Reviews code and suggests improvements',
-      status: 'idle',
-      model: 'gpt-4',
+      name: "Code Reviewer",
+      description: "Reviews code and suggests improvements",
+      status: "idle",
+      model: "gpt-4",
       config: { temperature: 0.7 },
       createdAt: new Date(Date.now() - 86400000),
     };
 
     const agent2: Agent = {
       id: nanoid(),
-      name: 'Bug Fixer',
-      description: 'Fixes bugs and writes tests',
-      status: 'idle',
-      model: 'claude-3',
+      name: "Bug Fixer",
+      description: "Fixes bugs and writes tests",
+      status: "idle",
+      model: "claude-3",
       config: { temperature: 0.5 },
       createdAt: new Date(Date.now() - 172800000),
     };
 
     const agent3: Agent = {
       id: nanoid(),
-      name: 'Feature Builder',
-      description: 'Builds new features from specifications',
-      status: 'running',
-      model: 'gpt-4',
+      name: "Feature Builder",
+      description: "Builds new features from specifications",
+      status: "running",
+      model: "gpt-4",
       config: { temperature: 0.8 },
       createdAt: new Date(Date.now() - 259200000),
       lastRunAt: new Date(Date.now() - 3600000),
@@ -56,30 +56,30 @@ class MockDatabase {
     const now = new Date();
     const task1: Task = {
       id: nanoid(),
-      title: 'Add user authentication',
-      description: 'Implement OAuth2 authentication flow',
-      stage: 'backlog',
-      priority: 'high',
+      title: "Add user authentication",
+      description: "Implement OAuth2 authentication flow",
+      stage: "backlog",
+      priority: "high",
       createdAt: new Date(now.getTime() - 86400000),
       updatedAt: new Date(now.getTime() - 86400000),
     };
 
     const task2: Task = {
       id: nanoid(),
-      title: 'Fix memory leak in dashboard',
-      description: 'Investigate and fix memory leak in React components',
-      stage: 'next',
-      priority: 'high',
+      title: "Fix memory leak in dashboard",
+      description: "Investigate and fix memory leak in React components",
+      stage: "next",
+      priority: "high",
       createdAt: new Date(now.getTime() - 43200000),
       updatedAt: new Date(now.getTime() - 43200000),
     };
 
     const task3: Task = {
       id: nanoid(),
-      title: 'Implement dark mode',
-      description: 'Add dark mode toggle and theme switching',
-      stage: 'in_progress',
-      priority: 'medium',
+      title: "Implement dark mode",
+      description: "Add dark mode toggle and theme switching",
+      stage: "in_progress",
+      priority: "medium",
       assignedAgentId: agent3.id,
       createdAt: new Date(now.getTime() - 21600000),
       updatedAt: new Date(now.getTime() - 3600000),
@@ -87,10 +87,10 @@ class MockDatabase {
 
     const task4: Task = {
       id: nanoid(),
-      title: 'Optimize database queries',
-      description: 'Add indexes and optimize slow queries',
-      stage: 'review',
-      priority: 'medium',
+      title: "Optimize database queries",
+      description: "Add indexes and optimize slow queries",
+      stage: "review",
+      priority: "medium",
       assignedAgentId: agent1.id,
       createdAt: new Date(now.getTime() - 172800000),
       updatedAt: new Date(now.getTime() - 7200000),
@@ -98,10 +98,10 @@ class MockDatabase {
 
     const task5: Task = {
       id: nanoid(),
-      title: 'Update documentation',
-      description: 'Update API documentation with latest changes',
-      stage: 'ready_to_ship',
-      priority: 'low',
+      title: "Update documentation",
+      description: "Update API documentation with latest changes",
+      stage: "ready_to_ship",
+      priority: "low",
       createdAt: new Date(now.getTime() - 259200000),
       updatedAt: new Date(now.getTime() - 1800000),
     };
@@ -126,7 +126,7 @@ class MockDatabase {
     const agent: Agent = {
       id: nanoid(),
       ...input,
-      status: 'idle',
+      status: "idle",
       config: input.config || {},
       createdAt: new Date(),
     };
@@ -162,8 +162,8 @@ class MockDatabase {
       id: nanoid(),
       title: input.title,
       description: input.description,
-      stage: input.stage || 'backlog',
-      priority: input.priority || 'medium',
+      stage: input.stage || "backlog",
+      priority: input.priority || "medium",
       assignedAgentId: input.assignedAgentId,
       createdAt: now,
       updatedAt: now,
@@ -211,7 +211,7 @@ class MockDatabase {
       id: nanoid(),
       agentId: input.agentId,
       taskId: input.taskId,
-      status: 'pending',
+      status: "pending",
       startedAt: new Date(),
     };
     this.runs.set(run.id, run);
@@ -258,27 +258,18 @@ class MockDatabase {
   // Metrics
   getMetrics() {
     const allRuns = Array.from(this.runs.values());
-    const completedRuns = allRuns.filter((r) => r.status === 'completed');
-    const failedRuns = allRuns.filter((r) => r.status === 'failed');
-    const totalTokens = completedRuns.reduce(
-      (sum, r) => sum + (r.tokensUsed || 0),
-      0,
-    );
-    const completedTasks = Array.from(this.tasks.values()).filter(
-      (t) => t.stage === 'done',
-    ).length;
+    const completedRuns = allRuns.filter((r) => r.status === "completed");
+    const failedRuns = allRuns.filter((r) => r.status === "failed");
+    const totalTokens = completedRuns.reduce((sum, r) => sum + (r.tokensUsed || 0), 0);
+    const completedTasks = Array.from(this.tasks.values()).filter((t) => t.stage === "done").length;
 
     return {
       tokensSpent: totalTokens,
       tasksCompleted: completedTasks,
-      errorRate:
-        allRuns.length > 0 ? failedRuns.length / allRuns.length : 0,
+      errorRate: allRuns.length > 0 ? failedRuns.length / allRuns.length : 0,
       lastRun:
         allRuns.length > 0
-          ? allRuns.sort(
-              (a, b) =>
-                b.startedAt.getTime() - a.startedAt.getTime(),
-            )[0]
+          ? allRuns.sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0]
           : undefined,
     };
   }

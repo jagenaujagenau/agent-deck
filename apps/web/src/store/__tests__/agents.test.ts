@@ -31,7 +31,7 @@ describe("Agents Store", () => {
     expect(agent).not.toBeNull();
     expect(agent?.name).toBe("Test Agent");
     expect(useAgentsStore.getState().agents).toContainEqual(
-      expect.objectContaining({ name: "Test Agent" })
+      expect.objectContaining({ name: "Test Agent" }),
     );
   });
 
@@ -57,9 +57,7 @@ describe("Agents Store", () => {
     if (agent) {
       const success = await store.deleteAgent(agent.id);
       expect(success).toBe(true);
-      expect(
-        useAgentsStore.getState().agents.find((a) => a.id === agent.id)
-      ).toBeUndefined();
+      expect(useAgentsStore.getState().agents.find((a) => a.id === agent.id)).toBeUndefined();
     }
   });
 });
