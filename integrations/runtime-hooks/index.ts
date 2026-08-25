@@ -27,6 +27,12 @@ import {
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
 import { drainRemoteMessages, promptContext, stopHookDecision } from "./remote-messages";
 import { parseHookPayload, type ToolArguments } from "./hook-input";
+import {
+  changedPaths,
+  diffForPath,
+  fingerprintWorkspace,
+  type WorkspaceFingerprint,
+} from "./workspace-changes";
 import { discoverSlashCommands } from "./slash-commands";
 
 type HookState = {
@@ -41,6 +47,8 @@ type HookState = {
   activeTurnId?: string;
   transcriptPath?: string;
   transcriptOffset?: number;
+  /** What the working tree looked like after the last shell command. */
+  workspace?: WorkspaceFingerprint;
   ownerPid?: number;
   capabilities?: ControlAction[];
   rateLimits?: Array<{
@@ -587,6 +595,42 @@ switch (event) {
     state.state = "running";
     state.task = `${tool} completed`;
     const itemId = input.toolUseId ?? crypto.randomUUID();
+    // A shell command names no file, so the workspace is asked what moved. Only
+    // for shell tools: every other tool carries its own target and is captured
+    // above without paying for a `git status`.
+    if (/^(bash|shell|run|terminal)/i.test(tool)) {
+      const workspace = fingerprintWorkspace(cwd);
+      if (workspace) {
+        const previous = state.workspace;
+        state.workspace = workspace;
+        // The first shell command of a session only establishes the baseline.
+        // Reporting against nothing would publish a whole dirty tree as this
+        // one command's doing.
+        for (const changed of previous ? changedPaths(previous, workspace) : []) {
+          const body = diffForPath(cwd, changed);
+          if (!body) continue;
+          const absolute = join(cwd, changed);
+          const summary = `${tool} changed ${changed.split("/").pop()}`;
+          await publishRuntime(
+            "item.completed",
+            { tool, summary, path: absolute, diff: body },
+            {
+              id: `item-completed:${sessionKey}:${itemId}:${changed}`,
+              itemId: `${itemId}:${changed}`,
+              turnId: state.activeTurnId,
+            },
+          ).catch(() => {});
+          // The runtime event feeds the projection; this is what lands the diff
+          // in the session's file history, which is what the Changes tab reads.
+          await publish("output", summary, undefined, {
+            id: `shell-change:${sessionKey}:${itemId}:${changed}`,
+            tool,
+            path: absolute,
+            diff: body,
+          }).catch(() => {});
+        }
+      }
+    }
     await publishRuntime(
       "item.completed",
       {
