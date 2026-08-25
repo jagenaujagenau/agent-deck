@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { AgentDeckClient } from "../../packages/agent-adapter/src/client";
 import type { RuntimeEventType } from "../../packages/agent-adapter/src/runtime-events";
 import { drainRemoteMessages, promptContext } from "../runtime-hooks/remote-messages";
@@ -140,7 +141,12 @@ async function claimBlocked(agent: HerdrAgent, agentId: string) {
   await publish(agentId, "session.state.changed", { state: "waiting", task: prompt.question });
   if (openRequests.has(agentId)) return;
 
-  const requestId = crypto.randomUUID();
+  // Derived from the session and the question rather than random, so the same
+  // screen always names the same request. The in-memory guard above forgets on
+  // restart, and a random id turned eight blocked sessions into twenty-eight
+  // pending questions across a few service restarts. A stable id collapses at
+  // the bridge instead.
+  const requestId = `${agentId}:${createHash("sha1").update(prompt.question).digest("hex").slice(0, 12)}`;
   openRequests.set(agentId, requestId);
   await client
     .runtimeEvent({
