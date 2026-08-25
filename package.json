@@ -20,8 +20,8 @@
     "dev:server": "turbo -F server dev",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "herdr": "bun run integrations/herdr/index.ts",
     "release:desktop": "bun run scripts/release-desktop.ts",
+    "service": "bun run scripts/agent-deck-service.ts",
     "knip": "knip",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"

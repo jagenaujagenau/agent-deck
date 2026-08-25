@@ -1,6 +1,6 @@
 //! Reading and steering the launchd service that runs the bridge.
 //!
-//! Deliberately native rather than shelling out to `scripts/bridge-service.ts`
+//! Deliberately native rather than shelling out to `scripts/agent-deck-service.ts`
 //! for reads: the tray polls this every few seconds, and paying a Bun start-up
 //! per poll to learn two facts is not a trade worth making. Writes do shell
 //! out, because installing the service means writing a plist and that logic
@@ -143,7 +143,7 @@ fn launchctl(args: &[&str]) -> Result<(), String> {
     Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
 }
 
-/// Where the service definition lives. Written by `scripts/bridge-service.ts`.
+/// Where the service definition lives. Written by `scripts/agent-deck-service.ts`.
 pub fn plist_path() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default())
         .join("Library/LaunchAgents")
@@ -162,7 +162,7 @@ pub fn plist_path() -> PathBuf {
 pub fn start() -> Result<(), String> {
     let plist = plist_path();
     if !plist.is_file() {
-        return Err("No service installed. Run: bun scripts/bridge-service.ts install".into());
+        return Err("No service installed. Run: bun scripts/agent-deck-service.ts install".into());
     }
     let bootstrapped = launchctl(&[
         "bootstrap",

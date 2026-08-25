@@ -72,7 +72,7 @@ function detail(status: BridgeStatus): string {
         ? "launchd holds the job but it exits immediately."
         : `Exits immediately with code ${status.last_exit_code}. Check ~/Library/Logs/AgentDeck.`;
     case "NotInstalled":
-      return "Run: bun scripts/bridge-service.ts install";
+      return "Run: bun scripts/agent-deck-service.ts install";
     default:
       return "";
   }
