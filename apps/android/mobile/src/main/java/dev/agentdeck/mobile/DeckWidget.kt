@@ -18,6 +18,8 @@ import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
+import androidx.glance.Image
+import androidx.glance.ImageProvider
 import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
@@ -210,7 +212,13 @@ private fun SessionCard(line: DeckLine) {
     }
 }
 
-/** The harness mark, boxed so it reads as a badge rather than a prefix. */
+/**
+ * The harness's own mark, boxed so it reads as a badge.
+ *
+ * Falls back to the monogram for a runtime that ships no mark, rather than
+ * drawing an empty square - a blank badge says the session has no harness,
+ * which is never what is meant.
+ */
 @Composable
 private fun Avatar(line: DeckLine, accent: Color) {
     Box(
@@ -220,7 +228,19 @@ private fun Avatar(line: DeckLine, accent: Color) {
             .background(Badge)
             .cornerRadius(5.dp),
     ) {
-        Text(text = line.harness.mark, style = mono(11f, accent, FontWeight.Bold))
+        val icon = line.harness.icon
+        if (icon != null) {
+            Image(
+                provider = ImageProvider(icon),
+                // The marks carry their own brand colours, which is the point of
+                // using them; tinting would throw away what makes them legible
+                // at a glance.
+                contentDescription = line.harness.label,
+                modifier = GlanceModifier.size(16.dp),
+            )
+        } else {
+            Text(text = line.harness.mark, style = mono(11f, accent, FontWeight.Bold))
+        }
     }
 }
 

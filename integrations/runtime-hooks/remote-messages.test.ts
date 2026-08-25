@@ -128,15 +128,20 @@ describe("queued message reporting", () => {
 });
 
 describe("promptContext", () => {
-  test("labels a single queued message as having arrived before the prompt", () => {
-    const text = promptContext(["go for it"]);
-    expect(text).toContain("before this prompt");
-    expect(text).toContain("go for it");
+  test("one message is delivered exactly as it was written", () => {
+    // Herdr types this straight into a pane, so anything added here appears in
+    // the person's own terminal, narrating to them that they sent it.
+    expect(promptContext(["go for it"])).toBe("go for it");
   });
 
-  test("numbers several, oldest first", () => {
+  test("several are numbered, oldest first", () => {
     const text = promptContext(["first", "second"]);
-    expect(text).toContain("oldest first");
     expect(text.indexOf("1. first")).toBeLessThan(text.indexOf("2. second"));
+  });
+
+  test("nothing is added around a lone message", () => {
+    const text = promptContext(["check the tests"]);
+    expect(text.startsWith("check")).toBe(true);
+    expect(text.endsWith("tests")).toBe(true);
   });
 });

@@ -139,6 +139,16 @@ class DeckTileGeometryTest {
 class DeckTileHarnessTest {
     private val round = Screen(widthDp = 227f, heightDp = 227f, round = true)
 
+    /** Every image the tile asks the system to draw, by the name it asks for. */
+    private fun images(element: LayoutElementBuilders.LayoutElement): List<String> =
+        when (element) {
+            is LayoutElementBuilders.Image -> listOf(element.resourceId?.value.orEmpty())
+            is LayoutElementBuilders.Column -> element.contents.flatMap { images(it) }
+            is LayoutElementBuilders.Row -> element.contents.flatMap { images(it) }
+            is LayoutElementBuilders.Box -> element.contents.flatMap { images(it) }
+            else -> emptyList()
+        }
+
     private fun texts(element: LayoutElementBuilders.LayoutElement): List<String> = when (element) {
         is LayoutElementBuilders.Text -> listOf(element.text?.value.orEmpty())
         is LayoutElementBuilders.Column -> element.contents.flatMap { texts(it) }
@@ -147,22 +157,44 @@ class DeckTileHarnessTest {
         else -> emptyList()
     }
 
+    private fun deckOf(vararg lines: DeckLine) = DeckSummary(
+        lines = lines.toList(),
+        running = lines.size,
+        reachedBridge = true,
+    )
+
     @Test
-    fun `the harness is named on every row`() {
-        val rendered = texts(
+    fun `a runtime with a mark of its own has it drawn`() {
+        val rendered = images(
             layout(
-                DeckSummary(
-                    lines = listOf(
-                        DeckLine("claude-a", "fx-ruby", "Weighing two approaches", Harness.Claude),
-                        DeckLine("opencode-b", "ai-2026", "Read the file", Harness.OpenCode),
-                    ),
-                    running = 2,
-                    reachedBridge = true,
+                deckOf(
+                    DeckLine("claude-a", "fx-ruby", "Weighing two approaches", Harness.Claude),
+                    DeckLine("opencode-b", "ai-2026", "Read the file", Harness.OpenCode),
                 ),
                 round,
             ),
-        ).map { it.trim() }
-        assertTrue("saw $rendered", rendered.contains(Harness.Claude.mark))
-        assertTrue("saw $rendered", rendered.contains(Harness.OpenCode.mark))
+        )
+        // Named by the enum entry, which is the same key the resources are
+        // registered under - a mismatch here draws nothing at all.
+        assertTrue("saw $rendered", rendered.contains(Harness.Claude.name))
+        assertTrue("saw $rendered", rendered.contains(Harness.OpenCode.name))
+    }
+
+    @Test
+    fun `every drawn image is one the tile actually registers`() {
+        val rendered = images(
+            layout(deckOf(DeckLine("claude-a", "fx", "thinking", Harness.Claude)), round),
+        )
+        val registered = Harness.entries.filter { it.icon != null }.map { it.name }
+        assertTrue("$rendered not all in $registered", registered.containsAll(rendered))
+    }
+
+    @Test
+    fun `a runtime with no mark falls back to its monogram`() {
+        // An empty badge would say the session has no harness, which is never
+        // what is meant.
+        val pi = deckOf(DeckLine("01a02e7b", "agent-control-dashboard", "Working", Harness.Pi))
+        assertTrue(images(layout(pi, round)).isEmpty())
+        assertTrue(texts(layout(pi, round)).map { it.trim() }.contains(Harness.Pi.mark))
     }
 }

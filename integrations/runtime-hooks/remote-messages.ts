@@ -80,22 +80,17 @@ export async function countQueuedMessages(
 }
 
 /**
- * Renders queued messages as extra context on a prompt the user is submitting.
+ * Queued messages as the person actually wrote them.
  *
- * The Stop hook can only deliver what was queued while a turn was running: it
- * fires at the end of one, and a session sitting idle runs none. When the user
- * comes back to the terminal and types, that is the first moment anything
- * queued in the meantime can reach the model, so it is folded into their turn
- * rather than left waiting for the turn after.
+ * No preamble. When Herdr types this into a pane it *is* the prompt, and
+ * "The user sent this from Agent Deck before this prompt:" then appears above
+ * the message in the person's own terminal - narrating, to them, that they sent
+ * the thing they are looking at. The delivery path is not the message.
+ *
+ * Several are still numbered, because two instructions run together read as one
+ * confused instruction.
  */
 export function promptContext(messages: string[]): string {
-  const body =
-    messages.length === 1
-      ? messages[0]
-      : messages.map((message, index) => `${index + 1}. ${message}`).join("\n\n");
-  const preface =
-    messages.length === 1
-      ? "The user sent this from Agent Deck before this prompt:"
-      : "The user sent these from Agent Deck before this prompt, oldest first:";
-  return `${preface}\n\n${body}`;
+  if (messages.length === 1) return messages[0]!;
+  return messages.map((message, index) => `${index + 1}. ${message}`).join("\n\n");
 }

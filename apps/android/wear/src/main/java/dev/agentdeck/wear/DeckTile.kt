@@ -19,6 +19,7 @@ import dev.agentdeck.shared.DeckLine
 import dev.agentdeck.shared.DeckSummaries
 import dev.agentdeck.shared.DeckSummary
 import dev.agentdeck.shared.DeckSummaryStore
+import dev.agentdeck.shared.Harness
 
 /**
  * The watch tile: what is asking for you, one swipe from the watch face.
@@ -58,15 +59,36 @@ class DeckTile : TileService() {
         )
     }
 
+    /**
+     * The harness marks, which a tile has to hand over rather than reference.
+     *
+     * A tile is rendered in the system's process, so a drawable id means nothing
+     * there until it has been mapped to a name the layout can ask for.
+     */
     override fun onTileResourcesRequest(
         requestParams: RequestBuilders.ResourcesRequest,
-    ): ListenableFuture<ResourceBuilders.Resources> =
-        Futures.immediateFuture(
-            ResourceBuilders.Resources.Builder().setVersion(RESOURCES).build(),
-        )
+    ): ListenableFuture<ResourceBuilders.Resources> {
+        val resources = ResourceBuilders.Resources.Builder().setVersion(RESOURCES)
+        for (harness in Harness.entries) {
+            val icon = harness.icon ?: continue
+            resources.addIdToImageMapping(
+                harness.name,
+                ResourceBuilders.ImageResource.Builder()
+                    .setAndroidResourceByResId(
+                        ResourceBuilders.AndroidImageResourceByResId.Builder()
+                            .setResourceId(icon)
+                            .build(),
+                    )
+                    .build(),
+            )
+        }
+        return Futures.immediateFuture(resources.build())
+    }
 
     private companion object {
-        const val RESOURCES = "1"
+        // Bumped whenever the mapping above changes, or the watch keeps serving
+        // the set it cached.
+        const val RESOURCES = "2"
         const val FRESHNESS_MS = 10 * 60 * 1000L
     }
 }
@@ -312,7 +334,13 @@ private fun deckRow(line: DeckLine): LayoutElementBuilders.LayoutElement {
         .build()
 }
 
-/** The harness mark, boxed so it reads as a badge rather than a prefix. */
+/**
+ * The harness's own mark, boxed so it reads as a badge.
+ *
+ * Falls back to the monogram for a runtime that ships no mark, rather than
+ * drawing an empty square - a blank badge says the session has no harness,
+ * which is never what is meant.
+ */
 private fun avatar(line: DeckLine, accent: Int): LayoutElementBuilders.LayoutElement =
     LayoutElementBuilders.Box.Builder()
         .setWidth(dp(24f))
@@ -328,7 +356,15 @@ private fun avatar(line: DeckLine, accent: Int): LayoutElementBuilders.LayoutEle
                 .build(),
         )
         .addContent(
-            text(line.harness.mark, 11f, accent, weight = LayoutElementBuilders.FONT_WEIGHT_BOLD),
+            if (line.harness.icon != null) {
+                LayoutElementBuilders.Image.Builder()
+                    .setResourceId(line.harness.name)
+                    .setWidth(dp(15f))
+                    .setHeight(dp(15f))
+                    .build()
+            } else {
+                text(line.harness.mark, 11f, accent, weight = LayoutElementBuilders.FONT_WEIGHT_BOLD)
+            },
         )
         .build()
 

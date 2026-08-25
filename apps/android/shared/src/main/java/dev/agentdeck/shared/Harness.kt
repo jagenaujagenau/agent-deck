@@ -8,19 +8,20 @@ package dev.agentdeck.shared
  * id prefix is what the adapters already agree on, and every one of them builds
  * it the same way - runtime, then a hash of the runtime's own session id.
  */
-enum class Harness(val mark: String, val label: String) {
+enum class Harness(val mark: String, val label: String, val icon: Int?) {
     /**
-     * Two-letter monograms rather than brand marks. Shipping other companies'
-     * logos is not something to do casually, and an invented mark would be
-     * worse than an honest abbreviation. Drop-in drawables can replace these
-     * without touching anything that reads them.
+     * The runtime's own mark where there is one, and a monogram where there is
+     * not. `icon` is null rather than a stand-in drawable so a surface can tell
+     * the difference and fall back to [mark] instead of drawing a blank.
      */
-    Claude("CC", "Claude Code"),
-    Codex("CX", "Codex"),
-    OpenCode("OC", "OpenCode"),
-    Pi("π", "Pi"),
-    Managed("MC", "Managed Claude"),
-    Unknown("··", "Agent"),
+    Claude("CC", "Claude Code", R.drawable.harness_claude),
+    Codex("CX", "Codex", R.drawable.harness_codex),
+    OpenCode("OC", "OpenCode", R.drawable.harness_opencode),
+    // Pi ships no mark that could be used here, so its own initial stands in.
+    Pi("π", "Pi", null),
+    // A bridge-hosted Claude session is still a Claude session.
+    Managed("MC", "Managed Claude", R.drawable.harness_claude),
+    Unknown("··", "Agent", null),
 }
 
 object Harnesses {
