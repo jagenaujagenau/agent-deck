@@ -2,7 +2,7 @@ package dev.agentdeck.wear
 
 import androidx.wear.protolayout.LayoutElementBuilders
 import dev.agentdeck.shared.DeckSummary
-import dev.agentdeck.shared.NeedsYou
+import dev.agentdeck.shared.DeckLine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,8 +22,8 @@ class DeckTileLayoutTest {
         else -> emptyList()
     }
 
-    private fun summary(attention: Int, needing: List<NeedsYou>, running: Int = 0) = DeckSummary(
-        needing = needing,
+    private fun summary(attention: Int, needing: List<DeckLine>, running: Int = 0) = DeckSummary(
+        lines = needing,
         attention = attention,
         running = running,
         observedAt = 1L,
@@ -37,8 +37,8 @@ class DeckTileLayoutTest {
                 summary(
                     attention = 5,
                     needing = listOf(
-                        NeedsYou("a1", "fx-ruby", "Approval: Bash"),
-                        NeedsYou("a2", "nametags", "Which branch?"),
+                        DeckLine("a1", "fx-ruby", "Approval: Bash", needsYou = true),
+                        DeckLine("a2", "nametags", "Which branch?", needsYou = true),
                     ),
                 ),
             ),
@@ -54,7 +54,7 @@ class DeckTileLayoutTest {
             layout(
                 summary(
                     attention = 5,
-                    needing = listOf(NeedsYou("a1", "fx-ruby", "Approval: Bash")),
+                    needing = listOf(DeckLine("a1", "fx-ruby", "Approval: Bash", needsYou = true)),
                 ),
             ),
         )
@@ -66,17 +66,27 @@ class DeckTileLayoutTest {
     @Test
     fun `nothing is left over when everything fits`() {
         val rendered = texts(
-            summary(attention = 1, needing = listOf(NeedsYou("a1", "fx-ruby", "Approval: Bash")))
+            summary(attention = 1, needing = listOf(DeckLine("a1", "fx-ruby", "Approval: Bash", needsYou = true)))
                 .let(::layout),
         )
         assertTrue(rendered.none { it.endsWith("more") })
     }
 
     @Test
-    fun `a resting deck says what it is doing rather than zero`() {
-        val rendered = texts(layout(summary(attention = 0, needing = emptyList(), running = 2)))
+    fun `a resting deck shows what is working rather than an empty circle`() {
+        val rendered = texts(
+            layout(
+                summary(
+                    attention = 0,
+                    needing = listOf(DeckLine("a1", "fx-lisp", "Using Bash")),
+                    running = 2,
+                ),
+            ),
+        )
         assertEquals("2 working", rendered.first())
-        assertEquals(1, rendered.size)
+        // The headline alone under a round face is the emptiness this fixes.
+        assertTrue(rendered.contains("fx-lisp"))
+        assertTrue(rendered.contains("Using Bash"))
     }
 
     @Test

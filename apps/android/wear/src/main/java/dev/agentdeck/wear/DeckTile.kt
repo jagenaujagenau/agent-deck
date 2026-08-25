@@ -15,7 +15,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import dev.agentdeck.shared.DeckSummaries
 import dev.agentdeck.shared.DeckSummary
 import dev.agentdeck.shared.DeckSummaryStore
-import dev.agentdeck.shared.NeedsYou
+import dev.agentdeck.shared.DeckLine
 
 /**
  * The watch tile: what is asking for you, one swipe from the watch face.
@@ -115,19 +115,23 @@ internal fun layout(summary: DeckSummary): LayoutElementBuilders.LayoutElement {
         .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
 
     column.addContent(
-        if (summary.attention > 0) {
-            text("${summary.attention} need you", 16f, ATTENTION)
-        } else {
-            text(DeckSummaries.restingLine(summary), 16f, ON_SURFACE)
-        },
+        text(
+            DeckSummaries.headline(summary),
+            16f,
+            if (summary.attention > 0) ATTENTION else ON_SURFACE,
+        ),
     )
 
-    for (needs in summary.needing) {
+    // A watch face is glanced at, so the tile shows fewer than the phone - but
+    // it shows what is working when nothing is waiting, rather than a headline
+    // over an empty circle.
+    val shown = summary.lines.take(MAX_ROWS)
+    for (line in shown) {
         column.addContent(spacer(8f))
-        column.addContent(needsYou(needs))
+        column.addContent(deckRow(line))
     }
 
-    val hidden = DeckSummaries.overflow(summary, summary.needing.size)
+    val hidden = DeckSummaries.overflow(summary, shown.size)
     if (hidden > 0) {
         column.addContent(spacer(6f))
         // Said rather than truncated: two of five shown without a word would
@@ -137,13 +141,16 @@ internal fun layout(summary: DeckSummary): LayoutElementBuilders.LayoutElement {
     return column.build()
 }
 
-private fun needsYou(needs: NeedsYou): LayoutElementBuilders.LayoutElement =
+/** Two rows is what a round face fits under a headline without crowding. */
+private const val MAX_ROWS = 2
+
+private fun deckRow(line: DeckLine): LayoutElementBuilders.LayoutElement =
     LayoutElementBuilders.Column.Builder()
         .setWidth(expand())
-        .setModifiers(openApp(needs.agentId))
+        .setModifiers(openApp(line.agentId))
         .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
-        .addContent(text(needs.project, 14f, ON_SURFACE))
-        .addContent(text(needs.asking, 12f, MUTED, maxLines = 2))
+        .addContent(text(line.project, 14f, if (line.needsYou) ATTENTION else ON_SURFACE))
+        .addContent(text(line.detail, 12f, MUTED, maxLines = 2))
         .build()
 
 private fun spacer(height: Float) =

@@ -5,11 +5,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.LocalSize
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -29,10 +31,10 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import dev.agentdeck.shared.DeckLine
 import dev.agentdeck.shared.DeckSummaries
 import dev.agentdeck.shared.DeckSummary
 import dev.agentdeck.shared.DeckSummaryStore
-import dev.agentdeck.shared.NeedsYou
 
 /**
  * The home screen widget: what is asking for you, without opening anything.
@@ -64,8 +66,23 @@ private fun deckIntent(agentId: String?): Intent = Intent(Intent.ACTION_VIEW).ap
     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
 }
 
+/**
+ * How many lines this widget has room for.
+ *
+ * Measured rather than fixed, because the same widget is placed at four cells
+ * wide and at one. Each row is a project and a line of detail, and the header
+ * takes the first slice of the height.
+ */
+internal fun rowsThatFit(height: Dp): Int =
+    ((height.value - HEADER_HEIGHT) / ROW_HEIGHT).toInt().coerceIn(0, DeckSummaries.MAX_LINES)
+
+private const val HEADER_HEIGHT = 34f
+private const val ROW_HEIGHT = 40f
+
 @Composable
 private fun DeckWidgetContent(summary: DeckSummary) {
+    val rows = rowsThatFit(LocalSize.current.height)
+    val shown = summary.lines.take(rows)
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -75,16 +92,15 @@ private fun DeckWidgetContent(summary: DeckSummary) {
             .clickable(actionStartActivity(deckIntent(null))),
     ) {
         Header(summary)
-        if (summary.needing.isEmpty()) return@Column
-        Spacer(GlanceModifier.height(10.dp))
-        for (needs in summary.needing) {
-            NeedsYouRow(needs)
-            Spacer(GlanceModifier.height(8.dp))
+        Spacer(GlanceModifier.height(8.dp))
+        for (line in shown) {
+            DeckRow(line)
+            Spacer(GlanceModifier.height(6.dp))
         }
-        val hidden = DeckSummaries.overflow(summary, summary.needing.size)
+        val hidden = DeckSummaries.overflow(summary, shown.size)
         if (hidden > 0) {
-            // Never silently truncated: three of six shown without saying so
-            // would tell you the other three are fine.
+            // Never silently truncated: three of eight shown without a word
+            // would tell you the deck has three sessions.
             Text(
                 text = "and $hidden more",
                 style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant),
@@ -97,7 +113,7 @@ private fun DeckWidgetContent(summary: DeckSummary) {
 private fun Header(summary: DeckSummary) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = GlanceModifier.fillMaxWidth()) {
         Text(
-            text = if (summary.attention > 0) "${summary.attention} need you" else "Agent Deck",
+            text = DeckSummaries.headline(summary),
             style = TextStyle(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Medium,
@@ -105,30 +121,49 @@ private fun Header(summary: DeckSummary) {
             ),
         )
         Spacer(GlanceModifier.defaultWeight())
-        Text(
-            text = DeckSummaries.restingLine(summary),
-            style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant),
-        )
+        if (summary.total > 0) {
+            Text(
+                text = "${summary.total} session${if (summary.total == 1) "" else "s"}",
+                style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant),
+            )
+        }
     }
 }
 
 @Composable
-private fun NeedsYouRow(needs: NeedsYou) {
-    Column(
+private fun DeckRow(line: DeckLine) {
+    Row(
+        verticalAlignment = Alignment.Top,
         modifier = GlanceModifier
             .fillMaxWidth()
-            .clickable(actionStartActivity(deckIntent(needs.agentId))),
+            .clickable(actionStartActivity(deckIntent(line.agentId))),
     ) {
+        // A dot rather than a coloured row: the state has to survive a
+        // launcher that tints widget text to match the wallpaper.
         Text(
-            text = needs.project,
-            style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Medium, color = GlanceTheme.colors.onSurface),
-            maxLines = 1,
+            text = if (line.needsYou) "●" else "○",
+            style = TextStyle(
+                fontSize = 10.sp,
+                color = if (line.needsYou) ColorProvider(Attention) else GlanceTheme.colors.onSurfaceVariant,
+            ),
+            modifier = GlanceModifier.padding(end = 6.dp, top = 2.dp),
         )
-        Text(
-            text = needs.asking,
-            style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant),
-            maxLines = 2,
-        )
+        Column {
+            Text(
+                text = line.project,
+                style = TextStyle(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = GlanceTheme.colors.onSurface,
+                ),
+                maxLines = 1,
+            )
+            Text(
+                text = line.detail,
+                style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant),
+                maxLines = 1,
+            )
+        }
     }
 }
 

@@ -40,7 +40,7 @@ object DeckSummaryStore {
 
     /** True when the write actually changes what a widget would draw. */
     fun differs(previous: DeckSummary, next: DeckSummary): Boolean =
-        previous.needing != next.needing ||
+        previous.lines != next.lines ||
             previous.attention != next.attention ||
             previous.running != next.running ||
             previous.idle != next.idle ||

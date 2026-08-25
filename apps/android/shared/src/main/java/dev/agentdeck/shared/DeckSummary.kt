@@ -16,12 +16,20 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class DeckSummary(
-    /** The ones there is room to name, longest wait first. */
-    val needing: List<NeedsYou> = emptyList(),
     /**
-     * How many are waiting in total, which is not `needing.size`.
+     * The deck itself, most worth seeing first.
      *
-     * Kept separate because the list is capped at what a widget can draw and
+     * Not only the sessions asking for you. A widget that listed nothing but
+     * those is blank whenever the answer is "none", which is most of the time -
+     * and a card that is empty most of the time reads as broken rather than
+     * calm. What the sessions are doing is worth the space when nothing needs
+     * doing about them.
+     */
+    val lines: List<DeckLine> = emptyList(),
+    /**
+     * How many are waiting in total, which is not the number of waiting lines.
+     *
+     * Kept separate because the list is capped at what a surface can draw and
      * the count is not: deriving one from the other made six waiting sessions
      * display as three, quietly reporting that the other three were fine.
      */
@@ -35,72 +43,79 @@ data class DeckSummary(
 ) {
     /** The whole deck, once every session is counted somewhere. */
     val total: Int get() = attention + running + idle
+
+    /** Only the ones asking for a person, which is all a small screen shows. */
+    val needing: List<DeckLine> get() = lines.filter { it.needsYou }
 }
 
-/** One session asking for a person, named the way a person would recognise it. */
+/** One session, named the way a person would recognise it. */
 @Serializable
-data class NeedsYou(
+data class DeckLine(
     val agentId: String,
     /** Project rather than the full session name: it is what fits and what identifies. */
     val project: String,
-    /** What it is waiting on - an approval, a question, a prompt in the terminal. */
-    val asking: String,
+    /** What it is waiting on, or what it is doing. */
+    val detail: String,
+    val needsYou: Boolean = false,
 )
 
-/**
- * Reduces a snapshot to the summary a widget draws.
- *
- * Attention is decided by [AttentionPolicy]'s own vocabulary rather than a
- * second reading of `state`: a session is waiting because something is
- * genuinely unanswered, and the policy is where that judgement already lives.
- */
 object DeckSummaries {
-    /** More than this and a widget is a list, not a glance. */
-    const val MAX_NEEDING: Int = 3
+    /**
+     * Enough lines for the largest surface that draws them, so one stored
+     * summary serves a phone widget at any size and a watch tile at one.
+     */
+    const val MAX_LINES: Int = 8
 
     fun of(agents: List<Agent>, observedAt: Long): DeckSummary {
         val live = agents.filter { it.state != "offline" }
-        val needing = live
-            .filter { it.state == "waiting" }
-            // Oldest first: the one that has been waiting longest is the one
-            // most likely to have stopped making progress.
-            .sortedBy { it.lastSeenAt }
-            .map {
-                NeedsYou(
-                    agentId = it.id,
-                    project = it.project.ifBlank { it.name },
-                    asking = it.task.ifBlank { "Needs your attention" },
-                )
-            }
+        val waiting = live.filter { it.state == "waiting" }
+        val running = live.filter { it.state == "running" }
+        val resting = live.filter { it.state != "waiting" && it.state != "running" }
+
+        // Waiting first, and oldest first within it: the session that has been
+        // waiting longest is the one most likely to have stopped making
+        // progress. Then what is working, then what is not.
+        val ordered = waiting.sortedBy { it.lastSeenAt } + running + resting
         return DeckSummary(
-            needing = needing.take(MAX_NEEDING),
-            attention = needing.size,
-            running = live.count { it.state == "running" },
-            idle = live.count { it.state != "waiting" && it.state != "running" },
+            lines = ordered.take(MAX_LINES).map { agent ->
+                DeckLine(
+                    agentId = agent.id,
+                    project = agent.project.ifBlank { agent.name },
+                    detail = agent.task.ifBlank {
+                        if (agent.state == "waiting") "Needs your attention" else agent.state
+                    },
+                    needsYou = agent.state == "waiting",
+                )
+            },
+            attention = waiting.size,
+            running = running.size,
+            idle = resting.size,
             observedAt = observedAt,
             reachedBridge = true,
         )
     }
 
     /**
-     * The line a widget shows when nothing is asking for you.
+     * The line a surface leads with.
      *
-     * Deliberately not "0 need you". A widget that reports zero of something is
+     * Deliberately never "0 need you". A widget reporting zero of something is
      * reporting a problem it does not have; what is true is that work is going
      * on, or that nothing is.
      */
-    fun restingLine(summary: DeckSummary): String = when {
+    fun headline(summary: DeckSummary): String = when {
         !summary.reachedBridge -> "Not connected"
+        summary.attention == 1 -> "1 needs you"
+        summary.attention > 1 -> "${summary.attention} need you"
         summary.running > 0 -> "${summary.running} working"
         summary.total == 0 -> "No sessions"
         else -> "All idle"
     }
 
     /**
-     * How many more are waiting than the widget had room for.
+     * How many sessions a surface did not have room for.
      *
-     * Reported rather than dropped: a widget that silently shows three of five
-     * is telling you that two sessions do not need you, which is a lie.
+     * Reported rather than dropped: a widget showing three of eight without a
+     * word is telling you the deck has three sessions.
      */
-    fun overflow(summary: DeckSummary, shown: Int): Int = (summary.attention - shown).coerceAtLeast(0)
+    fun overflow(summary: DeckSummary, shown: Int): Int = (summary.total - shown).coerceAtLeast(0)
 }
