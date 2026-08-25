@@ -26,23 +26,9 @@ import {
 } from "../../packages/agent-adapter/src/file-snapshot";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
 import { drainRemoteMessages, promptContext, stopHookDecision } from "./remote-messages";
+import { parseHookPayload, type ToolArguments } from "./hook-input";
 import { discoverSlashCommands } from "./slash-commands";
 
-type HookInput = Record<string, unknown> & {
-  session_id?: string;
-  cwd?: string;
-  hook_event_name?: string;
-  tool_name?: string;
-  tool_use_id?: string;
-  tool_input?: Record<string, unknown>;
-  tool_response?: unknown;
-  prompt?: string;
-  last_assistant_message?: string;
-  notification_type?: string;
-  message?: string;
-  transcript_path?: string;
-  permission_mode?: string;
-};
 type HookState = {
   state: AgentState;
   task: string;
@@ -86,10 +72,10 @@ const QUESTION_TIMEOUT_MS = Math.max(
 const runtime = process.argv[2] === "codex" ? "codex" : "claude";
 const expectedEvent = process.argv[3] ?? "";
 const inputText = await Bun.stdin.text();
-const input = (inputText.trim() ? JSON.parse(inputText) : {}) as HookInput;
-const event = canonicalLifecycleEvent(input.hook_event_name ?? expectedEvent);
-const cwd = typeof input.cwd === "string" ? input.cwd : process.cwd();
-const sessionSeed = input.session_id ?? `${cwd}:${input.transcript_path ?? process.ppid}`;
+const input = parseHookPayload(inputText);
+const event = canonicalLifecycleEvent(input.eventName ?? expectedEvent);
+const cwd = input.cwd ?? process.cwd();
+const sessionSeed = input.sessionId ?? `${cwd}:${input.transcriptPath ?? process.ppid}`;
 const sessionKey = createHash("sha256").update(String(sessionSeed)).digest("hex").slice(0, 24);
 const agentId = `${runtime}-${sessionKey}`;
 const stateDirectory = join(homedir(), ".cache", "agent-deck", "runtime-hooks");
@@ -130,7 +116,7 @@ state.name = `${runtime === "claude" ? "Claude" : "Codex"} Â· ${state.project} Â
 state.ownerPid = runtimeOwnerPid();
 state.capabilities = ["approve", "reject", "steer", "prompt", "follow_up"];
 // The daemon tails this for reasoning between hook invocations, so it has to know where it is.
-if (typeof input.transcript_path === "string") state.transcriptPath = input.transcript_path;
+if (input.transcriptPath !== undefined) state.transcriptPath = input.transcriptPath;
 
 function ensureDaemon() {
   const pidPath = `${statePath}.pid`;
@@ -162,9 +148,9 @@ function ensureDaemon() {
 }
 
 function updateUsageFromTranscript() {
-  if (typeof input.transcript_path !== "string") return;
+  if (input.transcriptPath === undefined) return;
   try {
-    const lines = readFileSync(input.transcript_path, "utf8").split("\n").filter(Boolean);
+    const lines = readFileSync(input.transcriptPath, "utf8").split("\n").filter(Boolean);
     if (runtime === "claude") {
       const seen = new Set<string>();
       let processedTokens = 0;
@@ -297,11 +283,11 @@ const publish = (
     ...extra,
   });
 
-function toolTarget(toolInput: Record<string, unknown>): string | undefined {
+function toolTarget(toolInput: ToolArguments): string | undefined {
   const target =
-    typeof toolInput.file_path === "string"
+    toolInput.file_path !== undefined
       ? toolInput.file_path
-      : typeof toolInput.path === "string"
+      : toolInput.path !== undefined
         ? toolInput.path
         : undefined;
   return target ? (target.startsWith("/") ? target : join(cwd, target)) : undefined;
@@ -309,7 +295,7 @@ function toolTarget(toolInput: Record<string, unknown>): string | undefined {
 
 /** Keys a snapshot to one tool call, falling back to the target path when the runtime omits an id. */
 function snapshotKey(target: string) {
-  return `${sessionKey}:${input.tool_use_id ?? target}`;
+  return `${sessionKey}:${input.toolUseId ?? target}`;
 }
 
 /**
@@ -317,7 +303,7 @@ function snapshotKey(target: string) {
  * diff the real before/after and emit unified hunks with true line numbers; otherwise we fall back
  * to the runtime's own before/after strings, which carry no positions.
  */
-function fileDiff(tool: string, toolInput: Record<string, unknown>): string | undefined {
+function fileDiff(tool: string, toolInput: ToolArguments): string | undefined {
   const target = toolTarget(toolInput);
   if (mutatesFile(tool, target)) {
     const before = consumeSnapshot(snapshotDirectory, snapshotKey(target));
@@ -329,8 +315,8 @@ function fileDiff(tool: string, toolInput: Record<string, unknown>): string | un
       if (unified !== null) return clipMultiline(unified, 16_000);
     }
   }
-  const oldText = typeof toolInput.old_string === "string" ? toolInput.old_string : undefined;
-  const newText = typeof toolInput.new_string === "string" ? toolInput.new_string : undefined;
+  const oldText = toolInput.old_string;
+  const newText = toolInput.new_string;
   if (oldText != null && newText != null) {
     return clipMultiline(
       `- ${oldText.replace(/\n/g, "\n- ")}\n+ ${newText.replace(/\n/g, "\n+ ")}`,
@@ -344,8 +330,8 @@ function fileDiff(tool: string, toolInput: Record<string, unknown>): string | un
 }
 
 async function preToolUse() {
-  const toolName = input.tool_name ?? "tool";
-  const toolInput = input.tool_input ?? {};
+  const toolName = input.toolName ?? "tool";
+  const toolInput = input.toolArguments;
   state.state = "running";
   state.task = `Using ${toolName}`;
   if (/ask.?user.?question/i.test(toolName)) {
@@ -432,7 +418,13 @@ async function preToolUse() {
     }
   }
   if (
-    !shouldRequestRemoteApproval(runtime, input.permission_mode, toolName, toolInput, approvalMode)
+    !shouldRequestRemoteApproval(
+      runtime,
+      input.permissionMode,
+      toolName,
+      toolInput.raw,
+      approvalMode,
+    )
   ) {
     state.pendingApproval = undefined;
     save();
@@ -440,7 +432,7 @@ async function preToolUse() {
     return;
   }
 
-  const detail = describeToolCall(toolName, toolInput);
+  const detail = describeToolCall(toolName, toolInput.raw);
   const approvalId = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   state.state = "waiting";
@@ -570,8 +562,8 @@ switch (event) {
   case "PreToolUse": {
     // The file still holds its old contents here; snapshot it so PostToolUse can produce a real
     // diff instead of reporting the whole new file as additions.
-    const target = toolTarget(input.tool_input ?? {});
-    if (mutatesFile(input.tool_name ?? "", target)) {
+    const target = toolTarget(input.toolArguments ?? {});
+    if (mutatesFile(input.toolName ?? "", target)) {
       pruneSnapshots(snapshotDirectory);
       captureSnapshot(snapshotDirectory, snapshotKey(target), target);
     }
@@ -581,8 +573,8 @@ switch (event) {
     process.exit(0);
   }
   case "PostToolUse": {
-    const tool = input.tool_name ?? "Tool";
-    const toolInput = input.tool_input ?? {};
+    const tool = input.toolName ?? "Tool";
+    const toolInput = input.toolArguments;
     const path =
       typeof toolInput.file_path === "string"
         ? toolInput.file_path
@@ -594,14 +586,21 @@ switch (event) {
     const diff = fileDiff(tool, toolInput);
     state.state = "running";
     state.task = `${tool} completed`;
-    const itemId = input.tool_use_id ?? crypto.randomUUID();
+    const itemId = input.toolUseId ?? crypto.randomUUID();
     await publishRuntime(
       "item.completed",
-      { tool, summary: state.task, detail: describeToolCall(tool, toolInput), path, command, diff },
+      {
+        tool,
+        summary: state.task,
+        detail: describeToolCall(tool, toolInput.raw),
+        path,
+        command,
+        diff,
+      },
       { id: `item-completed:${sessionKey}:${itemId}`, itemId, turnId: state.activeTurnId },
     ).catch(() => {});
-    await publish("output", state.task, describeToolCall(tool, toolInput), {
-      id: input.tool_use_id ? `tool:${sessionKey}:${input.tool_use_id}` : undefined,
+    await publish("output", state.task, describeToolCall(tool, toolInput.raw), {
+      id: input.toolUseId ? `tool:${sessionKey}:${input.toolUseId}` : undefined,
       tool,
       path,
       command,
@@ -611,7 +610,7 @@ switch (event) {
   }
   case "PostToolUseFailure":
     state.state = "error";
-    state.task = `${input.tool_name ?? "Tool"} failed`;
+    state.task = `${input.toolName ?? "Tool"} failed`;
     await publishRuntime(
       "runtime.error",
       { message: state.task },
@@ -621,7 +620,7 @@ switch (event) {
     break;
   case "Notification":
     state.state = "waiting";
-    state.task = clip(input.message ?? input.notification_type ?? "Needs attention");
+    state.task = clip(input.message ?? input.notificationType ?? "Needs attention");
     await publishRuntime("session.state.changed", { state: "waiting", task: state.task }).catch(
       () => {},
     );
@@ -630,12 +629,12 @@ switch (event) {
   case "StopFailure":
     state.state = "error";
     state.task = "Response failed";
-    await publish("error", state.task, input.last_assistant_message).catch(() => {});
+    await publish("error", state.task, input.lastAssistantMessage).catch(() => {});
     break;
   case "Stop":
     updateUsageFromTranscript();
     state.state = "idle";
-    state.task = clip(input.last_assistant_message ?? "Turn completed");
+    state.task = clip(input.lastAssistantMessage ?? "Turn completed");
     await publishRuntime(
       "token-usage.updated",
       {
