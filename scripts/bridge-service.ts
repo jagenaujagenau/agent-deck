@@ -22,7 +22,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <dict>
   <key>Label</key><string>${label}</string>
   <key>ProgramArguments</key>
-  <array><string>${xml(bun)}</string><string>run</string><string>src/index.ts</string></array>
+  <array><string>${xml(bun)}</string><string>run</string><string>src/effect/main.ts</string></array>
   <key>WorkingDirectory</key><string>${xml(serverDirectory)}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>

@@ -6,6 +6,7 @@ import { Authorizer } from "./Auth";
 import { BridgeConfig } from "./Config";
 import { BridgeRoutes } from "./Http";
 import { ManagedRuntime } from "./Managed";
+import { BridgeSchema } from "./Schema";
 import { BridgeState } from "./State";
 import { BridgeStore } from "./Store";
 
@@ -23,8 +24,9 @@ const AuthMiddleware = HttpRouter.use(
         // Hono's `c.req.path`, which is not prefix-stripped. Several of its
         // anchored rules therefore never fire; see routePolicy.
         const path = new URL(request.url, "http://bridge").pathname;
-        // Pairing is how a device obtains a credential; it cannot present one.
-        if (path.endsWith("/pair")) return yield* httpApp;
+        // Pairing is how a device obtains a credential; it cannot present one,
+        // and liveness is polled by the service wrapper, which has none either.
+        if (path === "/" || path.endsWith("/pair")) return yield* httpApp;
         const allowed = yield* auth.authorize(
           request.method,
           path,
@@ -49,6 +51,9 @@ const MainLayer = Layer.unwrap(
     return HttpRouter.serve(Layer.merge(BridgeRoutes, AuthMiddleware)).pipe(
       Layer.provide([ManagedRuntime.layer, BridgeStore.layer, Authorizer.layer]),
       Layer.provide(BridgeState.layer),
+      // The schema is built before anything reads it, so a bridge handed an
+      // empty database file still comes up.
+      Layer.provide(BridgeSchema),
       Layer.provide(Sql),
       Layer.provide(BunHttpServer.layer({ port: config.port })),
     );

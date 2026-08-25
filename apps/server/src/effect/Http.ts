@@ -56,6 +56,12 @@ const route = <E, R>(
 ) => HttpRouter.route(method, `${BRIDGE_PREFIX}${path}`, handler);
 
 export const BridgeRoutes = HttpRouter.addAll([
+  /**
+   * Liveness, outside the versioned prefix and outside auth. The service
+   * wrapper polls this to decide whether the bridge came up, and it has no
+   * credential to offer.
+   */
+  HttpRouter.route("GET", "/", Effect.succeed(HttpServerResponse.text("OK"))),
   // ---- reads -------------------------------------------------------------
   route(
     "GET",

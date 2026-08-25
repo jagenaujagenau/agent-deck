@@ -163,7 +163,12 @@ export class BridgeState extends Context.Service<
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const config = yield* BridgeConfig;
-      const revision = yield* SubscriptionRef.make(0);
+      // The revision is the SSE stream's cursor and the snapshot's sequence.
+      // Restarting at zero would send every connected device a sequence lower
+      // than the one it already holds, so it continues where it left off.
+      const storedRevision = yield* sql<{ value: string }>`
+        SELECT value FROM bridge_meta WHERE key = 'revision'`.pipe(Effect.orDie);
+      const revision = yield* SubscriptionRef.make(Number(storedRevision[0]?.value ?? 0) || 0);
       const agentsRef = yield* Ref.make(new Map<string, AgentRecord>());
       const commandsRef = yield* Ref.make(new Map<string, Command>());
 
