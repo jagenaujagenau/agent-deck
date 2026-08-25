@@ -78,6 +78,10 @@ import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import kotlinx.coroutines.flow.update
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
 
 
 class WearActivity : ComponentActivity() {
@@ -86,9 +90,20 @@ class WearActivity : ComponentActivity() {
         const val EXTRA_AGENT_ID = "agent_id"
     }
 
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setTheme(android.R.style.Theme_Material_NoActionBar)
+        // Asked for on launch, because a watch that cannot buzz is a watch that
+        // silently stops being the reason this app exists. Nothing here waits
+        // on the answer: a refused permission costs the alerts, not the app.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         // A notification names the session it is about; opening it should not
         // put the person back at the top of a list to find it again.
         setContent { WearTheme { WearDeck(openAgentId = intent?.getStringExtra(EXTRA_AGENT_ID)) } }
