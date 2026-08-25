@@ -464,10 +464,11 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
             }
           }
           item {
+            // A wear TextButton lays its content out in a Box, not a Row: an
+            // icon beside a label ends up printed over it. The word alone is
+            // clearer here anyway.
             TextButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("Refresh", fontSize = 12.sp)
+                Text("Refresh", fontSize = 13.sp)
             }
           }
         }
@@ -523,6 +524,7 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
         .filter { it.kind == "question" && it.options.isNotEmpty() }
         .maxByOrNull { it.createdAt }
         ?.takeIf { agent.state == "waiting" }
+    val wantsDecision = hasApproval || pendingQuestion != null
     val detailScroll = rememberLazyListState()
     val detailRotary = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { detailRotary.requestFocus() } }
@@ -543,9 +545,15 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
         item {
             IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = Muted, modifier = Modifier.size(20.dp).offset(x = (-1).dp)) }
         }
-        item {
-            Box(Modifier.size(52.dp).clip(CircleShape).background(color.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
-                Icon(statusIcon(agent.state), null, tint = color, modifier = Modifier.size(26.dp))
+        // A session wanting a decision leads with it. The status disc is
+        // identity, not information you need while deciding, and on this screen
+        // it is the difference between the buttons being visible and being a
+        // scroll away - on the one screen you reached for because it buzzed.
+        if (!wantsDecision) {
+            item {
+                Box(Modifier.size(52.dp).clip(CircleShape).background(color.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                    Icon(statusIcon(agent.state), null, tint = color, modifier = Modifier.size(26.dp))
+                }
             }
         }
         item {
@@ -558,13 +566,15 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
                 )
                 Text(agent.state.uppercase(), color = color, fontSize = 10.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(7.dp))
-                Text(
-                    agentCardActivity(agent),
-                    color = Muted,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    maxLines = 3,
-                )
+                if (!wantsDecision) {
+                    Text(
+                        agentCardActivity(agent),
+                        color = Muted,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 3,
+                    )
+                }
             }
         }
         if (busy) item { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) }
