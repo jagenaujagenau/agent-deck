@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   canonicalLifecycleEvent,
+  notificationIsIdle,
   shouldRequestRemoteApproval,
   shouldUseAgentDeckApproval,
 } from "./lifecycle";
@@ -46,5 +47,28 @@ describe("shouldUseAgentDeckApproval", () => {
     expect(shouldUseAgentDeckApproval("default")).toBe(true);
     expect(shouldUseAgentDeckApproval("acceptEdits")).toBe(true);
     expect(shouldUseAgentDeckApproval(undefined)).toBe(true);
+  });
+});
+
+describe("notificationIsIdle", () => {
+  // Both strings are taken verbatim from what this bridge has actually stored,
+  // not from the shapes the hook documentation describes.
+  test("an idle prompt is not a request for attention", () => {
+    expect(notificationIsIdle("Claude is waiting for your input")).toBe(true);
+  });
+
+  test("a permission prompt still needs a person", () => {
+    expect(notificationIsIdle("Claude needs your permission")).toBe(false);
+    expect(notificationIsIdle("Claude needs your permission to use Bash")).toBe(false);
+  });
+
+  test("unfamiliar wording is treated as needing a person", () => {
+    expect(notificationIsIdle("Something new happened")).toBe(false);
+    expect(notificationIsIdle("")).toBe(false);
+  });
+
+  test("a tool named for idling does not read as an idle prompt", () => {
+    // "idle" as a word means the prompt is empty; as part of a name it does not.
+    expect(notificationIsIdle("Claude needs your permission to use idlectl")).toBe(false);
   });
 });

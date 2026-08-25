@@ -15,7 +15,11 @@ import {
   describeToolCall,
   type ApprovalMode,
 } from "../../packages/agent-adapter/src/approval-policy";
-import { canonicalLifecycleEvent, shouldRequestRemoteApproval } from "./lifecycle";
+import {
+  canonicalLifecycleEvent,
+  notificationIsIdle,
+  shouldRequestRemoteApproval,
+} from "./lifecycle";
 import { projectNameForCwd } from "./project";
 import {
   captureSnapshot,
@@ -662,14 +666,33 @@ switch (event) {
     ).catch(() => {});
     await publish("error", state.task).catch(() => {});
     break;
-  case "Notification":
+  case "Notification": {
+    const message = clip(input.message ?? input.notificationType ?? "Needs attention");
+    // An approval already in flight outranks the wording: the blocked PreToolUse
+    // process is genuinely holding, whatever this notification happens to say.
+    const holdingApproval =
+      state.pendingApproval !== undefined &&
+      Date.parse(state.pendingApproval.expiresAt) > Date.now();
+    if (notificationIsIdle(message) && !holdingApproval) {
+      // The turn is over and Claude is back at its prompt. Said as idle rather
+      // than skipped, so a session whose Stop never landed - an interrupted
+      // turn, a crashed hook - still stops reading as busy. Nothing is
+      // published as an event: there is nothing here for a person to answer.
+      state.state = "idle";
+      state.task = "Ready for an instruction";
+      await publishRuntime("session.state.changed", { state: "idle", task: state.task }).catch(
+        () => {},
+      );
+      break;
+    }
     state.state = "waiting";
-    state.task = clip(input.message ?? input.notificationType ?? "Needs attention");
+    state.task = message;
     await publishRuntime("session.state.changed", { state: "waiting", task: state.task }).catch(
       () => {},
     );
     await publish("warning", "Needs attention", state.task).catch(() => {});
     break;
+  }
   case "StopFailure":
     state.state = "error";
     state.task = "Response failed";
