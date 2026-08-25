@@ -52,7 +52,12 @@ export class BridgeStore extends Context.Service<
     /** Every agent the bridge knows, as the snapshot renders them. */
     readonly agents: Effect.Effect<ReadonlyArray<Record<string, unknown>>, StoredAgentError>;
     /** A session's retained history: whole conversation plus recent activity. */
-    readonly history: (agentId: string) => Effect.Effect<ReadonlyArray<AgentEvent>>;
+    /**
+     * A session's retained history. `limit` trims it to the most recent
+     * exchanges for a caller that cannot use the whole thing - a watch reading
+     * over wifi, where the full history is most of a megabyte.
+     */
+    readonly history: (agentId: string, limit?: number) => Effect.Effect<ReadonlyArray<AgentEvent>>;
     /** Every file change a session produced, oldest first. */
     readonly fileChanges: (agentId: string) => Effect.Effect<ReadonlyArray<AgentEvent>>;
     /** What a session can be asked to run by name. */
@@ -114,7 +119,7 @@ export class BridgeStore extends Context.Service<
           createdAt: row.created_at,
         }));
 
-      const history = Effect.fn("BridgeStore.history")(function* (agentId: string) {
+      const history = Effect.fn("BridgeStore.history")(function* (agentId: string, limit?: number) {
         // Conversation is fetched separately from recent activity: tool events
         // outnumber messages by an order of magnitude, so a flat "most recent
         // N" would keep the chatter and drop the conversation.
@@ -134,7 +139,11 @@ export class BridgeStore extends Context.Service<
         const byId = new Map<string, AgentEvent>();
         for (const event of rowsToEvents(conversation)) byId.set(event.id, event);
         for (const event of rowsToEvents(recent)) byId.set(event.id, event);
-        return [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        const ordered = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        // Trimming takes the newest, because a conversation is read from its end.
+        return limit !== undefined && limit > 0 && ordered.length > limit
+          ? ordered.slice(-limit)
+          : ordered;
       }, Effect.orDie);
 
       const fileChanges = Effect.fn("BridgeStore.fileChanges")(function* (agentId: string) {

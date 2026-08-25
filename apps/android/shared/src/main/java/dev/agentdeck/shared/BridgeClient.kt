@@ -67,8 +67,13 @@ class BridgeClient(
      * cards, so on a busy session the conversation, reasoning and terminal output all age out of
      * it — the session view reads them here instead.
      */
-    suspend fun history(agentId: String): List<AgentEvent> = withContext(Dispatchers.IO) {
-        val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/history").get().build()
+    /**
+     * A session's retained history. `limit` asks the bridge for only the most
+     * recent events, for a caller that cannot afford the whole thing.
+     */
+    suspend fun history(agentId: String, limit: Int? = null): List<AgentEvent> = withContext(Dispatchers.IO) {
+        val suffix = limit?.let { "?limit=$it" }.orEmpty()
+        val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/history$suffix").get().build()
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("Bridge returned ${response.code}")
             json.decodeFromString<AgentHistory>(response.body.string()).events
@@ -259,7 +264,8 @@ class AgentRepository(private val client: BridgeClient) {
 
     suspend fun changes(agentId: String): List<AgentEvent> = client.changes(agentId)
 
-    suspend fun history(agentId: String): List<AgentEvent> = client.history(agentId)
+    suspend fun history(agentId: String, limit: Int? = null): List<AgentEvent> =
+        client.history(agentId, limit)
 
     suspend fun slashCommands(agentId: String): List<SlashCommand> = client.slashCommands(agentId)
 

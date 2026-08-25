@@ -77,8 +77,11 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/agents/:agentId/history",
     Effect.gen(function* () {
       const store = yield* BridgeStore;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const asked = Number(new URL(request.url, "http://bridge").searchParams.get("limit"));
+      const limit = Number.isFinite(asked) && asked > 0 ? asked : undefined;
       return yield* HttpServerResponse.json({
-        events: yield* store.history(yield* param("agentId")),
+        events: yield* store.history(yield* param("agentId"), limit),
       });
     }),
   ),

@@ -91,6 +91,9 @@ class WearActivity : ComponentActivity() {
 /** Control actions that ride the command queue rather than a waiting runtime. */
 private val QUEUED_ACTIONS = setOf("pause", "resume", "stop")
 
+/** Enough recent events to hold the newest message, thought and command. */
+private const val WATCH_HISTORY_LIMIT = 60
+
 class WearDeckViewModel(application: Application) : AndroidViewModel(application),
     com.google.android.gms.wearable.DataClient.OnDataChangedListener,
     com.google.android.gms.wearable.MessageClient.OnMessageReceivedListener {
@@ -182,10 +185,20 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
     private val _historyLoading = MutableStateFlow<String?>(null)
     val historyLoading = _historyLoading.asStateFlow()
 
+    private val _historyFailed = MutableStateFlow<String?>(null)
+
+    /** Which session could not be fetched, so "empty" is not shown for "unreachable". */
+    val historyFailed = _historyFailed.asStateFlow()
+
     fun loadHistory(agentId: String) = viewModelScope.launch {
         _historyLoading.value = agentId
-        runCatching { repository.history(agentId) }
+        _historyFailed.value = null
+        // The watch asks for the tail rather than the whole session: the full
+        // history of a long run is most of a megabyte and takes seconds over
+        // wifi, and only the newest of each thing is shown here anyway.
+        runCatching { repository.history(agentId, limit = WATCH_HISTORY_LIMIT) }
             .onSuccess { events -> _sessionEvents.update { it + (agentId to events) } }
+            .onFailure { _historyFailed.value = agentId }
         _historyLoading.value = null
     }
 
@@ -342,6 +355,7 @@ private fun WearDeck(vm: WearDeckViewModel = viewModel()) {
     val commandNotice by vm.commandNotice.collectAsStateWithLifecycle()
     val sessionEvents by vm.sessionEvents.collectAsStateWithLifecycle()
     val historyLoading by vm.historyLoading.collectAsStateWithLifecycle()
+    val historyFailed by vm.historyFailed.collectAsStateWithLifecycle()
     var selected by remember { mutableStateOf<String?>(null) }
     val snapshot = when (val current = state) {
         is BridgeState.Ready -> current.snapshot
@@ -369,31 +383,24 @@ private fun WearDeck(vm: WearDeckViewModel = viewModel()) {
                         // is already how this app moves.
                         val events = sessionEvents[agent.id].orEmpty()
                         LaunchedEffect(agent.id) { vm.loadHistory(agent.id) }
-                        val detailPager = rememberPagerState(pageCount = { 3 })
-                        HorizontalPager(state = detailPager, modifier = Modifier.fillMaxSize()) { page ->
-                            when (page) {
-                                0 -> AgentDetail(
-                                    agent,
-                                    busy == agent.id,
-                                    deliveryError,
-                                    commandNotice,
-                                    onBack = { selected = null },
-                                    onAnswer = { event, option -> vm.answer(agent, event, option) },
-                                ) { vm.control(agent, it) }
-                                1 -> WatchReasoning(events, historyLoading == agent.id)
-                                else -> WatchConversation(
-                                    events,
-                                    historyLoading == agent.id,
-                                    // Which action carries words depends on what
-                                    // the runtime accepts, exactly as on the phone.
-                                    sendAction = remoteMessageAction(agent.state) { action ->
-                                        supportsCapability(agent.capabilities, action)
-                                    },
-                                    busy = busy == agent.id,
-                                    onSend = { text, action -> vm.control(agent, action, text) },
-                                )
-                            }
-                        }
+                        // One vertical screen, not pages. A HorizontalPager
+                        // inside SwipeToDismissBox fights it for the same drag,
+                        // and with only the latest of each thing to show there
+                        // is not enough here to be worth a second page.
+                        AgentDetail(
+                            agent,
+                            busy == agent.id,
+                            deliveryError,
+                            commandNotice,
+                            onAnswer = { event, option -> vm.answer(agent, event, option) },
+                            sendAction = remoteMessageAction(agent.state) { action ->
+                                supportsCapability(agent.capabilities, action)
+                            },
+                            onSend = { text, action -> vm.control(agent, action, text) },
+                            latest = latestOf(events),
+                            historyLoading = historyLoading == agent.id,
+                            historyFailed = historyFailed == agent.id,
+                        ) { vm.control(agent, it) }
                     }
                 }
             }
@@ -560,11 +567,22 @@ private fun WearAgentCard(agent: Agent, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, commandNotice: String?, onBack: () -> Unit, onAnswer: (AgentEvent, String) -> Unit, onControl: (String) -> Unit) {
+private fun AgentDetail(
+    agent: Agent,
+    busy: Boolean,
+    deliveryError: String?,
+    commandNotice: String?,
+    onAnswer: (AgentEvent, String) -> Unit,
+    sendAction: String?,
+    onSend: (String, String) -> Unit,
+    latest: List<LatestSection>,
+    historyLoading: Boolean,
+    historyFailed: Boolean,
+    onControl: (String) -> Unit,
+) {
     val color = statusColor(agent.state)
     val haptics = LocalHapticFeedback.current
     val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
-    val latest = agent.events.maxByOrNull { it.createdAt }
     val hasApproval = agent.state == "waiting" && agent.pendingApproval != null
     // Only a question with preset options is answerable from a watch; free-text belongs on the host.
     val pendingQuestion = agent.events
@@ -589,20 +607,10 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item {
-            IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = Muted, modifier = Modifier.size(20.dp).offset(x = (-1).dp)) }
-        }
-        // A session wanting a decision leads with it. The status disc is
-        // identity, not information you need while deciding, and on this screen
-        // it is the difference between the buttons being visible and being a
-        // scroll away - on the one screen you reached for because it buzzed.
-        if (!wantsDecision) {
-            item {
-                Box(Modifier.size(52.dp).clip(CircleShape).background(color.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
-                    Icon(statusIcon(agent.state), null, tint = color, modifier = Modifier.size(26.dp))
-                }
-            }
-        }
+        // No status disc. It repeated what the state word beneath it already
+        // says, in a colour that word already carries, and cost 64dp of a
+        // 384px screen - about one control - on the screen where the controls
+        // are the point.
         item {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -698,6 +706,11 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
                 }
             }
         }
+        if (sendAction != null) {
+            item {
+                WatchComposer(label = "Reply", enabled = !busy) { text -> onSend(text, sendAction) }
+            }
+        }
         item {
             OutlinedButton(
                 onClick = { onControl("stop") },
@@ -706,23 +719,36 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
             ) { Icon(Icons.Rounded.Stop, null); Spacer(Modifier.width(6.dp)); Text("Stop") }
         }
-        latest?.let { event ->
+        // The newest message, thought and command, which is what "what is it
+        // doing" actually asks. Fetched from the bridge rather than the phone
+        // relay, which carries one event per agent.
+        if (latest.isEmpty()) {
             item {
-                Surface(shape = RoundedCornerShape(18.dp), color = Surface, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(13.dp)) {
-                        Text("LATEST", color = Muted, fontSize = 9.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(5.dp))
-                        Text(event.summary, fontSize = 12.sp, maxLines = 2)
-                        event.detail?.let { detail ->
-                            Spacer(Modifier.height(4.dp))
-                            Text(detail, color = Text, fontSize = 11.sp, maxLines = 4)
-                        }
-                        if (event.kind == "question") event.options.take(3).forEachIndexed { index, option ->
-                            Spacer(Modifier.height(4.dp))
-                            Text("${index + 1}. $option", color = Amber, fontSize = 10.sp, maxLines = 2)
-                        }
-                    }
-                }
+                Text(
+                    when {
+                        historyLoading -> "Loading…"
+                        // Unreachable and empty look the same unless one says so.
+                        historyFailed -> "Could not reach the bridge"
+                        else -> "Nothing recorded yet"
+                    },
+                    color = Muted,
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        items(latest.size) { index ->
+            val section = latest[index]
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Surface)
+                    .padding(13.dp),
+            ) {
+                Text(section.label, color = section.tint, fontSize = 9.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(5.dp))
+                Text(section.body, fontSize = 12.sp)
             }
         }
     }
