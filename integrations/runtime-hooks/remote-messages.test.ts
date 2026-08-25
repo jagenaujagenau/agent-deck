@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { RemoteCommand } from "../../packages/agent-adapter/src/index";
 import {
   countQueuedMessages,
+  promptContext,
   drainRemoteMessages,
   isRemoteMessage,
   queuedMessageNotice,
@@ -123,5 +124,19 @@ describe("queued message reporting", () => {
   test("an empty queue produces no notice, so the real activity line shows through", () => {
     expect(queuedMessageNotice(0)).toBeUndefined();
     expect(queuedMessageNotice(-1)).toBeUndefined();
+  });
+});
+
+describe("promptContext", () => {
+  test("labels a single queued message as having arrived before the prompt", () => {
+    const text = promptContext(["go for it"]);
+    expect(text).toContain("before this prompt");
+    expect(text).toContain("go for it");
+  });
+
+  test("numbers several, oldest first", () => {
+    const text = promptContext(["first", "second"]);
+    expect(text).toContain("oldest first");
+    expect(text.indexOf("1. first")).toBeLessThan(text.indexOf("2. second"));
   });
 });

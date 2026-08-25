@@ -78,3 +78,24 @@ export async function countQueuedMessages(
 ): Promise<number> {
   return (await queue.commands(agentId)).filter(isRemoteMessage).length;
 }
+
+/**
+ * Renders queued messages as extra context on a prompt the user is submitting.
+ *
+ * The Stop hook can only deliver what was queued while a turn was running: it
+ * fires at the end of one, and a session sitting idle runs none. When the user
+ * comes back to the terminal and types, that is the first moment anything
+ * queued in the meantime can reach the model, so it is folded into their turn
+ * rather than left waiting for the turn after.
+ */
+export function promptContext(messages: string[]): string {
+  const body =
+    messages.length === 1
+      ? messages[0]
+      : messages.map((message, index) => `${index + 1}. ${message}`).join("\n\n");
+  const preface =
+    messages.length === 1
+      ? "The user sent this from Agent Deck before this prompt:"
+      : "The user sent these from Agent Deck before this prompt, oldest first:";
+  return `${preface}\n\n${body}`;
+}

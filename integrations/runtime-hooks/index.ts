@@ -25,7 +25,7 @@ import {
   readFileForDiff,
 } from "../../packages/agent-adapter/src/file-snapshot";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
-import { drainRemoteMessages, stopHookDecision } from "./remote-messages";
+import { drainRemoteMessages, promptContext, stopHookDecision } from "./remote-messages";
 import { discoverSlashCommands } from "./slash-commands";
 
 type HookInput = Record<string, unknown> & {
@@ -558,6 +558,14 @@ switch (event) {
       { turnId: state.activeTurnId },
     ).catch(() => {});
     await publish("thought", "Received instruction", state.task).catch(() => {});
+    {
+      // Anything queued from the app while this session sat idle has had no
+      // delivery point - Stop fires at the end of a turn and an idle session
+      // runs none. The user typing is the first moment one can be delivered,
+      // so it joins this turn instead of waiting for the turn after it.
+      const queued = await drainRemoteMessages(client, agentId).catch(() => [] as string[]);
+      if (queued.length > 0) console.log(promptContext(queued));
+    }
     break;
   case "PreToolUse": {
     // The file still holds its old contents here; snapshot it so PostToolUse can produce a real
