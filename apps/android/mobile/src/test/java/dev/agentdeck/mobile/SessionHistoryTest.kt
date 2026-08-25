@@ -3,6 +3,10 @@ package dev.agentdeck.mobile
 import dev.agentdeck.shared.AgentEvent
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import dev.agentdeck.shared.ConversationRole
+import dev.agentdeck.shared.ConversationEntry
+import dev.agentdeck.shared.conversationEntries
+import dev.agentdeck.shared.mergeSessionEvents
 
 class SessionHistoryTest {
     private fun event(

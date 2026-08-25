@@ -77,16 +77,8 @@ import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
+import kotlinx.coroutines.flow.update
 
-private val Ink = Color(0xFF090C10)
-private val Surface = Color(0xFF171C22)
-private val Line = Color(0xFF303841)
-private val Text = Color(0xFFF1F5F4)
-private val Muted = Color(0xFF929DA7)
-private val Signal = Color(0xFF83E6B2)
-private val Amber = Color(0xFFFFC266)
-private val Danger = Color(0xFFFF7B7B)
-private val Blue = Color(0xFF8CB7FF)
 
 class WearActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -176,12 +168,33 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         sendToPhone(REFRESH_PATH, ByteArray(0), fallback = { repository.refresh() })
     }
 
+    private val _sessionEvents = MutableStateFlow<Map<String, List<AgentEvent>>>(emptyMap())
+
+    /**
+     * A session's retained history, fetched straight from the bridge.
+     *
+     * The phone relay carries one event per agent - enough for a status card
+     * and nothing like enough for a conversation - so the watch asks the bridge
+     * itself. It already holds the credentials the phone synced to it.
+     */
+    val sessionEvents = _sessionEvents.asStateFlow()
+
+    private val _historyLoading = MutableStateFlow<String?>(null)
+    val historyLoading = _historyLoading.asStateFlow()
+
+    fun loadHistory(agentId: String) = viewModelScope.launch {
+        _historyLoading.value = agentId
+        runCatching { repository.history(agentId) }
+            .onSuccess { events -> _sessionEvents.update { it + (agentId to events) } }
+        _historyLoading.value = null
+    }
+
     private val _commandNotice = MutableStateFlow<String?>(null)
 
     /** What becomes of the last command, when it is not simply collected. */
     val commandNotice = _commandNotice.asStateFlow()
 
-    fun control(agent: Agent, action: String) {
+    fun control(agent: Agent, action: String, value: String? = null) {
         val commandId = UUID.randomUUID().toString()
         _busy.value = agent.id
         _deliveryError.value = null
@@ -190,12 +203,21 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         // goes on the same queue a message does, and a session running no turn
         // has nothing to collect it with until it moves.
         _commandNotice.value =
-            if (action in QUEUED_ACTIONS) deliveryNotice(agent.state) else null
+            if (action in QUEUED_ACTIONS || value != null) deliveryNotice(agent.state) else null
         pendingCommands[commandId] = agent.id
-        val payloadText = JSONObject().put("commandId", commandId).put("agentId", agent.id).put("action", action).toString()
+        val payloadText = JSONObject()
+            .put("commandId", commandId)
+            .put("agentId", agent.id)
+            .put("action", action)
+            .apply { if (value != null) put("value", value) }
+            .toString()
         commandOutbox.put(commandId, payloadText)
         val payload = payloadText.toByteArray()
-        sendToPhone(CONTROL_PATH, payload, fallback = { repository.control(agent.id, action, commandId = commandId) })
+        sendToPhone(
+            CONTROL_PATH,
+            payload,
+            fallback = { repository.control(agent.id, action, value, commandId = commandId) },
+        )
         viewModelScope.launch {
             delay(12_000)
             if (pendingCommands.remove(commandId) != null) {
@@ -318,6 +340,8 @@ private fun WearDeck(vm: WearDeckViewModel = viewModel()) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val deliveryError by vm.deliveryError.collectAsStateWithLifecycle()
     val commandNotice by vm.commandNotice.collectAsStateWithLifecycle()
+    val sessionEvents by vm.sessionEvents.collectAsStateWithLifecycle()
+    val historyLoading by vm.historyLoading.collectAsStateWithLifecycle()
     var selected by remember { mutableStateOf<String?>(null) }
     val snapshot = when (val current = state) {
         is BridgeState.Ready -> current.snapshot
@@ -339,14 +363,37 @@ private fun WearDeck(vm: WearDeckViewModel = viewModel()) {
                     if (isBackground) {
                         Box(Modifier.fillMaxSize().background(Ink))
                     } else {
-                        AgentDetail(
-                            agent,
-                            busy == agent.id,
-                            deliveryError,
-                            commandNotice,
-                            onBack = { selected = null },
-                            onAnswer = { event, option -> vm.answer(agent, event, option) },
-                        ) { vm.control(agent, it) }
+                        // Controls, reasoning and conversation are pages of one
+                        // session rather than screens to navigate between: a
+                        // wrist has no room for a tab bar, and a sideways swipe
+                        // is already how this app moves.
+                        val events = sessionEvents[agent.id].orEmpty()
+                        LaunchedEffect(agent.id) { vm.loadHistory(agent.id) }
+                        val detailPager = rememberPagerState(pageCount = { 3 })
+                        HorizontalPager(state = detailPager, modifier = Modifier.fillMaxSize()) { page ->
+                            when (page) {
+                                0 -> AgentDetail(
+                                    agent,
+                                    busy == agent.id,
+                                    deliveryError,
+                                    commandNotice,
+                                    onBack = { selected = null },
+                                    onAnswer = { event, option -> vm.answer(agent, event, option) },
+                                ) { vm.control(agent, it) }
+                                1 -> WatchReasoning(events, historyLoading == agent.id)
+                                else -> WatchConversation(
+                                    events,
+                                    historyLoading == agent.id,
+                                    // Which action carries words depends on what
+                                    // the runtime accepts, exactly as on the phone.
+                                    sendAction = remoteMessageAction(agent.state) { action ->
+                                        supportsCapability(agent.capabilities, action)
+                                    },
+                                    busy = busy == agent.id,
+                                    onSend = { text, action -> vm.control(agent, action, text) },
+                                )
+                            }
+                        }
                     }
                 }
             }

@@ -4,6 +4,10 @@ import dev.agentdeck.shared.AgentEvent
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import dev.agentdeck.shared.supportsCapability
+import dev.agentdeck.shared.ConversationRole
+import dev.agentdeck.shared.conversationEntries
+import dev.agentdeck.shared.reasoningEvents
+import dev.agentdeck.shared.remoteMessageAction
 
 class AgentConversationTest {
     private fun event(id: String, kind: String, summary: String, detail: String? = null, second: Int = 0, command: String? = null) =
