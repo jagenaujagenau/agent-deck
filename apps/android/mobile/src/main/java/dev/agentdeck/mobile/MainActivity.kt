@@ -139,6 +139,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Actions that carry words for the model, as opposed to a control decision. */
+private val MESSAGE_ACTIONS = setOf("prompt", "steer", "follow_up")
+
 class DeckViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("bridge", 0)
     private val tokenStore = SecureTokenStore(application)
@@ -233,11 +236,26 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _commandNotice = MutableStateFlow<String?>(null)
+
+    /** What became of the last message: set only when it did not simply go through. */
+    val commandNotice = _commandNotice.asStateFlow()
+
     fun control(agent: Agent, action: String, value: String? = null) = viewModelScope.launch {
         _commandInFlight.value = agent.id
         runCatching { repository.control(agent.id, action, value) }
-            .onSuccess { _commandError.value = null }
-            .onFailure { _commandError.value = it.message ?: "Command delivery failed" }
+            .onSuccess {
+                _commandError.value = null
+                // The bridge accepting a message is not the session receiving
+                // it. Say which happened, rather than leaving silence to be
+                // read as delivery.
+                _commandNotice.value =
+                    if (action in MESSAGE_ACTIONS) deliveryNotice(agent.state) else null
+            }
+            .onFailure {
+                _commandError.value = it.message ?: "Command delivery failed"
+                _commandNotice.value = null
+            }
         _commandInFlight.value = null
     }
 
@@ -316,6 +334,7 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
     val state by vm.state.collectAsStateWithLifecycle()
     val busyAgent by vm.commandInFlight.collectAsStateWithLifecycle()
     val commandError by vm.commandError.collectAsStateWithLifecycle()
+    val commandNotice by vm.commandNotice.collectAsStateWithLifecycle()
     val analyticsState by vm.analyticsState.collectAsStateWithLifecycle()
     val archivedAgents by vm.archivedAgents.collectAsStateWithLifecycle()
     var destination by rememberSaveable { mutableStateOf(DeckDestination.Agents) }
@@ -344,6 +363,7 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
             agent = openAgent,
             busy = busyAgent == openAgent.id,
             commandError = commandError,
+            commandNotice = commandNotice,
             onDismiss = { selectedAgent = null },
             archived = agentArchiveKey(openAgent) in archivedAgents,
             onArchiveToggle = {
@@ -1184,7 +1204,7 @@ private fun StatusLabel(state: String, color: Color) {
 private enum class AgentViewMode { Responses, Reasoning, Diff, Terminal }
 
 @Composable
-private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit) {
+private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit) {
     var mode by rememberSaveable(agent.id) { mutableStateOf(AgentViewMode.Responses) }
     var confirmingStop by rememberSaveable(agent.id) { mutableStateOf(false) }
     val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
@@ -1307,6 +1327,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                     pendingApproval = pendingApproval,
                     pendingQuestion = pendingQuestion,
                     commandError = commandError,
+                    commandNotice = commandNotice,
                     supports = supports,
                     slashCommands = slashCommands,
                     onControl = onControl,
@@ -1315,7 +1336,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                 )
                 AgentViewMode.Reasoning -> ReasoningView(sessionAgent, Modifier.weight(1f).navigationBarsPadding())
                 AgentViewMode.Diff -> DiffView(fileChanges, changesLoaded, Modifier.weight(1f).navigationBarsPadding())
-                AgentViewMode.Terminal -> TerminalView(sessionAgent, busy, commandError, supports, onControl, Modifier.weight(1f))
+                AgentViewMode.Terminal -> TerminalView(sessionAgent, busy, commandError, commandNotice, supports, onControl, Modifier.weight(1f))
             }
         }
     }
@@ -1371,6 +1392,7 @@ private fun ResponsesView(
     pendingApproval: PendingApproval?,
     pendingQuestion: AgentEvent?,
     commandError: String?,
+    commandNotice: String?,
     supports: (String) -> Boolean,
     slashCommands: List<SlashCommand>,
     onControl: (String, String?) -> Unit,
@@ -1474,7 +1496,7 @@ private fun ResponsesView(
                 Text("New messages")
             }
         }
-        MessageComposer(agent, busy, commandError, supports, slashCommands, onControl)
+        MessageComposer(agent, busy, commandError, commandNotice, supports, slashCommands, onControl)
     }
 }
 
@@ -1550,7 +1572,7 @@ private fun SlashCommandPicker(matches: List<SlashCommand>, onPick: (SlashComman
 }
 
 @Composable
-private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit) {
+private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit) {
     var message by rememberSaveable(agent.id) { mutableStateOf("") }
     val action = remoteMessageAction(agent.state, supports)
     if (action == null) {
@@ -1566,6 +1588,9 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
                 Text("No commands reported by this runtime.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
             }
             commandError?.let { Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
+            if (commandError == null) {
+                commandNotice?.let { Text(it, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
@@ -1885,6 +1910,7 @@ private fun TerminalView(
     agent: Agent,
     busy: Boolean,
     commandError: String?,
+    commandNotice: String?,
     supports: (String) -> Boolean,
     onControl: (String, String?) -> Unit,
     modifier: Modifier = Modifier,
@@ -1977,7 +2003,7 @@ private fun TerminalView(
                 Text("New commands")
             }
         }
-        TerminalCommandComposer(agent, busy, commandError, supports, onControl)
+        TerminalCommandComposer(agent, busy, commandError, commandNotice, supports, onControl)
     }
 }
 
@@ -1986,6 +2012,7 @@ private fun TerminalCommandComposer(
     agent: Agent,
     busy: Boolean,
     commandError: String?,
+    commandNotice: String?,
     supports: (String) -> Boolean,
     onControl: (String, String?) -> Unit,
 ) {
@@ -1994,6 +2021,9 @@ private fun TerminalCommandComposer(
     Surface(color = Color(0xFF0C1014), tonalElevation = 2.dp) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 10.dp)) {
             commandError?.let { Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
+            if (commandError == null) {
+                commandNotice?.let { Text(it, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
+            }
             Row(Modifier.padding(start = 8.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.VerifiedUser, null, tint = Muted, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(6.dp))
