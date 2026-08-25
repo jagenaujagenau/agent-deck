@@ -32,7 +32,8 @@ const cardEvent = (event: AgentEvent): AgentEvent => {
   const { diff: _diff, command: _command, ...rest } = event;
   return {
     ...rest,
-    detail: rest.detail === undefined ? undefined : clip(rest.detail, SNAPSHOT_DETAIL_LIMIT),
+    // A runtime may send detail as null rather than omitting it; both mean absent.
+    detail: rest.detail == null ? undefined : clip(rest.detail, SNAPSHOT_DETAIL_LIMIT),
   };
 };
 

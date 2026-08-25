@@ -9,6 +9,16 @@ import { Schema } from "effect";
  * tightening it here would reject traffic the current bridge accepts.
  */
 
+/**
+ * A field a runtime may leave out entirely, or send as an explicit null.
+ *
+ * The adapters are separate programs written at different times and are not
+ * consistent about which they do. The deployed bridge treats both as absent,
+ * so accepting only the omitted form here would refuse heartbeats that work
+ * today - and a refused heartbeat shows up as a session going offline.
+ */
+const optionalField = <S extends Schema.Top>(schema: S) => Schema.optional(Schema.NullOr(schema));
+
 export const EventKind = Schema.Literals([
   "thought",
   "tool",
@@ -24,27 +34,27 @@ export const AgentEvent = Schema.Struct({
   id: Schema.String,
   kind: EventKind,
   summary: Schema.String,
-  detail: Schema.optional(Schema.String),
-  tool: Schema.optional(Schema.String),
-  path: Schema.optional(Schema.String),
-  command: Schema.optional(Schema.String),
-  diff: Schema.optional(Schema.String),
-  options: Schema.optional(Schema.Array(Schema.String)),
+  detail: optionalField(Schema.String),
+  tool: optionalField(Schema.String),
+  path: optionalField(Schema.String),
+  command: optionalField(Schema.String),
+  diff: optionalField(Schema.String),
+  options: optionalField(Schema.Array(Schema.String)),
   createdAt: Schema.String,
 });
 export interface AgentEvent extends Schema.Schema.Type<typeof AgentEvent> {}
 
 /** What a runtime posts to `/agents/:id/events`; the bridge assigns id and time. */
 export const AgentEventInput = Schema.Struct({
-  id: Schema.optional(Schema.String),
+  id: optionalField(Schema.String),
   kind: EventKind,
   summary: Schema.String,
-  detail: Schema.optional(Schema.String),
-  tool: Schema.optional(Schema.String),
-  path: Schema.optional(Schema.String),
-  command: Schema.optional(Schema.String),
-  diff: Schema.optional(Schema.String),
-  options: Schema.optional(Schema.Array(Schema.String)),
+  detail: optionalField(Schema.String),
+  tool: optionalField(Schema.String),
+  path: optionalField(Schema.String),
+  command: optionalField(Schema.String),
+  diff: optionalField(Schema.String),
+  options: optionalField(Schema.Array(Schema.String)),
 });
 export interface AgentEventInput extends Schema.Schema.Type<typeof AgentEventInput> {}
 
@@ -83,9 +93,10 @@ export const RateLimitWindow = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
   usedPercent: Schema.Number,
-  resetsAt: Schema.optional(Schema.String),
-  account: Schema.optional(Schema.String),
+  resetsAt: optionalField(Schema.String),
+  account: optionalField(Schema.String),
 });
+export interface RateLimitWindow extends Schema.Schema.Type<typeof RateLimitWindow> {}
 
 /** The heartbeat body a runtime adapter sends to keep its session live. */
 export const Heartbeat = Schema.Struct({
@@ -93,19 +104,19 @@ export const Heartbeat = Schema.Struct({
   name: Schema.String,
   project: Schema.String,
   model: Schema.String,
-  runtime: Schema.optional(Schema.String),
-  runtimeProtocol: Schema.optional(Schema.Literals(["canonical-v1"])),
+  runtime: optionalField(Schema.String),
+  runtimeProtocol: optionalField(Schema.Literals(["canonical-v1"])),
   state: AgentState,
   task: Schema.String,
-  objective: Schema.optional(Schema.String),
-  progress: Schema.optional(Schema.Number),
-  tokens: Schema.optional(Schema.Number),
-  processedTokens: Schema.optional(Schema.Number),
-  costUsd: Schema.optional(Schema.Number),
-  capabilities: Schema.optional(Schema.Array(ControlAction)),
-  rateLimits: Schema.optional(Schema.Array(RateLimitWindow)),
-  pendingApproval: Schema.optional(PendingApproval),
-  events: Schema.optional(Schema.Array(AgentEvent)),
+  objective: optionalField(Schema.String),
+  progress: optionalField(Schema.Number),
+  tokens: optionalField(Schema.Number),
+  processedTokens: optionalField(Schema.Number),
+  costUsd: optionalField(Schema.Number),
+  capabilities: optionalField(Schema.Array(ControlAction)),
+  rateLimits: optionalField(Schema.Array(RateLimitWindow)),
+  pendingApproval: optionalField(PendingApproval),
+  events: optionalField(Schema.Array(AgentEvent)),
 });
 export interface Heartbeat extends Schema.Schema.Type<typeof Heartbeat> {}
 
@@ -122,19 +133,69 @@ export type RequestStatus = typeof RequestStatus.Type;
 /** Body for resolving a durable approval or question. */
 export const ResolveRequest = Schema.Struct({
   status: RequestStatus,
-  value: Schema.optional(Schema.Unknown),
+  value: optionalField(Schema.Unknown),
 });
 
 export const ControlCommand = Schema.Struct({
   action: ControlAction,
-  value: Schema.optional(Schema.String),
-  commandId: Schema.optional(Schema.String),
+  value: optionalField(Schema.String),
+  commandId: optionalField(Schema.String),
 });
 
 export const SlashCommand = Schema.Struct({
   name: Schema.String,
-  description: Schema.optional(Schema.String),
+  description: optionalField(Schema.String),
   source: Schema.String,
+});
+
+/**
+ * The statuses a caller may resolve a request to. "pending" is deliberately
+ * absent: reopening a settled request is not something the wire allows.
+ */
+export const ResolvableStatus = Schema.Literals([
+  "approved",
+  "rejected",
+  "answered",
+  "expired",
+  "unavailable",
+]);
+
+/** Body for resolving a durable approval or question. */
+export const ResolveRequestBody = Schema.Struct({
+  status: ResolvableStatus,
+  value: optionalField(Schema.Unknown),
+});
+
+/**
+ * A published command catalog. The entries stay unconstrained on purpose: each
+ * runtime describes its own commands, and the deployed bridge stores whatever
+ * array it is handed rather than imposing a shape on them.
+ */
+export const SlashCommandPublication = Schema.Struct({
+  commands: Schema.Array(Schema.Unknown),
+});
+
+/** Body for starting a bridge-hosted Claude session. */
+export const ManagedSessionRequest = Schema.Struct({
+  project: Schema.String,
+  cwd: Schema.String,
+  model: optionalField(Schema.String),
+  objective: optionalField(Schema.String),
+  prompt: optionalField(Schema.String),
+  permissionMode: optionalField(
+    Schema.Literals(["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"]),
+  ),
+});
+
+/** Body for exchanging a pairing code for a device credential. */
+export const PairingRequest = Schema.Struct({
+  code: Schema.String,
+  deviceName: Schema.String,
+});
+
+/** Only the routing field is read here; the event itself is validated downstream. */
+export const RuntimeEventEnvelope = Schema.Struct({
+  agentId: Schema.String,
 });
 
 export const SlashCommandCatalog = Schema.Struct({

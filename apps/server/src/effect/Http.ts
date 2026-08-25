@@ -1,6 +1,15 @@
-import { Effect, Option, Stream, SubscriptionRef } from "effect";
+import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import type { RuntimeRequestStatus } from "@agent-control-dashboard/agent-adapter";
+import {
+  AgentEventInput,
+  ControlCommand,
+  Heartbeat,
+  ManagedSessionRequest,
+  PairingRequest,
+  ResolveRequestBody,
+  RuntimeEventEnvelope,
+  SlashCommandPublication,
+} from "./Domain";
 import { BridgeConfig } from "./Config";
 import { agentFingerprint } from "./Fingerprint";
 import { ManagedRuntime } from "./Managed";
@@ -12,32 +21,33 @@ const BRIDGE_PREFIX = "/bridge/v1";
 
 const param = (name: string) => Effect.map(HttpRouter.params, (params) => params[name] ?? "");
 
-const CONTROL_ACTIONS = [
-  "pause",
-  "resume",
-  "stop",
-  "approve",
-  "reject",
-  "prompt",
-  "steer",
-  "follow_up",
-] as const;
-const REQUEST_STATUSES: ReadonlySet<RuntimeRequestStatus> = new Set([
-  "approved",
-  "rejected",
-  "answered",
-  "expired",
-  "unavailable",
-]);
-
 const error = (message: string, status: number) =>
   HttpServerResponse.json({ error: message }, { status });
 
-/** A malformed body is a 400, never a 500. */
-const body = Effect.fnUntraced(function* () {
+/**
+ * Parses a request body against the wire contract, so a handler receives a
+ * domain value rather than something it has to inspect field by field.
+ *
+ * Decoding is deliberately permissive about what it ignores: unknown keys pass
+ * through and an optional field may arrive absent or null, because the runtimes
+ * are separate programs and the deployed bridge accepts both. What it will not
+ * do is let an unparsed body reach a handler.
+ */
+const rawBody = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
-  return yield* Effect.orElseSucceed(request.json, () => ({}) as unknown);
+  // A body that is not JSON at all fails the same way as one that is the wrong
+  // shape: both are a 400, never a 500.
+  return yield* Effect.orElseSucceed(request.json, () => undefined);
 });
+
+const decodeBody = <S extends Schema.Top>(schema: S) =>
+  Effect.flatMap(rawBody, Schema.decodeUnknownEffect(schema));
+
+/** Answers 400 when a body does not fit its contract, keeping the deployed wording. */
+const onMalformed =
+  (message: string) =>
+  <E, R>(effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Schema.SchemaError | E, R>) =>
+    Effect.catchTag(effect, "SchemaError", () => error(message, 400));
 
 const route = <E, R>(
   method: "GET" | "POST",
@@ -132,11 +142,10 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/agents/heartbeat",
     Effect.gen(function* () {
       const state = yield* BridgeState;
-      const input = (yield* body()) as any;
-      if (!input?.id || !input?.name || !input?.state) {
-        return yield* error("id, name and state are required", 400);
-      }
-      return yield* HttpServerResponse.json(yield* state.heartbeat(input), { status: 201 });
+      return yield* Effect.gen(function* () {
+        const input = yield* decodeBody(Heartbeat);
+        return yield* HttpServerResponse.json(yield* state.heartbeat(input), { status: 201 });
+      }).pipe(onMalformed("id, name and state are required"));
     }),
   ),
   route(
@@ -144,13 +153,13 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/agents/:id/events",
     Effect.gen(function* () {
       const state = yield* BridgeState;
-      const input = (yield* body()) as any;
-      if (!input?.kind || !input?.summary)
-        return yield* error("kind and summary are required", 400);
-      const event = yield* state.addEvent(yield* param("id"), input);
-      return event === undefined
-        ? yield* error("Agent not found", 404)
-        : yield* HttpServerResponse.json(event, { status: 201 });
+      return yield* Effect.gen(function* () {
+        const input = yield* decodeBody(AgentEventInput);
+        const event = yield* state.addEvent(yield* param("id"), input);
+        return event === undefined
+          ? yield* error("Agent not found", 404)
+          : yield* HttpServerResponse.json(event, { status: 201 });
+      }).pipe(onMalformed("kind and summary are required"));
     }),
   ),
   route(
@@ -158,11 +167,16 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/agents/:id/runtime-events",
     Effect.gen(function* () {
       const state = yield* BridgeState;
-      const input = (yield* body()) as any;
+      const raw = yield* rawBody;
+      // Only the routing field is read here; ingestRuntimeEvent validates the
+      // event itself and owns the vocabulary of what a runtime may say.
+      const envelope = yield* Schema.decodeUnknownEffect(RuntimeEventEnvelope)(raw).pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
       const id = yield* param("id");
-      if (input?.agentId !== id)
+      if (envelope?.agentId !== id)
         return yield* error("Runtime event agent does not match route", 400);
-      return yield* state.ingestRuntimeEvent(input).pipe(
+      return yield* state.ingestRuntimeEvent(raw).pipe(
         Effect.flatMap((result) => HttpServerResponse.json(result, { status: 201 })),
         Effect.catchTag("InvalidRuntimeEvent", (failure) => error(failure.reason, 400)),
       );
@@ -173,31 +187,32 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/agents/:id/control",
     Effect.gen(function* () {
       const state = yield* BridgeState;
-      const input = (yield* body()) as any;
-      if (!CONTROL_ACTIONS.includes(input?.action)) return yield* error("Invalid action", 400);
-      const id = yield* param("id");
-      const support = yield* state.supportsControl(id, input.action);
-      if (support === undefined) return yield* error("Agent not found", 404);
-      if (!support) return yield* error(`This runtime does not support ${input.action}`, 409);
-      if (
-        (input.action === "approve" || input.action === "reject") &&
-        !(yield* state.hasPendingApproval(id))
-      ) {
-        return yield* error("No approval is currently pending", 409);
-      }
-      const command = yield* state.control(
-        id,
-        input.action,
-        input.value,
-        typeof input.commandId === "string" ? input.commandId : undefined,
-      );
-      // A bridge-hosted session acts on the command in process; a hook session
-      // collects it by polling /commands.
-      if (command)
-        yield* Effect.forkDetach((yield* ManagedRuntime).handle(command).pipe(Effect.ignore));
-      return command === undefined
-        ? yield* error("Agent not found", 404)
-        : yield* HttpServerResponse.json(command, { status: 202 });
+      return yield* Effect.gen(function* () {
+        const input = yield* decodeBody(ControlCommand);
+        const id = yield* param("id");
+        const support = yield* state.supportsControl(id, input.action);
+        if (support === undefined) return yield* error("Agent not found", 404);
+        if (!support) return yield* error(`This runtime does not support ${input.action}`, 409);
+        if (
+          (input.action === "approve" || input.action === "reject") &&
+          !(yield* state.hasPendingApproval(id))
+        ) {
+          return yield* error("No approval is currently pending", 409);
+        }
+        const command = yield* state.control(
+          id,
+          input.action,
+          input.value ?? undefined,
+          input.commandId ?? undefined,
+        );
+        // A bridge-hosted session acts on the command in process; a hook session
+        // collects it by polling /commands.
+        if (command)
+          yield* Effect.forkDetach((yield* ManagedRuntime).handle(command).pipe(Effect.ignore));
+        return command === undefined
+          ? yield* error("Agent not found", 404)
+          : yield* HttpServerResponse.json(command, { status: 202 });
+      }).pipe(onMalformed("Invalid action"));
     }),
   ),
   route(
@@ -216,10 +231,11 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/agents/:agentId/slash-commands",
     Effect.gen(function* () {
       const state = yield* BridgeState;
-      const input = (yield* body()) as any;
-      if (!Array.isArray(input?.commands)) return yield* error("commands must be an array", 400);
-      yield* state.setSlashCommands(yield* param("agentId"), input.commands.slice(0, 400));
-      return yield* HttpServerResponse.json({ stored: input.commands.length });
+      return yield* Effect.gen(function* () {
+        const input = yield* decodeBody(SlashCommandPublication);
+        yield* state.setSlashCommands(yield* param("agentId"), input.commands.slice(0, 400));
+        return yield* HttpServerResponse.json({ stored: input.commands.length });
+      }).pipe(onMalformed("commands must be an array"));
     }),
   ),
   /**
@@ -233,8 +249,10 @@ export const BridgeRoutes = HttpRouter.addAll([
     Effect.gen(function* () {
       const state = yield* BridgeState;
       const config = yield* BridgeConfig;
-      const input = (yield* body()) as any;
-      if (!REQUEST_STATUSES.has(input?.status)) return yield* error("Invalid request status", 400);
+      const input = yield* decodeBody(ResolveRequestBody).pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      if (input === undefined) return yield* error("Invalid request status", 400);
       const request = yield* HttpServerRequest.HttpServerRequest;
       const bearer = (request.headers["authorization"] ?? "").replace(/^Bearer\s+/i, "");
       const isMaster = Option.match(config.masterToken, {
@@ -271,15 +289,22 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/managed/claude/sessions",
     Effect.gen(function* () {
       const managed = yield* ManagedRuntime;
-      const input = (yield* body()) as any;
-      const modes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"];
-      if (input?.permissionMode && !modes.includes(input.permissionMode)) {
-        return yield* error("Invalid permissionMode", 400);
-      }
-      return yield* managed.start(input).pipe(
-        Effect.flatMap((session) => HttpServerResponse.json(session, { status: 201 })),
-        Effect.catchTag("ManagedStartError", (failure) => error(failure.message, 400)),
-      );
+      return yield* Effect.gen(function* () {
+        const input = yield* decodeBody(ManagedSessionRequest);
+        return yield* managed
+          .start({
+            project: input.project,
+            cwd: input.cwd,
+            model: input.model ?? undefined,
+            objective: input.objective ?? undefined,
+            prompt: input.prompt ?? undefined,
+            permissionMode: input.permissionMode ?? undefined,
+          })
+          .pipe(
+            Effect.flatMap((session) => HttpServerResponse.json(session, { status: 201 })),
+            Effect.catchTag("ManagedStartError", (failure) => error(failure.message, 400)),
+          );
+      }).pipe(onMalformed("Invalid permissionMode"));
     }),
   ),
   route(
@@ -288,8 +313,10 @@ export const BridgeRoutes = HttpRouter.addAll([
     Effect.gen(function* () {
       const managed = yield* ManagedRuntime;
       const config = yield* BridgeConfig;
-      const input = (yield* body()) as any;
-      if (!REQUEST_STATUSES.has(input?.status)) return yield* error("Invalid request status", 400);
+      const input = yield* decodeBody(ResolveRequestBody).pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      if (input === undefined) return yield* error("Invalid request status", 400);
       const request = yield* HttpServerRequest.HttpServerRequest;
       const bearer = (request.headers["authorization"] ?? "").replace(/^Bearer\s+/i, "");
       const isMaster = Option.match(config.masterToken, {
@@ -340,12 +367,10 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/pair",
     Effect.gen(function* () {
       const state = yield* BridgeState;
-      const input = (yield* body()) as any;
-      if (
-        !/^\d{6}$/.test(input?.code) ||
-        typeof input?.deviceName !== "string" ||
-        !input.deviceName.trim()
-      ) {
+      const input = yield* decodeBody(PairingRequest).pipe(Effect.orElseSucceed(() => undefined));
+      // The shape is the schema's business; that a code is six digits is this
+      // endpoint's own rule, so it stays visible here.
+      if (input === undefined || !/^\d{6}$/.test(input.code) || !input.deviceName.trim()) {
         return yield* error("A six-digit code and device name are required", 400);
       }
       const device = yield* state.pair(input.code, input.deviceName.trim().slice(0, 80));

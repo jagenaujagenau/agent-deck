@@ -12,7 +12,15 @@ import { mergeRecentEvents } from "../bridgeEvents";
 import { scanClaudeUsage, scanCodexUsage, type TranscriptUsageRow } from "../transcriptUsage";
 import { buildAnalytics, rangeCutoff, type ActivityRow, type UsageRow } from "./Analytics";
 import { BridgeConfig } from "./Config";
-import type { AgentEvent, AgentState, ControlAction, PendingApproval } from "./Domain";
+import type {
+  AgentEvent,
+  AgentEventInput,
+  AgentState,
+  ControlAction,
+  Heartbeat,
+  PendingApproval,
+  RateLimitWindow,
+} from "./Domain";
 
 import { createHash, randomBytes, randomInt } from "node:crypto";
 
@@ -47,7 +55,7 @@ export interface AgentRecord {
   lastSeenAt: string;
   events: Array<AgentEvent>;
   capabilities?: Array<ControlAction>;
-  rateLimits?: Array<unknown>;
+  rateLimits?: ReadonlyArray<RateLimitWindow>;
   pendingApproval?: PendingApproval;
   isDemo?: boolean;
 }
@@ -68,9 +76,19 @@ const cardEvent = (event: AgentEvent) => {
   const { diff: _diff, command: _command, ...rest } = event;
   return {
     ...rest,
-    detail: rest.detail === undefined ? undefined : clip(rest.detail, SNAPSHOT_DETAIL_LIMIT),
+    // A runtime may send detail as null rather than omitting it; both mean absent.
+    detail: rest.detail == null ? undefined : clip(rest.detail, SNAPSHOT_DETAIL_LIMIT),
   };
 };
+
+/**
+ * A usage figure as it arrives from a runtime, reduced to a number the deck can
+ * render. A runtime may omit it, send null, or send NaN when its own accounting
+ * failed; all three mean "no figure", and the previous behaviour of every one
+ * was to fall back rather than display nonsense.
+ */
+const usageNumber = (value: number | null | undefined, fallback: number): number =>
+  value != null && Number.isFinite(value) ? value : fallback;
 
 const runtimeFor = (agent: Pick<AgentRecord, "name" | "runtime">) => {
   if (agent.runtime) return agent.runtime;
@@ -85,8 +103,11 @@ export class BridgeState extends Context.Service<
   {
     readonly revision: SubscriptionRef.SubscriptionRef<number>;
     readonly snapshot: Effect.Effect<Record<string, unknown>>;
-    readonly heartbeat: (input: any) => Effect.Effect<AgentRecord>;
-    readonly addEvent: (agentId: string, event: any) => Effect.Effect<AgentEvent | undefined>;
+    readonly heartbeat: (input: Heartbeat) => Effect.Effect<AgentRecord>;
+    readonly addEvent: (
+      agentId: string,
+      event: AgentEventInput,
+    ) => Effect.Effect<AgentEvent | undefined>;
     readonly ingestRuntimeEvent: (
       value: unknown,
     ) => Effect.Effect<{ sequence: number; event: CanonicalRuntimeEvent }, InvalidRuntimeEvent>;
@@ -458,22 +479,35 @@ export class BridgeState extends Context.Service<
         };
       });
 
-      const heartbeat = Effect.fn("BridgeState.heartbeat")(function* (input: any) {
+      const heartbeat = Effect.fn("BridgeState.heartbeat")(function* (input: Heartbeat) {
         const agents = yield* Ref.get(agentsRef);
         const previous = agents.get(input.id);
+        // The wire form and the stored record are different shapes: a runtime
+        // may leave a field out or send null, while the record the deck reads
+        // is total. Translating field by field is what makes that difference
+        // explicit rather than something every later reader has to re-check.
+        const tokens = usageNumber(input.tokens, 0);
         const agent: AgentRecord = {
-          ...input,
-          tokens: Number.isFinite(input.tokens) ? input.tokens : 0,
-          processedTokens: Number.isFinite(input.processedTokens)
-            ? input.processedTokens
-            : input.tokens,
-          costUsd: Number.isFinite(input.costUsd) ? input.costUsd : 0,
+          id: input.id,
+          name: input.name,
+          project: input.project,
+          model: input.model,
+          runtime: input.runtime ?? undefined,
+          runtimeProtocol: input.runtimeProtocol ?? undefined,
+          state: input.state,
+          task: input.task,
+          objective: input.objective ?? undefined,
+          progress: input.progress ?? undefined,
+          tokens,
+          processedTokens: usageNumber(input.processedTokens, tokens),
+          costUsd: usageNumber(input.costUsd, 0),
           lastSeenAt: now(),
-          events: mergeRecentEvents(previous?.events ?? [], input.events ?? []),
+          events: mergeRecentEvents(previous?.events ?? [], [...(input.events ?? [])]),
+          capabilities: input.capabilities ? [...input.capabilities] : undefined,
+          rateLimits: input.rateLimits ?? undefined,
+          pendingApproval: input.pendingApproval ?? undefined,
         };
-        const processedTokens = Number.isFinite(agent.processedTokens)
-          ? agent.processedTokens!
-          : agent.tokens;
+        const processedTokens = usageNumber(agent.processedTokens, agent.tokens);
         yield* persistAgent(agent);
         yield* syncApprovalRequest(agent, previous);
         // Usage is stored as deltas against a high-water cursor: a runtime that
@@ -534,7 +568,10 @@ export class BridgeState extends Context.Service<
         return agent;
       });
 
-      const addEvent = Effect.fn("BridgeState.addEvent")(function* (agentId: string, event: any) {
+      const addEvent = Effect.fn("BridgeState.addEvent")(function* (
+        agentId: string,
+        event: AgentEventInput,
+      ) {
         const agents = yield* Ref.get(agentsRef);
         const previous = agents.get(agentId);
         if (previous === undefined) return undefined;
