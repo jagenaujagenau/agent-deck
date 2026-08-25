@@ -1,3 +1,4 @@
+import { Option, Schema } from "effect";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
@@ -22,8 +23,39 @@ export type TranscriptUsageRow = {
   dedupeKey: string | null;
 };
 
-function positive(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+/**
+ * The parts of a Claude transcript line this needs, as a contract.
+ *
+ * A transcript is another program's file, written by a version of Claude Code
+ * that may not be this one. Fields are optional wherever the parser already
+ * tolerated their absence, so a line still yields usage when it carries less
+ * than expected - what changes is that the shape is stated once here instead of
+ * being re-checked at every read.
+ */
+const ClaudeUsageLine = Schema.Struct({
+  type: Schema.String,
+  timestamp: Schema.String,
+  sessionId: Schema.optional(Schema.String),
+  cwd: Schema.optional(Schema.String),
+  requestId: Schema.optional(Schema.String),
+  costUSD: Schema.optional(Schema.Number),
+  message: Schema.Struct({
+    id: Schema.optional(Schema.String),
+    model: Schema.optional(Schema.String),
+    usage: Schema.Struct({
+      input_tokens: Schema.optional(Schema.Number),
+      cache_creation_input_tokens: Schema.optional(Schema.Number),
+      cache_read_input_tokens: Schema.optional(Schema.Number),
+      output_tokens: Schema.optional(Schema.Number),
+    }),
+  }),
+});
+
+const decodeClaudeUsageLine = Schema.decodeUnknownOption(ClaudeUsageLine);
+
+/** A token count is only usable when it is a whole number above zero. */
+function positive(value: number | undefined) {
+  return value !== undefined && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
 
 export function parseClaudeUsageLine(line: string): TranscriptUsageRow | undefined {
@@ -33,39 +65,41 @@ export function parseClaudeUsageLine(line: string): TranscriptUsageRow | undefin
   } catch {
     return undefined;
   }
-  if (!value || typeof value !== "object") return undefined;
-  const row = value as Record<string, unknown>;
-  if (row.type !== "assistant" || !row.message || typeof row.message !== "object") return undefined;
-  const message = row.message as Record<string, unknown>;
-  if (!message.usage || typeof message.usage !== "object" || typeof row.timestamp !== "string")
-    return undefined;
-  const usage = message.usage as Record<string, unknown>;
-  const messageId = typeof message.id === "string" ? message.id : null;
-  const requestId = typeof row.requestId === "string" ? row.requestId : null;
-  const sessionId = typeof row.sessionId === "string" ? row.sessionId : "";
-  const cwd = typeof row.cwd === "string" ? row.cwd : "";
-  const model = typeof message.model === "string" ? message.model : "unknown";
+  const decoded = decodeClaudeUsageLine(value);
+  if (Option.isNone(decoded)) return undefined;
+  const row = decoded.value;
+  if (row.type !== "assistant") return undefined;
+
+  const { message } = row;
+  const { usage } = message;
+  const messageId = message.id ?? null;
+  const requestId = row.requestId ?? null;
+  const sessionId = row.sessionId ?? "";
+  const cwd = row.cwd ?? "";
   const uncachedInputTokens = positive(usage.input_tokens);
   const cacheCreationTokens = positive(usage.cache_creation_input_tokens);
   const cachedInputTokens = positive(usage.cache_read_input_tokens);
   const outputTokens = positive(usage.output_tokens);
   const tokens = uncachedInputTokens + cacheCreationTokens + cachedInputTokens + outputTokens;
   if (tokens === 0 || Number.isNaN(Date.parse(row.timestamp))) return undefined;
+  // A cost the transcript states is authoritative; its absence is what `priced`
+  // reports, so analytics can say how much of a total it could actually price.
+  const priced = row.costUSD !== undefined && Number.isFinite(row.costUSD);
   return {
     agent_id: sessionId
       ? `claude-${createHash("sha256").update(sessionId).digest("hex").slice(0, 24)}`
       : `claude:${messageId ?? requestId ?? row.timestamp}`,
     project: cwd ? basename(cwd) : "claude",
     runtime: "claude",
-    model,
+    model: message.model ?? "unknown",
     tokens,
     uncached_input_tokens: uncachedInputTokens,
     cached_input_tokens: cachedInputTokens,
     cache_creation_tokens: cacheCreationTokens,
     output_tokens: outputTokens,
     reasoning_tokens: 0,
-    cost_usd: typeof row.costUSD === "number" && Number.isFinite(row.costUSD) ? row.costUSD : 0,
-    priced: typeof row.costUSD === "number" && Number.isFinite(row.costUSD),
+    cost_usd: priced ? row.costUSD! : 0,
+    priced,
     created_at: row.timestamp,
     dedupeKey: messageId || requestId ? `${messageId ?? ""}:${requestId ?? ""}` : null,
   };
@@ -114,18 +148,64 @@ export function initialCodexScanState(): CodexScanState {
   };
 }
 
-function isForked(payload: Record<string, unknown>) {
-  if (typeof payload.forked_from_id === "string") return true;
-  const source = payload.source;
-  if (!source || typeof source !== "object") return false;
-  const subagent = (source as Record<string, unknown>).subagent;
-  if (!subagent || typeof subagent !== "object") return false;
-  const spawn = (subagent as Record<string, unknown>).thread_spawn;
-  return (
-    !!spawn &&
-    typeof spawn === "object" &&
-    typeof (spawn as Record<string, unknown>).parent_thread_id === "string"
-  );
+/**
+ * The parts of a Codex rollout line this needs.
+ *
+ * Codex writes several kinds of line into one file and this reads three of
+ * them, so every field below the discriminator is optional: a line is decoded
+ * first and interpreted second, rather than being probed key by key.
+ */
+const CodexLine = Schema.Struct({
+  type: Schema.optional(Schema.String),
+  timestamp: Schema.optional(Schema.String),
+  payload: Schema.Struct({
+    type: Schema.optional(Schema.String),
+    id: Schema.optional(Schema.String),
+    session_id: Schema.optional(Schema.String),
+    cwd: Schema.optional(Schema.String),
+    model: Schema.optional(Schema.String),
+    forked_from_id: Schema.optional(Schema.String),
+    // `source` is a plain origin label on most lines and a provenance object
+    // when a session was spawned from another. It is left unconstrained here
+    // and decoded below at the one place its shape decides anything.
+    source: Schema.optional(Schema.Unknown),
+    info: Schema.optional(
+      Schema.Struct({
+        last_token_usage: Schema.optional(
+          Schema.Struct({
+            input_tokens: Schema.optional(Schema.Number),
+            cached_input_tokens: Schema.optional(Schema.Number),
+            cache_write_input_tokens: Schema.optional(Schema.Number),
+            output_tokens: Schema.optional(Schema.Number),
+            reasoning_output_tokens: Schema.optional(Schema.Number),
+          }),
+        ),
+      }),
+    ),
+  }),
+});
+
+const decodeCodexLine = Schema.decodeUnknownOption(CodexLine);
+
+type CodexPayload = Schema.Schema.Type<typeof CodexLine>["payload"];
+
+/**
+ * Whether this session is a fork of another.
+ *
+ * A fork replays its parent's usage into its own file, so counting it again
+ * would double every token the parent already reported.
+ */
+const ForkProvenance = Schema.Struct({
+  subagent: Schema.Struct({
+    thread_spawn: Schema.Struct({ parent_thread_id: Schema.String }),
+  }),
+});
+
+const asForkProvenance = Schema.decodeUnknownOption(ForkProvenance);
+
+function isForked(payload: CodexPayload) {
+  if (payload.forked_from_id !== undefined) return true;
+  return Option.isSome(asForkProvenance(payload.source));
 }
 
 export function parseCodexUsageLine(
@@ -138,18 +218,18 @@ export function parseCodexUsageLine(
   } catch {
     return undefined;
   }
-  if (!value || typeof value !== "object") return undefined;
-  const row = value as Record<string, unknown>;
-  const payload = row.payload;
-  if (!payload || typeof payload !== "object") return undefined;
-  const body = payload as Record<string, unknown>;
+  const decoded = decodeCodexLine(value);
+  if (Option.isNone(decoded)) return undefined;
+  const row = decoded.value;
+  const body = row.payload;
+
   if (row.type === "session_meta") {
     if (state.sawSessionMeta) return undefined;
     state.sawSessionMeta = true;
     const id = body.id ?? body.session_id;
-    if (typeof id === "string") state.sessionId = id;
-    if (typeof body.cwd === "string") state.project = basename(body.cwd);
-    const timestamp = typeof row.timestamp === "string" ? Date.parse(row.timestamp) : NaN;
+    if (id !== undefined) state.sessionId = id;
+    if (body.cwd !== undefined) state.project = basename(body.cwd);
+    const timestamp = row.timestamp === undefined ? Number.NaN : Date.parse(row.timestamp);
     if (Number.isFinite(timestamp) && isForked(body)) {
       state.suppressingForkCopies = true;
       state.forkCopyAnchorMs = timestamp;
@@ -157,17 +237,17 @@ export function parseCodexUsageLine(
     return undefined;
   }
   if (row.type === "turn_context") {
-    if (typeof body.model === "string") state.model = body.model;
-    if (typeof body.cwd === "string") state.project = basename(body.cwd);
+    if (body.model !== undefined) state.model = body.model;
+    if (body.cwd !== undefined) state.project = basename(body.cwd);
     return undefined;
   }
-  if (body.type !== "token_count" || !body.info || typeof body.info !== "object") return undefined;
-  const last = (body.info as Record<string, unknown>).last_token_usage;
-  if (!last || typeof last !== "object" || !state.model || typeof row.timestamp !== "string")
+  const usage = body.info?.last_token_usage;
+  if (body.type !== "token_count" || !usage || !state.model || row.timestamp === undefined) {
     return undefined;
+  }
   const timestamp = Date.parse(row.timestamp);
   if (!Number.isFinite(timestamp)) return undefined;
-  const usage = last as Record<string, unknown>;
+  // Codex repeats the same totals on consecutive lines; only a change is new usage.
   const signature = JSON.stringify(usage);
   if (signature === state.lastUsageSignature) return undefined;
   state.lastUsageSignature = signature;
