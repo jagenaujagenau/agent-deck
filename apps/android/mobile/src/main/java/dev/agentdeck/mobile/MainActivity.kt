@@ -4,12 +4,14 @@ import android.Manifest
 import android.app.Application
 import android.app.NotificationManager
 import android.content.Intent
+import android.view.RoundedCorner
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,6 +20,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
@@ -54,6 +57,11 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -1169,7 +1177,7 @@ private fun HarnessMark(harness: AgentHarness, running: Boolean, statusColor: Co
                 color = SurfaceSunken,
                 modifier = Modifier.fillMaxSize(),
             ) {
-                Box(contentAlignment = Alignment.Center) { AgentLogo(harness, Modifier.size(diameter * 0.4f)) }
+                Box(contentAlignment = Alignment.Center) { AgentLogo(harness, Modifier.size(diameter * 0.58f)) }
             }
             if (running) {
                 CircularProgressIndicator(
@@ -1224,6 +1232,59 @@ private fun ProviderMark(provider: ProviderIdentity, diameter: androidx.compose.
 }
 
 /**
+ * The composer: a leading mark, the field, and the button that acts on it, all
+ * in one rounded container.
+ *
+ * The button used to sit outside, which made it look like a separate control
+ * that happened to be nearby. Inside, it reads as belonging to the text it
+ * sends - and the pill is the only thing that has to be sized, because
+ * everything within it is measured against the same height.
+ */
+@Composable
+private fun ComposerPill(
+    modifier: Modifier = Modifier,
+    leading: @Composable RowScope.() -> Unit,
+    field: @Composable RowScope.() -> Unit,
+    action: @Composable RowScope.() -> Unit,
+) {
+    Surface(
+        modifier = modifier.heightIn(min = 52.dp).shadow(8.dp, CircleShape),
+        shape = CircleShape,
+        color = SurfaceRaised,
+        border = BorderStroke(1.dp, Line),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(end = 5.dp),
+        ) {
+            leading()
+            field()
+            action()
+        }
+    }
+}
+
+/**
+ * Send.
+ *
+ * It briefly held to dictate as well, which was a mistake: every Android
+ * keyboard already carries a microphone, and a second one inside the app is a
+ * worse copy of it that also wants a permission.
+ */
+@Composable
+private fun ComposerSendButton(hasText: Boolean, busy: Boolean, onSend: () -> Unit) {
+    FilledIconButton(
+        onClick = onSend,
+        enabled = hasText && !busy,
+        modifier = Modifier.size(42.dp),
+        shape = CircleShape,
+    ) {
+        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        else Icon(Icons.Rounded.ArrowUpward, "Send", modifier = Modifier.size(20.dp))
+    }
+}
+
+/**
  * The text field inside a composer pill.
  *
  * Material's `TextField` reserves 56dp for a label it is never given, so a pill
@@ -1238,6 +1299,7 @@ private fun ComposerField(
     placeholder: String,
     modifier: Modifier = Modifier,
     monospace: Boolean = false,
+    focusRequester: FocusRequester? = null,
 ) {
     val style = TextStyle(
         color = Text,
@@ -1248,7 +1310,9 @@ private fun ComposerField(
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier.padding(horizontal = 8.dp, vertical = 13.dp),
+        modifier = modifier
+            .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+            .padding(horizontal = 8.dp, vertical = 13.dp),
         textStyle = style,
         maxLines = 4,
         cursorBrush = SolidColor(Signal),
@@ -1257,6 +1321,28 @@ private fun ComposerField(
             inner()
         },
     )
+}
+
+/**
+ * The radius this phone's own screen is cut to, for a panel sitting inside it.
+ *
+ * Asked of the device rather than guessed: corner radii differ enough between
+ * handsets that a fixed number looks deliberate on one and wrong on the next.
+ *
+ * The inset is subtracted because concentric curves only look parallel when the
+ * inner one is tighter by exactly the gap between them - matching the outer
+ * radius while sitting inside it reads as too round.
+ */
+@Composable
+private fun screenCornerRadius(inset: Dp, fallback: Dp = 28.dp): Dp {
+    val view = LocalView.current
+    val density = LocalDensity.current
+    val radius = remember(view) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@remember fallback
+        val corner = view.rootWindowInsets?.getRoundedCorner(RoundedCorner.POSITION_BOTTOM_LEFT)
+        corner?.radius?.let { with(density) { it.toDp() } } ?: fallback
+    }
+    return (radius - inset).coerceAtLeast(8.dp)
 }
 
 /** The three dots that make a rectangle read as a window. */
@@ -1347,7 +1433,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                             modifier = Modifier.padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            HarnessMark(harness, running = agent.state == "running", statusColor = stateColor, diameter = 36.dp)
+                            HarnessMark(harness, running = agent.state == "running", statusColor = stateColor, diameter = 42.dp)
                             Spacer(Modifier.width(9.dp))
                             Column {
                                 Text(agent.project, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1720,6 +1806,11 @@ private fun SlashCommandPicker(matches: List<SlashCommand>, onPick: (SlashComman
 @Composable
 private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit) {
     var message by rememberSaveable(agent.id) { mutableStateOf("") }
+    val composerFocus = remember { FocusRequester() }
+    // Switching to a view that can be typed into means wanting to type into it.
+    // Guarded because the node is not attached on the first frame, and a focus
+    // request against nothing throws rather than waiting.
+    LaunchedEffect(Unit) { runCatching { composerFocus.requestFocus() } }
     val action = remoteMessageAction(agent.state, supports)
     if (action == null) {
         Text("This runtime does not accept remote messages.", color = Muted, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(16.dp))
@@ -1747,19 +1838,14 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
             // outlined variant put a visible box inside a raised bar - two
             // borders around the same thing - and the slash button lives inside
             // it because it acts on what is being typed, not on the session.
-            Surface(
-                // Fully rounded, and a floor height the send button matches, so
-                // the two share a baseline instead of meeting at whatever height
-                // the text field happened to be.
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp).shadow(8.dp, CircleShape),
-                shape = CircleShape,
-                color = SurfaceRaised,
-                border = BorderStroke(1.dp, Line),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            // One pill holding everything, the way a messaging composer is
+            // drawn: the button belongs to the field it acts on, not beside it.
+            ComposerPill(
+                modifier = Modifier.weight(1f),
+                leading = {
                     IconButton(
                         onClick = { message = if (message.startsWith("/")) message else "/$message" },
-                        modifier = Modifier.size(42.dp),
+                        modifier = Modifier.size(40.dp),
                     ) {
                         Icon(
                             Icons.Rounded.Bolt,
@@ -1768,28 +1854,27 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
                             modifier = Modifier.size(20.dp),
                         )
                     }
+                },
+                field = {
                     // BasicTextField, not TextField: the material one carries a
-                    // 56dp minimum of its own, which made the pill visibly
-                    // taller than the send button beside it however the two were
-                    // sized. Here the padding is the height.
+                    // 56dp minimum of its own, which made the pill taller than
+                    // whatever sat next to it. Here the padding is the height.
                     ComposerField(
                         value = message,
                         onValueChange = { message = it },
                         placeholder = if (action == "steer") "Reply or steer…" else "Message agent…",
                         modifier = Modifier.weight(1f),
+                        focusRequester = composerFocus,
                     )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            FilledIconButton(
-                onClick = { val content = message.trim(); onControl(action, content); message = "" },
-                enabled = message.isNotBlank() && !busy,
-                modifier = Modifier.size(48.dp),
-                shape = CircleShape,
-            ) {
-                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.ArrowUpward, "Send message", modifier = Modifier.size(20.dp))
-            }
+                },
+                action = {
+                    ComposerSendButton(
+                        hasText = message.isNotBlank(),
+                        busy = busy,
+                        onSend = { val content = message.trim(); onControl(action, content); message = "" },
+                    )
+                },
+            )
         }
     }
 }
@@ -2120,6 +2205,13 @@ private fun TerminalView(
         initialPositionApplied = true
         newCommandsWaiting = false
     }
+    val bottomRadius = screenCornerRadius(inset = 10.dp)
+    val windowShape = RoundedCornerShape(
+        topStart = 12.dp,
+        topEnd = 12.dp,
+        bottomStart = bottomRadius,
+        bottomEnd = bottomRadius,
+    )
     // A window, because that is what it is: the terminal on the other end of
     // this session, drawn with the chrome a person already reads as one. The
     // same shape the home screen widget uses, so the two agree about what a
@@ -2129,11 +2221,13 @@ private fun TerminalView(
             .fillMaxWidth()
             // Closed on all four sides, with air beneath it: a window that runs
             // off the bottom of the screen is a panel, not a window, and the
-            // composer needs to read as sitting outside it.
+            // composer needs to read as sitting outside it. The lower corners
+            // follow the phone's own, so the window sits in the screen rather
+            // than on it.
             .padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(windowShape)
             .background(Color(0xFF050709))
-            .border(BorderStroke(1.dp, Line), RoundedCornerShape(12.dp)),
+            .border(BorderStroke(1.dp, Line), windowShape),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().height(40.dp).background(Color(0xFF0C1014)).padding(start = 12.dp, end = 4.dp),
@@ -2213,6 +2307,12 @@ private fun TerminalCommandComposer(
 ) {
     val action = remoteMessageAction(agent.state, supports) ?: return
     var command by rememberSaveable(agent.id) { mutableStateOf("") }
+    val composerFocus = remember { FocusRequester() }
+    // Switching to a view that can be typed into means wanting to type into it.
+    // Guarded because the node is not attached on the first frame, and a focus
+    // request against nothing throws rather than waiting.
+    LaunchedEffect(Unit) { runCatching { composerFocus.requestFocus() } }
+
     // The same floating composer as the chat, in the terminal's own voice: a
     // monospace field behind a green prompt rather than a slash button.
     Box(Modifier.fillMaxWidth()) {
@@ -2220,44 +2320,39 @@ private fun TerminalCommandComposer(
             commandError?.let { FloatingNotice(it, Danger) }
             if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
             Row(verticalAlignment = Alignment.Bottom) {
-                Surface(
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).shadow(8.dp, CircleShape),
-                    shape = CircleShape,
-                    color = SurfaceRaised,
-                    border = BorderStroke(1.dp, Line),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                ComposerPill(
+                    modifier = Modifier.weight(1f),
+                    leading = {
                         Text(
-                            "  \$",
+                            "\$",
                             color = Signal,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
-                            modifier = Modifier.padding(start = 10.dp),
+                            modifier = Modifier.padding(start = 16.dp, end = 2.dp),
                         )
+                    },
+                    field = {
                         ComposerField(
                             value = command,
                             onValueChange = { command = it },
                             placeholder = "Command for agent…",
                             modifier = Modifier.weight(1f),
                             monospace = true,
+                            focusRequester = composerFocus,
                         )
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                FilledIconButton(
-                    onClick = {
-                        val exact = command.trim()
-                        onControl(action, terminalCommandInstruction(exact))
-                        command = ""
                     },
-                    enabled = command.isNotBlank() && !busy,
-                    modifier = Modifier.size(48.dp),
-                    shape = CircleShape,
-                ) {
-                    if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else Icon(Icons.Rounded.ArrowUpward, "Ask agent to run command", modifier = Modifier.size(20.dp))
-                }
+                    action = {
+                        ComposerSendButton(
+                            hasText = command.isNotBlank(),
+                            busy = busy,
+                            onSend = {
+                                onControl(action, terminalCommandInstruction(command.trim()))
+                                command = ""
+                            },
+                        )
+                    },
+                )
             }
         }
     }
