@@ -4,7 +4,6 @@ import {
   correctionFor,
   deckAgentId,
   isDeckRuntime,
-  TERMINAL_PROMPT_TASK,
   type StoredSession,
 } from "./reconcile";
 
@@ -53,47 +52,41 @@ describe("acceptsPrompt", () => {
 });
 
 describe("correctionFor", () => {
-  const stored = (over: Partial<StoredSession> = {}): StoredSession => ({
+  const at = (over: Partial<StoredSession> = {}): StoredSession => ({
     state: "idle",
-    task: "Ready for an instruction",
     holdingApproval: false,
+    claimedByUs: false,
     ...over,
   });
 
   test("claims a session Herdr sees stopped at a prompt", () => {
-    expect(correctionFor("blocked", stored())).toBe("block");
+    expect(correctionFor("blocked", at())).toBe("block");
   });
 
   test("says it once and then stays quiet", () => {
-    const claimed = stored({ state: "waiting", task: TERMINAL_PROMPT_TASK });
-    expect(correctionFor("blocked", claimed)).toBeUndefined();
+    expect(correctionFor("blocked", at({ state: "waiting", claimedByUs: true }))).toBeUndefined();
+  });
+
+  test("re-claims if something else moved the session out of waiting", () => {
+    // A hook writing its own state does not mean the terminal stopped asking.
+    expect(correctionFor("blocked", at({ state: "running", claimedByUs: true }))).toBe("block");
   });
 
   test("withdraws the claim once the prompt clears", () => {
-    const claimed = stored({ state: "waiting", task: TERMINAL_PROMPT_TASK });
-    expect(correctionFor("idle", claimed)).toBe("clear");
-    expect(correctionFor("working", claimed)).toBe("clear");
+    expect(correctionFor("idle", at({ state: "waiting", claimedByUs: true }))).toBe("clear");
+    expect(correctionFor("working", at({ state: "waiting", claimedByUs: true }))).toBe("clear");
   });
 
-  test("never touches a session it did not claim", () => {
-    // The hooks are describing a real approval; this is not ours to withdraw.
-    expect(
-      correctionFor("idle", stored({ state: "waiting", task: "Approval: Bash" })),
-    ).toBeUndefined();
-    expect(correctionFor("working", stored({ task: "Using Bash" }))).toBeUndefined();
+  test("never withdraws a claim it did not make", () => {
+    // The task now carries the question read off the screen, which looks no
+    // different from something a hook wrote. Only our own claim is ours to end.
+    expect(correctionFor("idle", at({ state: "waiting" }))).toBeUndefined();
+    expect(correctionFor("working", at({ state: "running" }))).toBeUndefined();
   });
 
   test("leaves a live approval to the hooks, which know what is asking", () => {
-    const approving = stored({ state: "waiting", task: "Approval: Bash", holdingApproval: true });
+    const approving = at({ state: "waiting", holdingApproval: true, claimedByUs: true });
     expect(correctionFor("blocked", approving)).toBeUndefined();
     expect(correctionFor("idle", approving)).toBeUndefined();
-  });
-
-  test("re-claims a session a hook has since described differently", () => {
-    // Idempotence is the point: the claim is restated from current facts rather
-    // than remembered, so a hook's write does not silently end it.
-    expect(correctionFor("blocked", stored({ state: "running", task: "Using Bash" }))).toBe(
-      "block",
-    );
   });
 });

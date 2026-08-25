@@ -1,9 +1,8 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { AgentDeckClient } from "../../packages/agent-adapter/src/index";
+import { AgentDeckClient } from "../../packages/agent-adapter/src/client";
+import type { RuntimeEventType } from "../../packages/agent-adapter/src/runtime-events";
 import { drainRemoteMessages, promptContext } from "../runtime-hooks/remote-messages";
-import { listAgents, promptAgent } from "./herdr-cli";
+import { listAgents, promptAgent, readPane, sendKeys } from "./herdr-cli";
+import { parsePrompt, type TerminalPrompt } from "./prompt";
 import {
   acceptsPrompt,
   correctionFor,
@@ -19,70 +18,149 @@ import {
  * One process for every session rather than one per session: Herdr reports all
  * of its agents in a single call, so a per-session daemon would multiply the
  * same poll by the number of sessions open to learn the same thing.
+ *
+ * Everything here is published as canonical Runtime Events. An earlier version
+ * wrote corrections into the hooks' private state files, because the bridge
+ * discarded any projection that disagreed with a heartbeat and an event could
+ * not move a session on its own. With that gate gone (ADR-0001), one
+ * integration no longer has to reach into another's on-disk state to launder a
+ * fact through a third component.
  */
 
 const POLL_INTERVAL_MS = Number(process.env.AGENT_DECK_HERDR_INTERVAL_MS ?? 4_000) || 4_000;
-const STATE_DIRECTORY = join(homedir(), ".cache", "agent-deck", "runtime-hooks");
+/** Long enough for a person to reach a wrist, short enough to expire honestly. */
+const ANSWER_TIMEOUT_MS = 10 * 60_000;
 
 const client = new AgentDeckClient();
 
-interface HookState {
-  state?: string;
-  task?: string;
-  pendingApproval?: { expiresAt?: string };
-  [key: string]: unknown;
-}
+/** Requests opened for a terminal prompt, so one screen opens one request. */
+const openRequests = new Map<string, string>();
 
 /**
- * Reads a session's recorded state, or nothing if there is no state file.
+ * Sessions this integration has put into `waiting`.
  *
- * Only the hook runtimes write one. A plugin runtime like OpenCode reports
- * straight from its own process and keeps no file here, so an absent file is
- * not the same as an unknown session - see `knownToDeck`.
+ * In memory because a restart should forget: Herdr will report the pane blocked
+ * again on the next pass and the claim is remade. A claim that outlived the
+ * process would be one nothing could withdraw.
  */
-function readHookState(agentId: string): HookState | undefined {
-  try {
-    return JSON.parse(readFileSync(join(STATE_DIRECTORY, `${agentId}.json`), "utf8")) as HookState;
-  } catch {
-    return undefined;
-  }
+const claimed = new Set<string>();
+
+interface DeckAgent {
+  id: string;
+  state: string;
+  task: string;
+  pendingApproval?: unknown;
 }
 
-function applyCorrection(agentId: string, correction: "block" | "clear") {
-  // Re-read immediately before writing: a hook may have written this file while
-  // the Herdr call was in flight, and this pass only means to change two fields.
-  const current = readHookState(agentId);
-  if (current === undefined) return false;
-  const next =
-    correction === "block"
-      ? { ...current, state: "waiting", task: TERMINAL_PROMPT_TASK }
-      : { ...current, state: "idle", task: "Ready for an instruction" };
-  try {
-    writeFileSync(join(STATE_DIRECTORY, `${agentId}.json`), JSON.stringify(next));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The agents the bridge is actually holding.
- *
- * A state file used to stand in for this, which was true only while every
- * adapter was a hook. OpenCode reports from inside its own process and writes
- * no file, so asking the bridge is the question that was always meant: does the
- * deck know this session, whatever put it there.
- */
-async function knownToDeck(): Promise<ReadonlySet<string>> {
+/** What the bridge currently believes, which is what corrections are made against. */
+async function deckAgents(): Promise<Map<string, DeckAgent>> {
   const snapshot = await client
-    .request<{ agents: ReadonlyArray<{ id: string }> }>("/snapshot")
+    .request<{ agents: ReadonlyArray<DeckAgent> }>("/snapshot")
     .catch(() => undefined);
-  return new Set(snapshot?.agents.map((agent) => agent.id) ?? []);
+  return new Map((snapshot?.agents ?? []).map((agent) => [agent.id, agent]));
 }
 
-const holdingApproval = (stored: HookState) =>
-  stored.pendingApproval?.expiresAt !== undefined &&
-  Date.parse(stored.pendingApproval.expiresAt) > Date.now();
+const publish = (
+  agentId: string,
+  type: RuntimeEventType,
+  payload: Record<string, unknown>,
+  id?: string,
+) =>
+  client
+    .runtimeEvent({
+      id: id ?? crypto.randomUUID(),
+      agentId,
+      type,
+      createdAt: new Date().toISOString(),
+      payload,
+    })
+    .catch(() => {});
+
+/**
+ * Waits for an answer and presses it, then lets the screen speak for itself.
+ *
+ * Keys rather than text: Herdr refuses to submit a prompt to a blocked agent,
+ * and blocked is the only state this ever runs in. The number is typed and
+ * confirmed exactly as a person sitting there would.
+ */
+async function awaitAnswer(
+  agentId: string,
+  requestId: string,
+  target: string,
+  prompt: TerminalPrompt,
+) {
+  const answer = await client
+    .waitForAnswer(agentId, requestId, { timeoutMs: ANSWER_TIMEOUT_MS })
+    .catch(() => undefined);
+  openRequests.delete(agentId);
+
+  if (answer === undefined) {
+    // Nobody answered. The terminal is still waiting, and saying so is better
+    // than leaving a resolved-looking request behind.
+    await publish(agentId, "user-input.resolved", { status: "expired" });
+    return;
+  }
+
+  // A device sends back the label it was shown; the terminal wants the number.
+  const chosen =
+    prompt.options.find((option) => option.label === answer) ??
+    prompt.options.find((option) => String(option.number) === answer.trim());
+  if (chosen === undefined) {
+    await publish(agentId, "user-input.resolved", { status: "unavailable", value: answer });
+    return;
+  }
+
+  const pressed = await sendKeys(target, [String(chosen.number), "enter"]).catch(() => false);
+  await publish(agentId, "user-input.resolved", {
+    status: pressed ? "answered" : "unavailable",
+    value: chosen.label,
+  });
+  if (pressed) {
+    await publish(agentId, "session.state.changed", { state: "running", task: chosen.label });
+  }
+}
+
+/**
+ * Turns a blocked pane into something a watch can answer.
+ *
+ * When the screen cannot be read as a question, the session is still reported
+ * as waiting - knowing that something is stuck is worth more than nothing, even
+ * when the deck cannot say what it wants.
+ */
+async function claimBlocked(agent: HerdrAgent, agentId: string) {
+  const prompt = parsePrompt(await readPane(agent.target).catch(() => ""));
+  if (prompt === undefined) {
+    await publish(agentId, "session.state.changed", {
+      state: "waiting",
+      task: TERMINAL_PROMPT_TASK,
+    });
+    return;
+  }
+
+  await publish(agentId, "session.state.changed", { state: "waiting", task: prompt.question });
+  if (openRequests.has(agentId)) return;
+
+  const requestId = crypto.randomUUID();
+  openRequests.set(agentId, requestId);
+  await client
+    .runtimeEvent({
+      id: `terminal-prompt:${requestId}`,
+      agentId,
+      type: "user-input.requested",
+      createdAt: new Date().toISOString(),
+      requestId,
+      payload: {
+        kind: "user-input",
+        question: prompt.question,
+        options: prompt.options.map((option) => option.label),
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + ANSWER_TIMEOUT_MS).toISOString(),
+      },
+    })
+    .catch(() => openRequests.delete(agentId));
+
+  void awaitAnswer(agentId, requestId, agent.target, prompt);
+}
 
 /** Hands a session's queued messages to Herdr, which types them into its pane. */
 async function deliver(agent: HerdrAgent, agentId: string) {
@@ -109,24 +187,30 @@ async function deliver(agent: HerdrAgent, agentId: string) {
 async function pass() {
   const agents = await listAgents().catch(() => []);
   if (agents.length === 0) return;
-  const known = await knownToDeck();
+  const known = await deckAgents();
 
   for (const agent of agents) {
     if (!isDeckRuntime(agent.kind)) continue;
     const agentId = deckAgentId(agent.kind, agent.sessionId);
-    if (!known.has(agentId)) continue;
+    const deck = known.get(agentId);
+    // A terminal the deck has never seen is not part of the deck.
+    if (deck === undefined) continue;
 
-    // Only a hook runtime has a file to correct. A plugin runtime describes its
-    // own state from inside the process, where it can see more than Herdr can,
-    // so there is nothing here worth overruling.
-    const stored = readHookState(agentId);
-    if (stored !== undefined) {
-      const correction = correctionFor(agent.status, {
-        state: String(stored.state ?? ""),
-        task: String(stored.task ?? ""),
-        holdingApproval: holdingApproval(stored),
+    const correction = correctionFor(agent.status, {
+      state: deck.state,
+      holdingApproval: deck.pendingApproval != null,
+      claimedByUs: claimed.has(agentId),
+    });
+    if (correction === "block") {
+      claimed.add(agentId);
+      await claimBlocked(agent, agentId);
+    } else if (correction === "clear") {
+      claimed.delete(agentId);
+      openRequests.delete(agentId);
+      await publish(agentId, "session.state.changed", {
+        state: "idle",
+        task: "Ready for an instruction",
       });
-      if (correction) applyCorrection(agentId, correction);
     }
 
     if (acceptsPrompt(agent.status)) await deliver(agent, agentId);

@@ -52,6 +52,33 @@ export async function listAgents(timeoutMs = 5_000): Promise<ReadonlyArray<Herdr
 }
 
 /**
+ * The pane's visible contents.
+ *
+ * The only way to see a runtime's own UI. A hook fires for tool calls and
+ * questions the runtime routes through its API; a "Resume from summary" box is
+ * drawn on a screen and announced to nobody.
+ */
+export async function readPane(target: string, timeoutMs = 5_000): Promise<string> {
+  const { stdout, code } = await run(["agent", "read", target], timeoutMs);
+  return code === 0 ? stdout : "";
+}
+
+/**
+ * Presses keys in a pane.
+ *
+ * Not `agent prompt`, which Herdr refuses for a blocked agent - and blocked is
+ * exactly when a question needs answering. Keys are what a person would press.
+ */
+export async function sendKeys(
+  target: string,
+  keys: ReadonlyArray<string>,
+  timeoutMs = 5_000,
+): Promise<boolean> {
+  const { code } = await run(["agent", "send-keys", target, ...keys], timeoutMs);
+  return code === 0;
+}
+
+/**
  * Submits text to an agent, returning whether Herdr accepted it.
  *
  * Herdr refuses a blocked agent with `agent_blocked` before sending any input,

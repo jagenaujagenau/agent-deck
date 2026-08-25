@@ -76,35 +76,37 @@ export function acceptsPrompt(status: HerdrStatus): boolean {
  */
 export const TERMINAL_PROMPT_TASK = "Waiting at a prompt in the terminal";
 
-/** A session as the hooks have recorded it, reduced to what a correction reads. */
+/** A session as the bridge currently reports it. */
 export interface StoredSession {
   readonly state: string;
-  readonly task: string;
   /** A live approval the hooks are already blocked on, and own outright. */
   readonly holdingApproval: boolean;
+  /**
+   * Whether this integration is the one that put the session in `waiting`.
+   *
+   * Held rather than inferred from the task text. The task now carries the
+   * question read off the screen, which is indistinguishable from something a
+   * hook wrote - and withdrawing a claim that was never ours would report a
+   * session as idle while it sat at a prompt.
+   */
+  readonly claimedByUs: boolean;
 }
 
 export type Correction = "block" | "clear";
 
 /**
- * Whether this session's recorded state needs correcting, given what Herdr sees.
+ * Whether this session's reported state needs correcting, given what Herdr sees.
  *
  * Idempotent rather than edge-triggered: a pass states the conclusion the
  * current facts support instead of remembering a transition. An edge-triggered
- * version goes wrong the first time a hook writes over the claim, because the
- * transition it was waiting to re-fire has already happened.
- *
- * A claim is only ever withdrawn when the task text is still this integration's
- * own. A session the hooks have since described some other way has moved on,
- * and overwriting that would be trading a fresh account for a stale one.
+ * version goes wrong the first time something else writes over the claim,
+ * because the transition it was waiting to re-fire has already happened.
  */
 export function correctionFor(status: HerdrStatus, stored: StoredSession): Correction | undefined {
   // An approval in flight is the hooks' to describe: they know which tool is
   // asking, and a device can answer it. Herdr only sees that a UI is up.
   if (stored.holdingApproval) return undefined;
-  if (status === "blocked") {
-    const alreadySaid = stored.state === "waiting" && stored.task === TERMINAL_PROMPT_TASK;
-    return alreadySaid ? undefined : "block";
-  }
-  return stored.task === TERMINAL_PROMPT_TASK ? "clear" : undefined;
+  if (status === "blocked")
+    return stored.claimedByUs && stored.state === "waiting" ? undefined : "block";
+  return stored.claimedByUs ? "clear" : undefined;
 }
