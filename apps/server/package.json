@@ -7,7 +7,9 @@
     "check-types": "tsc -b",
     "compile": "bun build --compile --minify --sourcemap --bytecode ./src/index.ts --outfile server",
     "dev": "bun run --hot src/index.ts",
-    "start": "bun run dist/index.mjs"
+    "dev:effect": "bun run --hot src/effect/main.ts",
+    "start": "bun run dist/index.mjs",
+    "start:effect": "bun run src/effect/main.ts"
   },
   "dependencies": {
     "@agent-control-dashboard/agent-adapter": "workspace:*",
@@ -15,10 +17,13 @@
     "@agent-control-dashboard/auth": "workspace:*",
     "@agent-control-dashboard/db": "workspace:*",
     "@agent-control-dashboard/env": "workspace:*",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.112",
     "@hono/trpc-server": "^0.4.0",
     "@trpc/server": "catalog:",
     "better-auth": "catalog:",
     "dotenv": "catalog:",
+    "effect": "4.0.0-rc.112",
     "hono": "catalog:",
     "zod": "catalog:"
   },

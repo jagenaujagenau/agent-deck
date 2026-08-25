@@ -51,6 +51,7 @@ temp
 # Local bridge database
 local.db
 local.db-*
+local.db.backup-*
 apps/android/local.db
 
 # Android local toolchain paths and build caches
