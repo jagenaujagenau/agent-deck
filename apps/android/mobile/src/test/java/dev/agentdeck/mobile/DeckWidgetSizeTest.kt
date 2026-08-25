@@ -21,14 +21,28 @@ class DeckWidgetSizeTest {
     }
 
     @Test
-    fun `a short widget still shows something under the header`() {
+    fun `a short widget still shows something under the chrome`() {
         assertTrue(rowsThatFit(110.dp) >= 1)
+    }
+
+    @Test
+    fun `the size granted is what decides, not the minimum declared`() {
+        // Glance reports the provider's minHeight unless the widget asks for
+        // SizeMode.Exact, and a card placed with room for six drew one.
+        assertTrue(rowsThatFit(300.dp) > rowsThatFit(110.dp))
     }
 
     @Test
     fun `a widget too small for any row asks for none rather than a negative`() {
         assertEquals(0, rowsThatFit(20.dp))
         assertEquals(0, rowsThatFit(0.dp))
+    }
+
+    @Test
+    fun `the chrome is paid for before any row is offered`() {
+        // Title bar plus prompt line. A row drawn into that space would be
+        // clipped by the window it is supposed to be inside.
+        assertEquals(0, rowsThatFit(55.dp))
     }
 
     @Test
