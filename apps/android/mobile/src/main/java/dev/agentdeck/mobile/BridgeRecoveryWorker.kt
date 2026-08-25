@@ -38,7 +38,7 @@ class BridgeRecoveryWorker(context: Context, parameters: WorkerParameters) : Cor
                     // The widget is redrawn even when notifications are
                     // refused: it is a surface a person chose to place, and
                     // it going stale is not the same as being alerted.
-                    DeckWidgetUpdater.onSnapshot(applicationContext, snapshot.agents)
+                    DeckWidgetUpdater.onSnapshot(applicationContext, snapshot)
                     applicationContext.getSharedPreferences("bridge_recovery", 0).edit()
                         .putLong("last_success_at", System.currentTimeMillis())
                         .remove("last_error")

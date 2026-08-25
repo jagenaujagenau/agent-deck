@@ -1,6 +1,5 @@
 package dev.agentdeck.wear
 
-import android.content.Context
 import androidx.wear.protolayout.ActionBuilders
 import androidx.wear.protolayout.ColorBuilders.argb
 import androidx.wear.protolayout.DimensionBuilders.expand
@@ -45,7 +44,7 @@ class DeckTile : TileService() {
                 // the phone has been out of range.
                 .setFreshnessIntervalMillis(FRESHNESS_MS)
                 .setTileTimeline(
-                    TimelineBuilders.Timeline.fromLayoutElement(layout(this, summary)),
+                    TimelineBuilders.Timeline.fromLayoutElement(layout(summary)),
                 )
                 .build(),
         )
@@ -109,7 +108,7 @@ private fun text(value: String, size: Float, color: Int, maxLines: Int = 1) =
         )
         .build()
 
-internal fun layout(context: Context, summary: DeckSummary): LayoutElementBuilders.LayoutElement {
+internal fun layout(summary: DeckSummary): LayoutElementBuilders.LayoutElement {
     val column = LayoutElementBuilders.Column.Builder()
         .setWidth(expand())
         .setModifiers(openApp(null))

@@ -72,7 +72,7 @@ class BridgeMonitorService : Service() {
                 val approvals = waiting.count { it.pendingApproval != null }
                 val questions = waiting.count { agent -> agent.events.maxByOrNull { it.createdAt }?.kind == "question" }
                 ApprovalNotifier.reconcile(this@BridgeMonitorService, snapshot.agents)
-                DeckWidgetUpdater.onSnapshot(this@BridgeMonitorService, snapshot.agents)
+                DeckWidgetUpdater.onSnapshot(this@BridgeMonitorService, snapshot)
                 val status = when {
                     approvals > 0 -> "$approvals approval${if (approvals == 1) "" else "s"} waiting"
                     questions > 0 -> "$questions question${if (questions == 1) "" else "s"} waiting"
