@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown in the tile picker, where a person is choosing what to swipe to. -->
+    <string name="deck_tile_label">Agent Deck</string>
+</resources>

@@ -45,6 +45,13 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
+    // Tiles are ProtoLayout, not Compose: the watch renders them in the system
+    // process, so the layout has to be sent as data rather than composed here.
+    implementation("androidx.wear.tiles:tiles:1.6.2")
+    implementation("androidx.wear.protolayout:protolayout:1.4.2")
+    implementation("androidx.wear.protolayout:protolayout-material3:1.4.2")
+    implementation("androidx.wear.protolayout:protolayout-expression:1.4.2")
+    implementation("com.google.guava:guava:33.5.0-android")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation(kotlin("test"))

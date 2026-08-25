@@ -41,6 +41,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
+    // Glance draws the home screen widget. RemoteViews by hand would mean a
+    // second layout language for a surface the rest of the app writes in Compose.
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.glance:glance-material3:1.1.1")
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
     implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.44.0")

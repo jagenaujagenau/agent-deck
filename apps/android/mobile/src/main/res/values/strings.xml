@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown in the widget picker, where a person is deciding whether to place it. -->
+    <string name="deck_widget_description">Sessions waiting on you</string>
+</resources>

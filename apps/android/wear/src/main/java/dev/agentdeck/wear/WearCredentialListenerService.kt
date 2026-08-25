@@ -39,6 +39,10 @@ class WearCredentialListenerService : WearableListenerService() {
                 val snapshot = Json { ignoreUnknownKeys = true }
                     .decodeFromString(BridgeSnapshot.serializer(), payload)
                 WatchNotifier.reconcile(this, snapshot.agents)
+                // The tile is drawn from disk, and this service runs whether or
+                // not the app is open - so this is the only place the tile can
+                // learn anything while the watch sits on a wrist doing nothing.
+                DeckTileUpdater.onSnapshot(this, snapshot.agents)
             }
         }
     }

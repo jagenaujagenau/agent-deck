@@ -24,6 +24,19 @@
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/agent-deck/snapshot" />
             </intent-filter>
         </service>
+
+        <service
+            android:name=".DeckTile"
+            android:exported="true"
+            android:label="@string/deck_tile_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/ic_launcher_foreground" />
+        </service>
         <activity android:name=".WearActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
