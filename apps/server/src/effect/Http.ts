@@ -5,6 +5,7 @@ import {
   ControlCommand,
   Heartbeat,
   ManagedSessionRequest,
+  ManagedSessionTarget,
   PairingRequest,
   ResolveRequestBody,
   RuntimeEventEnvelope,
@@ -310,7 +311,20 @@ export const BridgeRoutes = HttpRouter.addAll([
             Effect.flatMap((session) => HttpServerResponse.json(session, { status: 201 })),
             Effect.catchTag("ManagedStartError", (failure) => error(failure.message, 400)),
           );
-      }).pipe(onMalformed("Invalid permissionMode"));
+      }).pipe(
+        Effect.catchTag("SchemaError", () =>
+          Effect.gen(function* () {
+            // Decoding failed; which half of the body was at fault decides what
+            // to tell the caller.
+            const target = yield* Schema.decodeUnknownEffect(ManagedSessionTarget)(
+              yield* rawBody,
+            ).pipe(Effect.orElseSucceed(() => undefined));
+            return yield* target === undefined
+              ? error("project and an absolute cwd are required", 400)
+              : error("Invalid permissionMode", 400);
+          }),
+        ),
+      );
     }),
   ),
   route(

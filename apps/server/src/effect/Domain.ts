@@ -154,6 +154,18 @@ export const SlashCommandPublication = Schema.Struct({
   commands: Schema.Array(Schema.Unknown),
 });
 
+/**
+ * The part of a start request that must be there at all.
+ *
+ * Kept separate so a rejected body can say which thing was wrong: a missing
+ * project and an unrecognised permission mode are different mistakes, and one
+ * message for both sends the caller looking in the wrong place.
+ */
+export const ManagedSessionTarget = Schema.Struct({
+  project: Schema.String,
+  cwd: Schema.String,
+});
+
 /** Body for starting a bridge-hosted Claude session. */
 export const ManagedSessionRequest = Schema.Struct({
   project: Schema.String,
