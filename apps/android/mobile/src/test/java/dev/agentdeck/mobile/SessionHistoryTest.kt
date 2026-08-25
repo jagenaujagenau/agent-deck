@@ -5,8 +5,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SessionHistoryTest {
-    private fun event(id: String, at: String, detail: String? = null) =
-        AgentEvent(id, "output", "Response", detail, at)
+    private fun event(
+        id: String,
+        at: String,
+        detail: String? = null,
+        command: String? = null,
+        diff: String? = null,
+    ) = AgentEvent(id, "output", "Response", detail, at, command = command, diff = diff)
 
     @Test
     fun `history and the live window combine into one ordered timeline`() {
@@ -77,6 +82,35 @@ class SessionHistoryTest {
         val live = listOf(event("a", "2026-08-24T10:00:00Z", detail = "wait for it\u2026"))
 
         assertEquals("wait for it\u2026", mergeSessionEvents(history, live).single().detail)
+    }
+
+    @Test
+    fun `a terminal command survives the snapshot copy that omits it`() {
+        // The snapshot drops `command` to keep cards small. Letting that copy win stripped the
+        // command, and the Terminal tab filters on it - so the newest entries vanished from view.
+        val history = listOf(event("a", "2026-08-24T10:00:00Z", command = "bun test"))
+        val live = listOf(event("a", "2026-08-24T10:00:00Z", command = null))
+
+        val merged = mergeSessionEvents(history, live)
+        assertEquals("bun test", merged.single().command)
+        assertEquals(listOf("a"), terminalEvents(merged).map { it.id })
+    }
+
+    @Test
+    fun `a diff survives the snapshot copy that omits it`() {
+        val history = listOf(event("a", "2026-08-24T10:00:00Z", diff = "@@ -1 +1 @@"))
+        val live = listOf(event("a", "2026-08-24T10:00:00Z", diff = null))
+
+        assertEquals("@@ -1 +1 @@", mergeSessionEvents(history, live).single().diff)
+    }
+
+    @Test
+    fun `a live command still replaces the one history holds`() {
+        // Preserving history must not freeze a value the runtime actually revised.
+        val history = listOf(event("a", "2026-08-24T10:00:00Z", command = "old"))
+        val live = listOf(event("a", "2026-08-24T10:00:00Z", command = "new"))
+
+        assertEquals("new", mergeSessionEvents(history, live).single().command)
     }
 
 }

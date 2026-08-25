@@ -45,12 +45,19 @@ internal fun mergeSessionEvents(history: List<AgentEvent>, live: List<AgentEvent
     for (event in history) byId[event.id] = event
     for (event in live) {
         val known = byId[event.id]
-        // The live copy is fresher and normally wins, but the snapshot clips `detail` to keep cards
-        // small. Taking it wholesale would replace a whole message with its first 400 characters.
-        byId[event.id] = if (known != null && isClippedForm(event.detail, known.detail)) {
-            event.copy(detail = known.detail)
-        } else {
+        // The live copy is fresher and normally wins, but the snapshot is a lossy view of the same
+        // event: it clips `detail` so a card stays small, and drops `command` and `diff` outright.
+        // Taking it wholesale replaces a whole message with its first 400 characters, and strips
+        // the command off a terminal entry - which then fails the Terminal tab's filter and
+        // disappears from the list entirely.
+        byId[event.id] = if (known == null) {
             event
+        } else {
+            event.copy(
+                detail = if (isClippedForm(event.detail, known.detail)) known.detail else event.detail,
+                command = event.command ?: known.command,
+                diff = event.diff ?: known.diff,
+            )
         }
     }
     return byId.values.sortedBy { it.createdAt }
