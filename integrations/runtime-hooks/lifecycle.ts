@@ -10,6 +10,7 @@ const lifecycleNames = new Map([
   ["posttooluse", "PostToolUse"],
   ["posttoolusefailure", "PostToolUseFailure"],
   ["notification", "Notification"],
+  ["subagentstop", "SubagentStop"],
   ["stopfailure", "StopFailure"],
   ["stop", "Stop"],
   ["sessionend", "SessionEnd"],

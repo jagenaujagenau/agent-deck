@@ -42,6 +42,13 @@ export interface HookPayload {
   message?: string;
   transcriptPath?: string;
   permissionMode?: string;
+  /**
+   * The subagent a SubagentStop refers to. Its own id and kind, alongside - not
+   * instead of - the parent's `sessionId`, which is what makes subagent work
+   * reportable without inventing a second session for it.
+   */
+  agentId?: string;
+  agentType?: string;
 }
 
 const EMPTY_ARGUMENTS: ToolArguments = { raw: Object.freeze({}) };
@@ -88,5 +95,7 @@ export function parseHookPayload(text: string): HookPayload {
     message: asString(raw.message),
     transcriptPath: asString(raw.transcript_path),
     permissionMode: asString(raw.permission_mode),
+    agentId: asString(raw.agent_id),
+    agentType: asString(raw.agent_type),
   };
 }

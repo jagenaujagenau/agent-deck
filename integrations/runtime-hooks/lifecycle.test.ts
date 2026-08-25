@@ -14,6 +14,9 @@ describe("canonicalLifecycleEvent", () => {
     ["userPromptSubmit", "UserPromptSubmit"],
     ["PreToolUse", "PreToolUse"],
     ["post_tool_use_failure", "PostToolUseFailure"],
+    ["SubagentStop", "SubagentStop"],
+    ["subagent_stop", "SubagentStop"],
+    ["subagentStop", "SubagentStop"],
   ])("normalizes %s", (input, expected) => {
     expect(canonicalLifecycleEvent(input)).toBe(expected);
   });

@@ -13,6 +13,7 @@ const events = [
   "PostToolUse",
   "PostToolUseFailure",
   "Notification",
+  "SubagentStop",
   "Stop",
   "StopFailure",
   "SessionEnd",

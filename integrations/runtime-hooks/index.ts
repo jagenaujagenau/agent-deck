@@ -693,6 +693,29 @@ switch (event) {
     await publish("warning", "Needs attention", state.task).catch(() => {});
     break;
   }
+  case "SubagentStop": {
+    // A subagent finishing is work completed *inside* the turn, never the turn
+    // itself ending - so the state is deliberately left alone. Marking the
+    // session idle here would report the parent as done while it is still
+    // collecting results, which is the whole reason this event was worth adding.
+    const kind = input.agentType ?? "Subagent";
+    state.task = clip(`${kind} subagent finished`, 180);
+    // Claude Code hands us the parent's session id and the subagent's own id as
+    // separate fields, so the subagent is reportable without deriving a second
+    // session from it. The subagent id is the item id: re-publishing the same
+    // completion collapses at the bridge instead of arriving twice.
+    const itemId = input.agentId ?? crypto.randomUUID();
+    await publishRuntime(
+      "item.completed",
+      { tool: "Task", summary: state.task, detail: input.lastAssistantMessage },
+      { id: `subagent-completed:${sessionKey}:${itemId}`, itemId, turnId: state.activeTurnId },
+    ).catch(() => {});
+    await publish("output", state.task, input.lastAssistantMessage, {
+      id: `subagent:${sessionKey}:${itemId}`,
+      tool: "Task",
+    }).catch(() => {});
+    break;
+  }
   case "StopFailure":
     state.state = "error";
     state.task = "Response failed";
