@@ -533,6 +533,17 @@ switch (event) {
       ownerPid: runtimeOwnerPid(),
       capabilities: ["approve", "reject", "steer", "prompt", "follow_up"],
     };
+    // Identity as an event, not only as a heartbeat field. The heartbeat was
+    // the sole carrier of a session's name, project and model, which is the one
+    // reason ADR-0001 keeps it alive; a projection that can say what a session
+    // is called can stand on its own.
+    await publishRuntime("session.registered", {
+      name: displayName,
+      project: detectedProject,
+      model,
+      runtime,
+      capabilities: state.capabilities,
+    }).catch(() => {});
     await publishRuntime("session.state.changed", { state: "idle", task: state.task }).catch(
       () => {},
     );

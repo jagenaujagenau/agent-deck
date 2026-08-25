@@ -495,20 +495,44 @@ export class BridgeState extends Context.Service<
           if (approval) approvals.set(agent.id, approval);
         }
         const rendered = [...agents.values()].map((agent) => {
-          const projection =
-            agent.runtimeProtocol === "canonical-v1" ? projections.get(agent.id) : undefined;
+          /**
+           * The projection is believed, not checked against the heartbeat.
+           *
+           * It used to be discarded wholesale unless its state already matched
+           * the stored document, which made it incapable of ever correcting
+           * one - an adapter could publish a perfectly ordered event and see
+           * nothing change. Measured across this bridge, that gate was also
+           * throwing away the better number: heartbeats reported 0 tokens for
+           * sessions whose projection had counted 220,100.
+           *
+           * The heartbeat still supplies identity and liveness, which is what
+           * ADR-0001 keeps it for until every runtime registers itself.
+           */
           const activeProjection =
-            projection && projection.state === agent.state ? projection : undefined;
+            agent.runtimeProtocol === "canonical-v1" ? projections.get(agent.id) : undefined;
+          const projection = activeProjection;
           return {
             ...agent,
             ...(projection
               ? {
                   projectionSequence: projection.sequence,
-                  projectionParity: activeProjection != null,
+                  // Retained as a migration signal: it now reports whether the
+                  // two agree, rather than deciding whether to listen.
+                  projectionParity: projection.state === agent.state,
                 }
               : {}),
             ...(activeProjection
               ? { state: activeProjection.state as AgentState, task: activeProjection.task }
+              : {}),
+            ...(activeProjection?.identity
+              ? {
+                  name: activeProjection.identity.name,
+                  project: activeProjection.identity.project,
+                  model: activeProjection.identity.model,
+                  ...(activeProjection.identity.capabilities
+                    ? { capabilities: activeProjection.identity.capabilities }
+                    : {}),
+                }
               : {}),
             tokens: activeProjection?.usageKnown
               ? activeProjection.contextTokens

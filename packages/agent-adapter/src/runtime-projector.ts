@@ -3,6 +3,21 @@ import type { CanonicalRuntimeEvent, RuntimeRequestStatus } from "./runtime-even
 export type RuntimeProjection = {
   agentId: string;
   sequence: number;
+  /**
+   * Who this session is, as the runtime declared itself.
+   *
+   * Absent until a `session.registered` event arrives. The heartbeat was the
+   * only carrier of identity, which is the single reason it had to stay: a
+   * projection that cannot say what a session is called cannot replace a
+   * document that can. ADR-0001 names this as the migration's exit condition.
+   */
+  identity?: {
+    name: string;
+    project: string;
+    model: string;
+    runtime?: string;
+    capabilities?: ReadonlyArray<string>;
+  };
   state: "idle" | "running" | "waiting" | "error" | "offline";
   task: string;
   activeTurnId?: string;
@@ -40,6 +55,23 @@ export function projectRuntimeEvent(
   if (event.agentId !== current.agentId || sequence <= current.sequence) return current;
   const next = { ...current, sequence, updatedAt: event.createdAt };
   switch (event.type) {
+    case "session.registered":
+      return {
+        ...next,
+        identity: {
+          name: text(event.payload.name) ?? current.identity?.name ?? current.agentId,
+          project: text(event.payload.project) ?? current.identity?.project ?? "",
+          model: text(event.payload.model) ?? current.identity?.model ?? "",
+          runtime: text(event.payload.runtime) ?? current.identity?.runtime,
+          capabilities: Array.isArray(event.payload.capabilities)
+            ? (event.payload.capabilities as ReadonlyArray<string>)
+            : current.identity?.capabilities,
+        },
+        // Registration says who, not what it is doing. A session that
+        // re-registers after a reconnect has not gone back to idle.
+        state: current.sequence === 0 ? next.state : current.state,
+        task: current.sequence === 0 ? next.task : current.task,
+      };
     case "session.state.changed":
       return {
         ...next,

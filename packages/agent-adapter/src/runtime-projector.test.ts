@@ -62,3 +62,68 @@ describe("projectRuntimeEvent", () => {
     expect(reset.processedTokens).toBe(100);
   });
 });
+
+describe("session.registered", () => {
+  const at = (type: string, payload: Record<string, unknown>, seq: number) => ({
+    id: `e${seq}`,
+    agentId: "a",
+    type,
+    createdAt: new Date(seq * 1000).toISOString(),
+    payload,
+  });
+
+  const fold = (events: ReadonlyArray<ReturnType<typeof at>>) =>
+    events.reduce(
+      (projection, event, index) => projectRuntimeEvent(projection, event as never, index + 1),
+      emptyRuntimeProjection("a"),
+    );
+
+  test("carries the identity the heartbeat used to be needed for", () => {
+    const projection = fold([
+      at(
+        "session.registered",
+        {
+          name: "Claude · fx · 27d9",
+          project: "fx",
+          model: "Claude Code",
+          runtime: "claude",
+          capabilities: ["approve", "reject"],
+        },
+        1,
+      ),
+    ]);
+    expect(projection.identity?.name).toBe("Claude · fx · 27d9");
+    expect(projection.identity?.project).toBe("fx");
+    expect(projection.identity?.capabilities).toEqual(["approve", "reject"]);
+  });
+
+  test("re-registering does not send a working session back to idle", () => {
+    // A reconnect republishes identity. Treating that as a state change would
+    // report every reconnecting session as freshly idle.
+    const projection = fold([
+      at("session.registered", { name: "n", project: "p", model: "m" }, 1),
+      at("turn.started", { objective: "Doing the thing" }, 2),
+      at("session.registered", { name: "n", project: "p", model: "m" }, 3),
+    ]);
+    expect(projection.state).toBe("running");
+    expect(projection.task).toBe("Doing the thing");
+  });
+
+  test("a later registration updates the name without losing the rest", () => {
+    const projection = fold([
+      at("session.registered", { name: "old", project: "p", model: "m" }, 1),
+      at("token-usage.updated", { contextTokens: 500, processedTokens: 900 }, 2),
+      at("session.registered", { name: "new", project: "p", model: "m" }, 3),
+    ]);
+    expect(projection.identity?.name).toBe("new");
+    expect(projection.contextTokens).toBe(500);
+    expect(projection.usageKnown).toBe(true);
+  });
+
+  test("a session that never registers simply has no identity", () => {
+    // Every runtime that has not been migrated yet, which is the state the
+    // heartbeat still covers for.
+    const projection = fold([at("session.state.changed", { state: "idle", task: "Ready" }, 1)]);
+    expect(projection.identity).toBeUndefined();
+  });
+});

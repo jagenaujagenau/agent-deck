@@ -1,4 +1,5 @@
 export type RuntimeEventType =
+  | "session.registered"
   | "session.state.changed"
   | "turn.started"
   | "turn.completed"
@@ -34,6 +35,7 @@ export type CanonicalRuntimeEvent = {
 };
 
 const eventTypes = new Set<RuntimeEventType>([
+  "session.registered",
   "session.state.changed",
   "turn.started",
   "turn.completed",

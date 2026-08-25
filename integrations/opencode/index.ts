@@ -114,6 +114,14 @@ export const AgentDeckPlugin = async (input: {
   const adopt = (nextSessionId: string) => {
     if (sessionId !== nextSessionId) {
       sessionId = nextSessionId;
+      // Identity as an event, not only as a heartbeat field - see ADR-0001.
+      void publishRuntime("session.registered", {
+        name: `OpenCode · ${projectName} · ${nextSessionId.slice(-4)}`,
+        project: projectName,
+        model,
+        runtime: "opencode",
+        capabilities: ["approve", "reject"],
+      });
       void heartbeat();
     }
     if (!timer) timer = setInterval(() => void heartbeat(), HEARTBEAT_INTERVAL_MS);

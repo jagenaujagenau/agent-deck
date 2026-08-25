@@ -437,6 +437,14 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     state = nextCtx.isIdle() ? "idle" : "running";
     task = lastUserTask(nextCtx);
     objective = task == "Ready for a remote instruction" ? undefined : clip(task, 500);
+    // Identity as an event, not only as a heartbeat field - see ADR-0001.
+    await publishRuntime("session.registered", {
+      name: pi.getSessionName() ?? `Pi · ${basename(nextCtx.cwd)}`,
+      project: basename(nextCtx.cwd),
+      model: modelName(),
+      runtime: "pi",
+      capabilities: ["approve", "reject", "steer", "prompt", "follow_up"],
+    }).catch(() => {});
     await heartbeat();
     void pollCommands();
   });
