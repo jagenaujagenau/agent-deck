@@ -17,6 +17,8 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -52,6 +54,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -1220,6 +1223,52 @@ private fun ProviderMark(provider: ProviderIdentity, diameter: androidx.compose.
     }
 }
 
+/**
+ * The text field inside a composer pill.
+ *
+ * Material's `TextField` reserves 56dp for a label it is never given, so a pill
+ * built around one is always taller than the button beside it no matter what
+ * height either is asked for. This sets its own padding, which makes the pill
+ * and the send button the same size because both are told the same number.
+ */
+@Composable
+private fun ComposerField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    monospace: Boolean = false,
+) {
+    val style = TextStyle(
+        color = Text,
+        fontSize = if (monospace) 14.sp else 15.sp,
+        lineHeight = 20.sp,
+        fontFamily = if (monospace) FontFamily.Monospace else null,
+    )
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.padding(horizontal = 8.dp, vertical = 13.dp),
+        textStyle = style,
+        maxLines = 4,
+        cursorBrush = SolidColor(Signal),
+        decorationBox = { inner ->
+            if (value.isEmpty()) Text(placeholder, color = Muted, style = style)
+            inner()
+        },
+    )
+}
+
+/** The three dots that make a rectangle read as a window. */
+@Composable
+private fun WindowSemaphore() {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (colour in listOf(Color(0xFFFF5F57), Color(0xFFFEBC2E), Color(0xFF28C840))) {
+            Box(Modifier.size(9.dp).clip(CircleShape).background(colour))
+        }
+    }
+}
+
 @Composable
 private fun StatusLabel(state: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1719,28 +1768,15 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
                             modifier = Modifier.size(20.dp),
                         )
                     }
-                    TextField(
+                    // BasicTextField, not TextField: the material one carries a
+                    // 56dp minimum of its own, which made the pill visibly
+                    // taller than the send button beside it however the two were
+                    // sized. Here the padding is the height.
+                    ComposerField(
                         value = message,
                         onValueChange = { message = it },
+                        placeholder = if (action == "steer") "Reply or steer…" else "Message agent…",
                         modifier = Modifier.weight(1f),
-                        placeholder = {
-                            Text(
-                                if (action == "steer") "Reply or steer…" else "Message agent…",
-                                color = Muted,
-                                fontSize = 15.sp,
-                            )
-                        },
-                        textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
-                        minLines = 1,
-                        maxLines = 4,
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent,
-                        ),
                     )
                 }
             }
@@ -2084,15 +2120,33 @@ private fun TerminalView(
         initialPositionApplied = true
         newCommandsWaiting = false
     }
-    Column(modifier.fillMaxWidth().background(Color(0xFF050709))) {
+    // A window, because that is what it is: the terminal on the other end of
+    // this session, drawn with the chrome a person already reads as one. The
+    // same shape the home screen widget uses, so the two agree about what a
+    // terminal looks like.
+    Column(
+        modifier
+            .fillMaxWidth()
+            // Closed on all four sides, with air beneath it: a window that runs
+            // off the bottom of the screen is a panel, not a window, and the
+            // composer needs to read as sitting outside it.
+            .padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF050709))
+            .border(BorderStroke(1.dp, Line), RoundedCornerShape(12.dp)),
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(48.dp).background(Color(0xFF0C1014)).padding(start = 16.dp, end = 6.dp),
+            modifier = Modifier.fillMaxWidth().height(40.dp).background(Color(0xFF0C1014)).padding(start = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(if (followNewest) Signal else Amber))
-            Spacer(Modifier.width(9.dp))
-            Text(agent.project, color = Text.copy(alpha = 0.82f), fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text("${events.size} ${if (events.size == 1) "command" else "commands"}", color = Muted.copy(alpha = 0.72f), fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+            // Close, minimise, zoom - drawn, not wired. They are what makes a
+            // rectangle read as a window at a glance.
+            WindowSemaphore()
+            Spacer(Modifier.width(12.dp))
+            Text(agent.project, color = Text.copy(alpha = 0.7f), fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            // The follow-the-tail state moved onto the jump button, where the
+            // action that changes it already lives.
+            Text("${events.size}", color = Muted.copy(alpha = 0.72f), fontFamily = FontFamily.Monospace, fontSize = 10.sp)
             IconButton(
                 onClick = {
                     followNewest = true
@@ -2165,7 +2219,6 @@ private fun TerminalCommandComposer(
         Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 8.dp)) {
             commandError?.let { FloatingNotice(it, Danger) }
             if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
-            FloatingNotice("Agent-mediated · runtime permissions apply", Muted)
             Row(verticalAlignment = Alignment.Bottom) {
                 Surface(
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp).shadow(8.dp, CircleShape),
@@ -2182,24 +2235,12 @@ private fun TerminalCommandComposer(
                             fontSize = 15.sp,
                             modifier = Modifier.padding(start = 10.dp),
                         )
-                        TextField(
+                        ComposerField(
                             value = command,
                             onValueChange = { command = it },
+                            placeholder = "Command for agent…",
                             modifier = Modifier.weight(1f),
-                            placeholder = {
-                                Text("Command for agent…", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
-                            },
-                            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp, color = Text),
-                            minLines = 1,
-                            maxLines = 4,
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                disabledContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                disabledIndicatorColor = Color.Transparent,
-                            ),
+                            monospace = true,
                         )
                     }
                 }
