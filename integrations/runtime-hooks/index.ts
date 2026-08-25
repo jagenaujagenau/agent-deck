@@ -425,7 +425,9 @@ switch (event) {
     await publishRuntime("token-usage.updated", { contextTokens: state.tokens ?? 0, processedTokens: state.processedTokens ?? state.tokens ?? 0 }, { turnId: state.activeTurnId }).catch(() => {});
     await publishRuntime("turn.completed", { status: "completed", summary: state.task }, { turnId: state.activeTurnId }).catch(() => {});
     state.activeTurnId = undefined;
-    await publish("output", "Response", input.last_assistant_message).catch(() => {});
+    // The response is not published here. The daemon republishes it from the transcript with an id
+    // derived from the transcript uuid, which is what lets a re-publish collapse at the bridge; a
+    // copy sent from here would carry a fresh id every turn and show up as a second message.
     {
       // A hook cannot type into a running session, but blocking the Stop hook keeps the turn alive
       // and hands `reason` back to the model as its next instruction. That is the delivery point

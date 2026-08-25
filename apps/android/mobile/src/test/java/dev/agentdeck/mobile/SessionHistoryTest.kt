@@ -49,4 +49,34 @@ class SessionHistoryTest {
         // Derived from the live window alone, the conversation would be empty.
         assertEquals(emptyList<ConversationEntry>(), conversationEntries(live))
     }
+    @Test
+    fun `the snapshot's clipped copy does not replace the full message from history`() {
+        // The exact failure seen on the phone: a 3337-character reply rendered as its first 400
+        // characters, because the snapshot copy of the same event arrived after the history one.
+        val full = "Of the three, this one fits best" + " and here is the rest".repeat(40)
+        val clipped = full.take(399).trimEnd() + "\u2026"
+        val history = listOf(event("a", "2026-08-24T10:00:00Z", detail = full))
+        val live = listOf(event("a", "2026-08-24T10:00:00Z", detail = clipped))
+
+        assertEquals(full, mergeSessionEvents(history, live).single().detail)
+    }
+
+    @Test
+    fun `a revision to shorter text still wins over history`() {
+        // Only the clipped shape is restored; a genuinely rewritten event must not be reverted.
+        val history = listOf(event("a", "2026-08-24T10:00:00Z", detail = "a much longer earlier text"))
+        val live = listOf(event("a", "2026-08-24T10:00:00Z", detail = "short"))
+
+        assertEquals("short", mergeSessionEvents(history, live).single().detail)
+    }
+
+    @Test
+    fun `text that merely ends in an ellipsis is not treated as clipped`() {
+        // An author's own trailing ellipsis is not a clip marker unless history extends it.
+        val history = listOf(event("a", "2026-08-24T10:00:00Z", detail = "wait for it\u2026"))
+        val live = listOf(event("a", "2026-08-24T10:00:00Z", detail = "wait for it\u2026"))
+
+        assertEquals("wait for it\u2026", mergeSessionEvents(history, live).single().detail)
+    }
+
 }

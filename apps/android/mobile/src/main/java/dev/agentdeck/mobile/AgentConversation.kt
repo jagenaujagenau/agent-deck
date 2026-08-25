@@ -43,8 +43,29 @@ internal fun mergeSessionEvents(history: List<AgentEvent>, live: List<AgentEvent
     if (history.isEmpty()) return live
     val byId = LinkedHashMap<String, AgentEvent>(history.size + live.size)
     for (event in history) byId[event.id] = event
-    for (event in live) byId[event.id] = event
+    for (event in live) {
+        val known = byId[event.id]
+        // The live copy is fresher and normally wins, but the snapshot clips `detail` to keep cards
+        // small. Taking it wholesale would replace a whole message with its first 400 characters.
+        byId[event.id] = if (known != null && isClippedForm(event.detail, known.detail)) {
+            event.copy(detail = known.detail)
+        } else {
+            event
+        }
+    }
     return byId.values.sortedBy { it.createdAt }
+}
+
+/**
+ * Whether `live` is the snapshot's shortened form of `full`.
+ *
+ * The snapshot cuts `detail` and marks the cut with an ellipsis, so its text is a prefix of what
+ * history holds. Restoring only that exact shape leaves a genuine revision alone — an event whose
+ * text was rewritten to something shorter still takes the live copy.
+ */
+private fun isClippedForm(live: String?, full: String?): Boolean {
+    if (live == null || full == null || !live.endsWith('\u2026')) return false
+    return full.length > live.length && full.startsWith(live.dropLast(1).trimEnd())
 }
 
 internal fun terminalEvents(events: List<AgentEvent>): List<AgentEvent> =
