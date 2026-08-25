@@ -1,0 +1,146 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --panel: #f4f4f5;
+  --line: #e4e4e7;
+  --text: #18181b;
+  --muted: #71717a;
+  --serving: #16a34a;
+  --failing: #dc2626;
+  --idle: #a1a1aa;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #18181b;
+    --panel: #232327;
+    --line: #34343a;
+    --text: #fafafa;
+    --muted: #a1a1aa;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  /* Room for the transparent title bar the window is drawn with. */
+  padding: 34px 16px 16px;
+}
+
+h1 {
+  font-size: 15px;
+  margin: 0 0 2px;
+  letter-spacing: -0.01em;
+}
+h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 20px 0 8px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--idle);
+  flex: none;
+}
+.dot.serving {
+  background: var(--serving);
+}
+.dot.failing {
+  background: var(--failing);
+}
+.dot.starting {
+  background: #ca8a04;
+}
+
+.muted {
+  color: var(--muted);
+}
+.meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.row:last-child {
+  border-bottom: none;
+}
+.row .name {
+  font-weight: 500;
+}
+.row .path {
+  font-size: 10.5px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+button {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pill {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pill.on {
+  color: var(--serving);
+}
+
+.error {
+  color: var(--failing);
+  font-size: 11.5px;
+  margin-top: 8px;
+}

@@ -21,6 +21,7 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "herdr": "bun run integrations/herdr/index.ts",
+    "release:desktop": "bun run scripts/release-desktop.ts",
     "knip": "knip",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"

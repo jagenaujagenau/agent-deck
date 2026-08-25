@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Agent Deck",
+  "version": "0.1.0",
+  "identifier": "dev.agentdeck.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev:vite",
+    "devUrl": "http://localhost:5183",
+    "beforeBuildCommand": "bun run build:vite",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Agent Deck",
+        "width": 460,
+        "height": 620,
+        "resizable": true,
+        "visible": false,
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "icon": [
+      "icons/icon.icns",
+      "icons/128x128.png",
+      "icons/32x32.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1NTBDRjJGNjgzRjI0NTUKUldSVkpEOW9MODlRZFEycExydk9JN0ZrVmk1YmJqNG9JZ2F5bVZBa0ZMeVFPb21KNFl5cjhwMEsK",
+      "endpoints": [
+        "https://REPLACE-ME.example/agentdeck/latest.json"
+      ]
+    }
+  }
+}

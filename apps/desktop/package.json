@@ -1,0 +1,23 @@
+{
+  "name": "desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:vite": "vite build",
+    "check-types": "tsc --noEmit",
+    "dev": "tauri dev",
+    "dev:vite": "vite",
+    "tauri": "tauri",
+    "build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-updater": "^2.10.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "typescript": "catalog:",
+    "vite": "^8.2.2"
+  }
+}
