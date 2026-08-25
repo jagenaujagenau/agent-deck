@@ -103,7 +103,10 @@ private fun TerminalWindow(summary: DeckSummary) {
         modifier = GlanceModifier
             .fillMaxSize()
             .background(Window)
-            .cornerRadius(12.dp)
+            // Square-ish on purpose. Measured on a Pixel at density 420, the
+            // launcher renders whatever radius is asked for rather than
+            // clipping to a larger system one, so this is the corner you see.
+            .cornerRadius(4.dp)
             .clickable(actionStartActivity(deckIntent(null))),
     ) {
         TitleBar(summary)
