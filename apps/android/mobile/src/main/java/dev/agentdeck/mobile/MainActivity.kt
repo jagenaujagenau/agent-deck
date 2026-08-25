@@ -2159,28 +2159,51 @@ private fun TerminalCommandComposer(
 ) {
     val action = remoteMessageAction(agent.state, supports) ?: return
     var command by rememberSaveable(agent.id) { mutableStateOf("") }
-    Surface(color = Color(0xFF0C1014), tonalElevation = 2.dp) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 10.dp)) {
-            // Over the conversation now, so each notice carries its own ground.
+    // The same floating composer as the chat, in the terminal's own voice: a
+    // monospace field behind a green prompt rather than a slash button.
+    Box(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 8.dp)) {
             commandError?.let { FloatingNotice(it, Danger) }
             if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
-            Row(Modifier.padding(start = 8.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.VerifiedUser, null, tint = Muted, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Agent-mediated · runtime permissions apply", color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
-            }
-            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = command,
-                    onValueChange = { command = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Command for agent…", fontFamily = FontFamily.Monospace) },
-                    prefix = { Text("\$ ", color = Signal, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold) },
-                    textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp, color = Text),
-                    shape = RoundedCornerShape(16.dp),
-                    minLines = 1,
-                    maxLines = 4,
-                )
+            FloatingNotice("Agent-mediated · runtime permissions apply", Muted)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Surface(
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).shadow(8.dp, CircleShape),
+                    shape = CircleShape,
+                    color = SurfaceRaised,
+                    border = BorderStroke(1.dp, Line),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "  \$",
+                            color = Signal,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            modifier = Modifier.padding(start = 10.dp),
+                        )
+                        TextField(
+                            value = command,
+                            onValueChange = { command = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = {
+                                Text("Command for agent…", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                            },
+                            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp, color = Text),
+                            minLines = 1,
+                            maxLines = 4,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
+                            ),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
                 FilledIconButton(
                     onClick = {
                         val exact = command.trim()
@@ -2188,10 +2211,11 @@ private fun TerminalCommandComposer(
                         command = ""
                     },
                     enabled = command.isNotBlank() && !busy,
-                    modifier = Modifier.size(52.dp),
+                    modifier = Modifier.size(48.dp),
+                    shape = CircleShape,
                 ) {
-                    if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    else Icon(Icons.Rounded.ArrowUpward, "Ask agent to run command")
+                    if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    else Icon(Icons.Rounded.ArrowUpward, "Ask agent to run command", modifier = Modifier.size(20.dp))
                 }
             }
         }
