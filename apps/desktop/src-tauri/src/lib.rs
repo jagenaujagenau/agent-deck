@@ -1,9 +1,9 @@
-//! Menu bar control for the Agent Deck bridge.
+//! Menu bar control for the Agent Deck services.
 
-mod bridge;
 mod harness;
+mod service;
 
-use bridge::{BridgeStatus, Health};
+use service::{Health, ServiceStatus};
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -14,31 +14,31 @@ use tauri::{AppHandle, Emitter, Manager};
 /// Exposed so the real states - a crash-looping service, a harness that moved -
 /// can be checked against the machine rather than inferred from the UI.
 pub fn inspect() -> (
-    BridgeStatus,
+    Vec<ServiceStatus>,
     Vec<harness::Harness>,
     Option<std::path::PathBuf>,
 ) {
-    (bridge::status(), harness::list(), harness::repo_root())
+    (service::statuses(), harness::list(), harness::repo_root())
 }
 
 #[tauri::command]
-fn bridge_status() -> BridgeStatus {
-    bridge::status()
+fn service_status() -> Vec<ServiceStatus> {
+    service::statuses()
 }
 
 #[tauri::command]
-fn bridge_start() -> Result<(), String> {
-    bridge::start()
+fn service_start(name: String) -> Result<(), String> {
+    service::start(&name)
 }
 
 #[tauri::command]
-fn bridge_stop() -> Result<(), String> {
-    bridge::stop()
+fn service_stop(name: String) -> Result<(), String> {
+    service::stop(&name)
 }
 
 #[tauri::command]
-fn bridge_restart() -> Result<(), String> {
-    bridge::restart()
+fn service_restart(name: String) -> Result<(), String> {
+    service::restart(&name)
 }
 
 #[tauri::command]
@@ -71,23 +71,40 @@ fn tray_glyph(health: &Health) -> &'static str {
     }
 }
 
-fn tray_summary(status: &BridgeStatus) -> String {
-    match status.health {
-        Health::Serving => match &status.version {
-            Some(version) => format!("Bridge {version} · serving"),
-            None => "Bridge serving".into(),
-        },
-        Health::Starting => "Bridge starting".into(),
-        Health::Failing => match status.last_exit_code {
-            Some(code) => format!("Bridge failing to start (exit {code})"),
-            None => "Bridge failing to start".into(),
-        },
-        Health::Stopped => "Bridge stopped".into(),
-        Health::NotInstalled => "Bridge service not installed".into(),
+/// One line naming what is wrong, or what is right when nothing is.
+///
+/// Names the service in every unhealthy case. A tray that says "failing"
+/// without saying which job leaves you opening the window to find out, which is
+/// what a tray exists to save you.
+fn tray_summary(statuses: &[ServiceStatus]) -> String {
+    let unwell: Vec<&ServiceStatus> = statuses
+        .iter()
+        .filter(|entry| entry.health != Health::Serving)
+        .collect();
+    if unwell.is_empty() {
+        let version = statuses
+            .iter()
+            .find_map(|entry| entry.version.as_deref())
+            .unwrap_or("?");
+        return format!("Bridge {version} · all services running");
     }
+    unwell
+        .iter()
+        .map(|entry| match entry.health {
+            Health::Failing => match entry.last_exit_code {
+                Some(code) => format!("{} failing (exit {code})", entry.name),
+                None => format!("{} failing to start", entry.name),
+            },
+            Health::Starting => format!("{} starting", entry.name),
+            Health::Stopped => format!("{} stopped", entry.name),
+            Health::NotInstalled => format!("{} not installed", entry.name),
+            Health::Serving => format!("{} running", entry.name),
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
-/// Polls the service and keeps the menu bar honest about it.
+/// Polls the jobs and keeps the menu bar honest about them.
 ///
 /// The window may be closed for days at a time - that is the point of a tray
 /// app - so the poll belongs here rather than in the page, which only exists
@@ -96,19 +113,20 @@ fn watch(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut previous: Option<String> = None;
         loop {
-            let status = bridge::status();
-            let title = format!("{} ", tray_glyph(&status.health));
-            let tooltip = tray_summary(&status);
+            let statuses = service::statuses();
+            let title = format!("{} ", tray_glyph(&service::worst(&statuses)));
+            let tooltip = tray_summary(&statuses);
             if let Some(tray) = app.tray_by_id("main") {
                 let _ = tray.set_title(Some(&title));
                 let _ = tray.set_tooltip(Some(&tooltip));
             }
             // Only wake the window when something actually changed: a page that
             // re-renders every two seconds is a page that cannot be read.
-            let fingerprint = format!("{tooltip}{:?}{:?}", status.pid, status.port_taken_by_other);
+            let pids: Vec<Option<u32>> = statuses.iter().map(|entry| entry.pid).collect();
+            let fingerprint = format!("{tooltip}{pids:?}");
             if previous.as_deref() != Some(fingerprint.as_str()) {
                 previous = Some(fingerprint);
-                let _ = app.emit("bridge-status", &status);
+                let _ = app.emit("service-status", &statuses);
             }
             tokio_sleep(Duration::from_secs(2)).await;
         }
@@ -127,10 +145,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            bridge_status,
-            bridge_start,
-            bridge_stop,
-            bridge_restart,
+            service_status,
+            service_start,
+            service_stop,
+            service_restart,
             harness_list,
             harness_install,
             app_version
@@ -141,7 +159,8 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let open = MenuItem::with_id(app, "open", "Open Agent Deck", true, None::<&str>)?;
-            let restart = MenuItem::with_id(app, "restart", "Restart bridge", true, None::<&str>)?;
+            let restart =
+                MenuItem::with_id(app, "restart", "Restart services", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;
             let menu = Menu::with_items(app, &[&open, &restart, &separator, &quit])?;
@@ -157,7 +176,11 @@ pub fn run() {
                         }
                     }
                     "restart" => {
-                        let _ = bridge::restart();
+                        // Everything, because a menu item that silently restarted
+                        // only the bridge would be the wrong half of the fix.
+                        for definition in service::SERVICES.iter() {
+                            let _ = service::restart(definition.name);
+                        }
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -181,4 +204,63 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Agent Deck");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(name: &str, health: Health, version: Option<&str>) -> ServiceStatus {
+        ServiceStatus {
+            name: name.into(),
+            summary: String::new(),
+            health,
+            pid: None,
+            last_exit_code: None,
+            version: version.map(str::to_string),
+            port_taken_by_other: false,
+        }
+    }
+
+    #[test]
+    fn all_well_reports_the_bridge_version() {
+        let statuses = [
+            at("bridge", Health::Serving, Some("0.1.0")),
+            at("herdr", Health::Serving, None),
+        ];
+        assert_eq!(
+            tray_summary(&statuses),
+            "Bridge 0.1.0 · all services running"
+        );
+    }
+
+    #[test]
+    fn an_unhealthy_service_is_named() {
+        // "failing" without saying which job sends you to the window to find
+        // out, which is what the tray exists to save you.
+        let statuses = [
+            at("bridge", Health::Serving, Some("0.1.0")),
+            at("herdr", Health::Stopped, None),
+        ];
+        assert_eq!(tray_summary(&statuses), "herdr stopped");
+    }
+
+    #[test]
+    fn two_unhealthy_services_are_both_named() {
+        let statuses = [
+            at("bridge", Health::Failing, None),
+            at("herdr", Health::Stopped, None),
+        ];
+        assert_eq!(
+            tray_summary(&statuses),
+            "bridge failing to start · herdr stopped"
+        );
+    }
+
+    #[test]
+    fn a_failing_service_carries_its_exit_code() {
+        let mut failing = at("bridge", Health::Failing, None);
+        failing.last_exit_code = Some(1);
+        assert_eq!(tray_summary(&[failing]), "bridge failing (exit 1)");
+    }
 }

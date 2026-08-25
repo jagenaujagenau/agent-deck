@@ -144,3 +144,20 @@ button:disabled {
   font-size: 11.5px;
   margin-top: 8px;
 }
+
+/* Services stack rather than sit in one card: each has its own controls, and a
+   shared border would imply a shared state they do not have. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.status .pill {
+  margin-left: auto;
+}
+.status .pill + .pill {
+  margin-left: 6px;
+}
+.card .path {
+  margin-top: 3px;
+}

@@ -34,9 +34,7 @@ pub fn repo_root() -> Option<PathBuf> {
     if let Ok(explicit) = std::env::var("AGENT_DECK_REPO") {
         return Some(PathBuf::from(explicit));
     }
-    let plist = home()
-        .join("Library/LaunchAgents")
-        .join(format!("{}.plist", super::bridge::LABEL));
+    let plist = super::service::plist_path();
     let out = Command::new("plutil")
         .args(["-extract", "WorkingDirectory", "raw", "-o", "-"])
         .arg(&plist)

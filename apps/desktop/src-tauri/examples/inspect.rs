@@ -4,8 +4,8 @@
 //! state - a service that is loaded but crashing, a harness whose config moved
 //! - and those are not reachable by clicking through a menu bar in a test.
 fn main() {
-    let (status, harnesses, root) = agent_deck_desktop_lib::inspect();
-    println!("bridge:     {}", serde_json::to_string(&status).unwrap());
+    let (services, harnesses, root) = agent_deck_desktop_lib::inspect();
+    println!("services:   {}", serde_json::to_string(&services).unwrap());
     println!(
         "repo root:  {}",
         root.map(|p| p.display().to_string())

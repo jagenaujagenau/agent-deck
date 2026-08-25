@@ -12,7 +12,9 @@ import { check } from "@tauri-apps/plugin-updater";
 
 type Health = "Serving" | "Starting" | "Failing" | "Stopped" | "NotInstalled";
 
-interface BridgeStatus {
+interface ServiceStatus {
+  name: string;
+  summary: string;
   health: Health;
   pid?: number;
   last_exit_code?: number;
@@ -60,7 +62,7 @@ const escape = (value: string) =>
  * cannot diagnose from the tray glyph alone, and the exit code is the first
  * thing they would go looking for.
  */
-function detail(status: BridgeStatus): string {
+function detail(status: ServiceStatus): string {
   if (status.port_taken_by_other) {
     return "Something else is answering on port 3000 — the bridge cannot bind it.";
   }
@@ -72,42 +74,51 @@ function detail(status: BridgeStatus): string {
         ? "launchd holds the job but it exits immediately."
         : `Exits immediately with code ${status.last_exit_code}. Check ~/Library/Logs/AgentDeck.`;
     case "NotInstalled":
-      return "Run: bun scripts/agent-deck-service.ts install";
+      return `Run: bun scripts/agent-deck-service.ts install ${status.name}`;
     default:
       return "";
   }
 }
 
 let harnesses: Harness[] = [];
-let status: BridgeStatus | undefined;
+let services: ServiceStatus[] = [];
 let appVersion = "";
 let notice = "";
 
-function render() {
-  if (!status) {
-    app.innerHTML = `<h1>Agent Deck</h1><p class="muted">Reading the bridge…</p>`;
-    return;
-  }
+/** One service, with the controls that make sense for the state it is in. */
+function serviceCard(status: ServiceStatus): string {
   const line = detail(status);
   const running = status.health === "Serving" || status.health === "Starting";
+  return `
+    <div class="card">
+      <div class="status">
+        <span class="dot ${DOT_CLASS[status.health]}"></span>
+        <strong>${escape(status.name)}</strong>
+        <span class="pill">${HEALTH_TEXT[status.health]}</span>
+        ${status.version ? `<span class="pill">v${escape(status.version)}</span>` : ""}
+      </div>
+      <div class="path">${escape(status.summary)}</div>
+      ${line ? `<div class="meta">${escape(line)}</div>` : ""}
+      <div class="actions">
+        <button data-act="start" data-name="${escape(status.name)}" ${running ? "disabled" : ""}>Start</button>
+        <button data-act="stop" data-name="${escape(status.name)}" ${running ? "" : "disabled"}>Stop</button>
+        <button data-act="restart" data-name="${escape(status.name)}">Restart</button>
+      </div>
+    </div>`;
+}
+
+function render() {
+  if (services.length === 0) {
+    app.innerHTML = `<h1>Agent Deck</h1><p class="muted">Reading the services…</p>`;
+    return;
+  }
+  const bridgeVersion = services.find((service) => service.version)?.version;
   app.innerHTML = `
     <h1>Agent Deck</h1>
     <p class="muted">Menu bar control for the bridge</p>
 
-    <h2>Bridge</h2>
-    <div class="card">
-      <div class="status">
-        <span class="dot ${DOT_CLASS[status.health]}"></span>
-        <strong>${HEALTH_TEXT[status.health]}</strong>
-        ${status.version ? `<span class="pill">v${escape(status.version)}</span>` : ""}
-      </div>
-      ${line ? `<div class="meta">${escape(line)}</div>` : ""}
-      <div class="actions">
-        <button id="start" ${running ? "disabled" : ""}>Start</button>
-        <button id="stop" ${running ? "" : "disabled"}>Stop</button>
-        <button id="restart">Restart</button>
-      </div>
-    </div>
+    <h2>Services</h2>
+    <div class="stack">${services.map(serviceCard).join("")}</div>
 
     <h2>Agent harnesses</h2>
     <div class="card">
@@ -140,7 +151,7 @@ function render() {
       </div>
       <div class="row">
         <div><div class="name">Bridge</div><div class="path">Reported by the running service</div></div>
-        <span class="pill">${status.version ? `v${escape(status.version)}` : "—"}</span>
+        <span class="pill">${bridgeVersion ? `v${escape(bridgeVersion)}` : "—"}</span>
       </div>
       <div class="actions"><button id="update">Check for updates</button></div>
     </div>
@@ -159,15 +170,13 @@ async function act(action: () => Promise<void>) {
 }
 
 function wire() {
-  document.querySelector("#start")?.addEventListener("click", () => {
-    void act(() => invoke<void>("bridge_start"));
-  });
-  document.querySelector("#stop")?.addEventListener("click", () => {
-    void act(() => invoke<void>("bridge_stop"));
-  });
-  document.querySelector("#restart")?.addEventListener("click", () => {
-    void act(() => invoke<void>("bridge_restart"));
-  });
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-act]")) {
+    button.addEventListener("click", () => {
+      const name = button.dataset.name!;
+      const command = `service_${button.dataset.act}`;
+      void act(() => invoke<void>(command, { name }));
+    });
+  }
   document.querySelector("#update")?.addEventListener("click", () => {
     void act(async () => {
       const update = await check();
@@ -186,8 +195,8 @@ function wire() {
 }
 
 async function refresh() {
-  [status, harnesses] = await Promise.all([
-    invoke<BridgeStatus>("bridge_status"),
+  [services, harnesses] = await Promise.all([
+    invoke<ServiceStatus[]>("service_status"),
     invoke<Harness[]>("harness_list"),
   ]);
   render();
@@ -196,7 +205,7 @@ async function refresh() {
 appVersion = await invoke<string>("app_version");
 await refresh();
 // The Rust side already watches the service; take its word rather than polling.
-void listen<BridgeStatus>("bridge-status", (event) => {
-  status = event.payload;
+void listen<ServiceStatus[]>("service-status", (event) => {
+  services = event.payload;
   render();
 });
