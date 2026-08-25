@@ -117,8 +117,10 @@ internal fun responseBlocks(content: String): List<ResponseBlock> {
         var rowIndex = index + 1
         while (rowIndex < lines.size) {
             val cells = tableCells(lines[rowIndex])
-            if (cells.size != headers.size) break
-            rows += cells
+            if (cells.isEmpty()) break
+            // Markdown pads short rows and ignores extra cells; requiring an exact match silently
+            // truncated a table at its first ragged row.
+            rows += List(headers.size) { column -> cells.getOrElse(column) { "" } }
             rowIndex += 1
         }
         blocks += ResponseBlock.Table(headers, rows)
@@ -131,8 +133,25 @@ internal fun responseBlocks(content: String): List<ResponseBlock> {
 
 private fun tableCells(line: String): List<String> {
     val trimmed = line.trim()
-    if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) return emptyList()
-    return trimmed.trim('|').split('|').map(String::trim)
+    // A lone "|" starts and ends with a pipe but delimits nothing; without this it would be read
+    // as a one-empty-cell row and absorbed into whatever table precedes it.
+    if (trimmed.length < 2 || !trimmed.startsWith('|') || !trimmed.endsWith('|')) return emptyList()
+    // Split on unescaped pipes only: a cell may legitimately contain `\|`, and splitting on it
+    // gives the row more cells than the table has columns, which used to drop the row entirely.
+    val cells = mutableListOf<String>()
+    val cell = StringBuilder()
+    var index = 1
+    val end = trimmed.length - 1
+    while (index < end) {
+        val character = trimmed[index]
+        when {
+            character == '\\' && index + 1 < end && trimmed[index + 1] == '|' -> { cell.append('|'); index += 2 }
+            character == '|' -> { cells += cell.toString().trim(); cell.clear(); index += 1 }
+            else -> { cell.append(character); index += 1 }
+        }
+    }
+    cells += cell.toString().trim()
+    return cells
 }
 
 /** Repairs historical responses flattened before Markdown-safe ingestion was introduced. */
