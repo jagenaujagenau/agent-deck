@@ -40,7 +40,13 @@ export function readConversationBacklog(
   } catch {
     return [];
   }
-  return readNewTranscript(transcriptPath, { offset: 0 }, sessionKey, size).messages;
+  return readNewTranscript(
+    transcriptPath,
+    { offset: 0 },
+    sessionKey,
+    size,
+    Number.POSITIVE_INFINITY,
+  ).messages;
 }
 
 export function readNewTranscript(
@@ -48,6 +54,12 @@ export function readNewTranscript(
   cursor: TranscriptCursor,
   sessionKey: string,
   forcedSize?: number,
+  /**
+   * How much reasoning one pass will take before leaving the rest for the next.
+   * The backlog read lifts it, because a limit meant to pace a live tail would
+   * otherwise cut a whole conversation short.
+   */
+  reasoningLimit: number = MAX_PER_PASS,
 ): { reasoning: ReasoningBlock[]; messages: TranscriptMessage[] } {
   const empty = { reasoning: [] as ReasoningBlock[], messages: [] as TranscriptMessage[] };
   let size: number;
@@ -90,12 +102,18 @@ export function readNewTranscript(
   const lines = chunk.split("\n");
   // A trailing fragment means the runtime is mid-write; leave it for the next pass.
   const complete = chunk.endsWith("\n") ? lines : lines.slice(0, -1);
-  cursor.offset =
-    previous + complete.reduce((total, line) => total + Buffer.byteLength(line, "utf8") + 1, 0);
 
   const blocks: ReasoningBlock[] = [];
   const messages: TranscriptMessage[] = [];
+  // The cursor advances line by line rather than in one jump to the end. A pass
+  // stops once it has enough reasoning, and stopping must leave the rest to be
+  // read next time: advancing past lines this pass declined to publish is how
+  // reasoning goes missing for good. That matters after any gap - a daemon
+  // restart, a sleeping machine - where one catch-up pass covers a whole turn.
+  let consumed = previous;
   for (const line of complete) {
+    if (blocks.length >= reasoningLimit) break;
+    consumed += Buffer.byteLength(line, "utf8") + 1;
     if (!line.trim()) continue;
     let entry: {
       type?: string;
@@ -144,5 +162,6 @@ export function readNewTranscript(
         text: spoken.join("\n\n").trim(),
       });
   }
-  return { reasoning: blocks.slice(-MAX_PER_PASS), messages };
+  cursor.offset = consumed;
+  return { reasoning: blocks, messages };
 }
