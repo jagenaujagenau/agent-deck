@@ -8,7 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import dev.agentdeck.shared.Agent
-import java.time.Instant
+import dev.agentdeck.shared.AttentionPolicy
+import dev.agentdeck.shared.AttentionPolicy.Action
 import dev.agentdeck.shared.supportsCapability
 
 /** Posts each concrete approval event once, durably across reconnects and process restarts. */
@@ -16,41 +17,6 @@ internal object ApprovalNotifier {
     private const val CHANNEL = "agent_approvals"
     private const val PREFERENCES = "approval_notifications"
 
-    internal enum class Action { Ignore, Cancel, Notify }
-    internal data class Decision(val action: Action, val observedAt: String, val resolved: Boolean, val approvalKey: String?)
-
-    internal fun approvalKey(agent: Agent): String? {
-        val approval = agent.pendingApproval ?: return null
-        if (!supportsCapability(agent.capabilities, "approve") || !supportsCapability(agent.capabilities, "reject")) return null
-        if (agent.state != "waiting" || runCatching { Instant.parse(approval.expiresAt).isAfter(Instant.now()) }.getOrDefault(false).not()) return null
-        return "${agent.id}:${approval.id}"
-    }
-
-    private fun attentionKey(agent: Agent): String? {
-        approvalKey(agent)?.let { return it }
-        if (agent.state != "waiting") return null
-        return agent.events.maxByOrNull { it.createdAt }?.takeIf { it.kind == "question" }?.let { "${agent.id}:${it.id}" }
-    }
-
-    internal fun decide(agent: Agent, previousAt: String?, previousResolved: Boolean, previousKey: String?): Decision {
-        val observedAt = maxOf(agent.lastSeenAt, agent.events.maxOfOrNull { it.createdAt } ?: agent.lastSeenAt)
-        val key = attentionKey(agent)
-        if (previousAt != null && observedAt < previousAt) return Decision(Action.Ignore, previousAt, previousResolved, previousKey)
-        if (previousAt == observedAt && previousResolved && key != null) {
-            return Decision(Action.Ignore, previousAt, previousResolved, previousKey)
-        }
-        return Decision(
-            action = when {
-                key == null && !previousResolved -> Action.Cancel
-                key == null -> Action.Ignore
-                key == previousKey -> Action.Ignore
-                else -> Action.Notify
-            },
-            observedAt = observedAt,
-            resolved = key == null,
-            approvalKey = key,
-        )
-    }
 
     @Synchronized
     fun reconcile(context: Context, agents: List<Agent>) {
@@ -68,7 +34,7 @@ internal object ApprovalNotifier {
             val observedKey = "observed:${agent.id}"
             val resolvedKey = "resolved:${agent.id}"
             val notifiedKey = "notified:${agent.id}"
-            val decision = decide(
+            val decision = AttentionPolicy.decide(
                 agent = agent,
                 previousAt = preferences.getString(observedKey, null),
                 previousResolved = preferences.getBoolean(resolvedKey, false),

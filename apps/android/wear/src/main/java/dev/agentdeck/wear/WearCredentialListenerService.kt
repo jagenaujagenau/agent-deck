@@ -5,7 +5,9 @@ import com.google.android.gms.wearable.DataEventBuffer
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.WearableListenerService
+import dev.agentdeck.shared.BridgeSnapshot
 import dev.agentdeck.shared.SecureTokenStore
+import kotlinx.serialization.json.Json
 import org.json.JSONObject
 
 class WearCredentialListenerService : WearableListenerService() {
@@ -31,6 +33,13 @@ class WearCredentialListenerService : WearableListenerService() {
                 .putString("snapshot", payload)
                 .putLong("publishedAt", data.getLong("publishedAt"))
                 .apply()
+            // This service runs whether or not the app is open, which is what
+            // makes it the right place to decide the wrist should buzz.
+            runCatching {
+                val snapshot = Json { ignoreUnknownKeys = true }
+                    .decodeFromString(BridgeSnapshot.serializer(), payload)
+                WatchNotifier.reconcile(this, snapshot.agents)
+            }
         }
     }
 

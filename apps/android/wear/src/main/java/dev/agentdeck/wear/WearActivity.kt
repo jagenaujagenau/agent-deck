@@ -81,10 +81,17 @@ import kotlinx.coroutines.flow.update
 
 
 class WearActivity : ComponentActivity() {
+    companion object {
+        /** Which session a notification was about, so tapping it lands there. */
+        const val EXTRA_AGENT_ID = "agent_id"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setTheme(android.R.style.Theme_Material_NoActionBar)
-        setContent { WearTheme { WearDeck() } }
+        // A notification names the session it is about; opening it should not
+        // put the person back at the top of a list to find it again.
+        setContent { WearTheme { WearDeck(openAgentId = intent?.getStringExtra(EXTRA_AGENT_ID)) } }
     }
 }
 
@@ -361,7 +368,7 @@ private fun WearTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun WearDeck(vm: WearDeckViewModel = viewModel()) {
+private fun WearDeck(openAgentId: String? = null, vm: WearDeckViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val deliveryError by vm.deliveryError.collectAsStateWithLifecycle()
@@ -369,7 +376,7 @@ private fun WearDeck(vm: WearDeckViewModel = viewModel()) {
     val sessionEvents by vm.sessionEvents.collectAsStateWithLifecycle()
     val historyLoading by vm.historyLoading.collectAsStateWithLifecycle()
     val historyFailed by vm.historyFailed.collectAsStateWithLifecycle()
-    var selected by remember { mutableStateOf<String?>(null) }
+    var selected by remember { mutableStateOf(openAgentId) }
     val snapshot = when (val current = state) {
         is BridgeState.Ready -> current.snapshot
         is BridgeState.Failed -> current.previous

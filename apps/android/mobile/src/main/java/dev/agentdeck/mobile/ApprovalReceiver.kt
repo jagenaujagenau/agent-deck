@@ -9,6 +9,7 @@ import dev.agentdeck.shared.SecureTokenStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import dev.agentdeck.shared.AttentionPolicy
 
 class ApprovalReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -25,7 +26,7 @@ class ApprovalReceiver : BroadcastReceiver() {
                     SecureTokenStore(appContext).get(),
                 )
                 val current = client.snapshot().agents.firstOrNull { it.id == agentId }
-                if (current != null && ApprovalNotifier.approvalKey(current) == approvalKey) {
+                if (current != null && AttentionPolicy.approvalKey(current) == approvalKey) {
                     client.control(agentId, action)
                 }
                 appContext.getSystemService(NotificationManager::class.java).cancel(agentId.hashCode())
