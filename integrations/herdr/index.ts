@@ -46,6 +46,20 @@ const openRequests = new Map<string, string>();
  */
 const claimed = new Set<string>();
 
+/**
+ * Questions already put to a person, whether or not they answered.
+ *
+ * Without this the loop eats itself: the request id is derived from the screen,
+ * so a second pass reuses it, finds it already settled, resolves it again - and
+ * a resolution projects to "running", which reads as the claim having been lost
+ * and starts the whole thing over. It ran four times a second and produced 468
+ * resolutions in an hour for prompts nobody had touched.
+ *
+ * Asked once per distinct screen. Forgotten when the prompt clears, so the same
+ * question appearing again later is a new question.
+ */
+const asked = new Set<string>();
+
 interface DeckAgent {
   id: string;
   state: string;
@@ -96,9 +110,9 @@ async function awaitAnswer(
   openRequests.delete(agentId);
 
   if (answer === undefined) {
-    // Nobody answered. The terminal is still waiting, and saying so is better
-    // than leaving a resolved-looking request behind.
-    await publish(agentId, "user-input.resolved", { status: "expired" });
+    // Nobody answered within the window. Nothing is published: a resolution
+    // projects to "running", and announcing one for a prompt still sitting on
+    // screen would say the session had resumed when it has not.
     return;
   }
 
@@ -147,6 +161,8 @@ async function claimBlocked(agent: HerdrAgent, agentId: string) {
   // pending questions across a few service restarts. A stable id collapses at
   // the bridge instead.
   const requestId = `${agentId}:${createHash("sha1").update(prompt.question).digest("hex").slice(0, 12)}`;
+  if (asked.has(requestId)) return;
+  asked.add(requestId);
   openRequests.set(agentId, requestId);
   await client
     .runtimeEvent({
@@ -213,6 +229,9 @@ async function pass() {
     } else if (correction === "clear") {
       claimed.delete(agentId);
       openRequests.delete(agentId);
+      // The screen has moved on, so the same question appearing later is a new
+      // one worth putting to someone again.
+      for (const id of asked) if (id.startsWith(`${agentId}:`)) asked.delete(id);
       await publish(agentId, "session.state.changed", {
         state: "idle",
         task: "Ready for an instruction",

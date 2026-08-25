@@ -109,7 +109,19 @@ export function projectRuntimeEvent(
         : next;
     case "request.resolved":
     case "user-input.resolved":
-      return { ...next, state: "running", pendingRequest: undefined };
+      return {
+        ...next,
+        // A settled request means the question is answered, not that the
+        // session went back to work. Usually it did - the blocked call resumes -
+        // but a request that expired unanswered leaves the runtime exactly where
+        // it was, and saying "running" there reported sessions as busy while
+        // they sat at a prompt.
+        state:
+          event.payload.status === "answered" || event.payload.status === "approved"
+            ? "running"
+            : current.state,
+        pendingRequest: undefined,
+      };
     case "item.started":
     case "item.updated":
       return {
@@ -121,7 +133,15 @@ export function projectRuntimeEvent(
     case "item.completed":
       return {
         ...next,
-        state: "running",
+        // A finished item does not mean work is happening - it means some
+        // finished. On a session whose turn has already completed this is late
+        // news, and claiming "running" for it resurrected sessions that were
+        // sitting idle: a Task subagent can outlive the turn that dispatched
+        // it, so its completion lands minutes after `turn.completed`.
+        //
+        // `item.started` still moves a session to running, because work
+        // beginning genuinely is work happening.
+        state: current.state === "idle" ? "idle" : "running",
         activeItemId: undefined,
         task: text(event.payload.summary) ?? "Tool completed",
       };
