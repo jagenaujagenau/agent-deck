@@ -19,8 +19,6 @@ import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
@@ -42,14 +40,9 @@ import androidx.wear.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.gestures.ScrollableState
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -80,6 +73,10 @@ import androidx.wear.compose.material3.TimeText
 import androidx.wear.compose.material3.SwipeToDismissBox
 import androidx.wear.compose.material3.ColorScheme
 import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.foundation.rotary.rotaryScrollable
 
 private val Ink = Color(0xFF090C10)
 private val Surface = Color(0xFF171C22)
@@ -373,8 +370,7 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
 
     val pages = WearStatePage.entries
     val pagerState = rememberPagerState(pageCount = { pages.size })
-    val pageScrollStates = pages.map { rememberScrollState() }
-    val listFlingBehavior = rememberFastListFlingBehavior()
+    val pageListStates = pages.map { rememberTransformingLazyColumnState() }
     val pagerFlingBehavior = PagerDefaults.flingBehavior(
         state = pagerState,
         snapAnimationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
@@ -394,24 +390,45 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
             WearStatePage.Paused -> Blue
             WearStatePage.Idle -> Muted
         }
-        Column(
+        val listState = pageListStates[pageIndex]
+        // TransformingLazyColumn scales and fades what approaches the bezel,
+        // which is what keeps a round screen readable at its edges. ScreenScaffold
+        // draws the scroll indicator beside it.
+        ScreenScaffold(scrollState = listState) { contentPadding ->
+        val rotaryFocus = remember { FocusRequester() }
+        LaunchedEffect(pageIndex, pagerState.currentPage) {
+            // Only the page in view should answer the crown; two lists reacting
+            // to one turn is worse than none.
+            if (pagerState.currentPage == pageIndex) runCatching { rotaryFocus.requestFocus() }
+        }
+        TransformingLazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(pageScrollStates[pageIndex], flingBehavior = listFlingBehavior)
-                .rotaryScroll(pageScrollStates[pageIndex])
-                .padding(start = 12.dp, end = 12.dp, top = 28.dp, bottom = 34.dp),
+                .rotaryScrollable(
+                    RotaryScrollableDefaults.behavior(listState),
+                    focusRequester = rotaryFocus,
+                ),
+            contentPadding = contentPadding,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+          item {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                // The app's own name costs a row the agents need. What the dot
+                // says - whether the bridge is reachable - rides with the page
+                // title instead, and the clock above already ends the chrome.
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(7.dp).clip(CircleShape).background(if (state is BridgeState.Ready) Signal else Danger))
-                    Spacer(Modifier.width(6.dp))
-                    Text("AGENT DECK", color = Signal, fontSize = 10.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(if (state is BridgeState.Ready) Signal else Danger),
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text(page.label, color = pageColor, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                 }
-                Spacer(Modifier.height(9.dp))
-                Text(page.label, color = pageColor, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                 Text("${agents.size} ${if (agents.size == 1) "agent" else "agents"}", color = Muted, fontSize = 11.sp)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     pages.indices.forEach { index ->
                         Box(
@@ -426,65 +443,62 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
                     Spacer(Modifier.height(6.dp))
                     Text("${limit.usedPercent.toInt()}% of ${limit.label} limit", color = if (limit.usedPercent >= 80) Amber else Muted, fontSize = 10.sp)
                 }
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(2.dp))
             }
-            if (agents.isEmpty()) {
+          }
+          if (agents.isEmpty()) {
+            item {
                 Box(Modifier.fillMaxWidth().height(112.dp), contentAlignment = Alignment.Center) {
                     Text("No ${page.label.lowercase()} agents", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
                 }
-            } else {
-                agents.groupBy { it.project }.forEach { (project, projectAgents) ->
+            }
+          } else {
+            agents.groupBy { it.project }.forEach { (project, projectAgents) ->
+                item {
                     Text(project, color = Muted, fontSize = 10.sp, modifier = Modifier.padding(start = 10.dp, top = 5.dp))
-                    projectAgents.forEach { agent -> WearAgentCard(agent) { onAgent(agent) } }
+                }
+                items(projectAgents.size) { index ->
+                    val agent = projectAgents[index]
+                    WearAgentCard(agent, agentLabel(agent.name, project)) { onAgent(agent) }
                 }
             }
+          }
+          item {
             TextButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Rounded.Refresh, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(5.dp))
                 Text("Refresh", fontSize = 12.sp)
             }
+          }
+        }
         }
     }
 }
 
-/**
- * Makes a scrollable respond to the rotating crown.
- *
- * A watch's crown is its primary scroll input, and a list that only answers to
- * a fingertip makes the user cover the screen they are reading. Rotary events
- * are only delivered to a focused component, so the focus is requested here
- * rather than left to chance.
- */
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun Modifier.rotaryScroll(scroll: ScrollableState): Modifier {
-    val requester = remember { FocusRequester() }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { runCatching { requester.requestFocus() } }
-    return this
-        .onRotaryScrollEvent { event ->
-            scope.launch { scroll.scrollBy(event.verticalScrollPixels) }
-            true
-        }
-        .focusRequester(requester)
-        .focusable()
-}
-
-@Composable
-private fun WearAgentCard(agent: Agent, onClick: () -> Unit) {
+private fun WearAgentCard(agent: Agent, label: String, onClick: () -> Unit) {
     val color = statusColor(agent.state)
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(24.dp),
         color = Surface,
     ) {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(36.dp).clip(CircleShape).background(color.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                Icon(statusIcon(agent.state), null, tint = color, modifier = Modifier.size(19.dp))
+        // A 192dp-wide screen has no room for decoration: the padding, the icon
+        // and a chevron together left the name too little space to be read, and
+        // a full-width card on a watch already announces that it is tappable.
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(32.dp).clip(CircleShape).background(color.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+                Icon(statusIcon(agent.state), null, tint = color, modifier = Modifier.size(17.dp))
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
-                Text(agent.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    label,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 Text(
                     agentCardActivity(agent),
                     color = Muted,
@@ -493,7 +507,6 @@ private fun WearAgentCard(agent: Agent, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Icon(Icons.Rounded.ChevronRight, null, tint = Muted, modifier = Modifier.size(18.dp).offset(x = 1.dp))
         }
     }
 }
@@ -511,10 +524,18 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
         .maxByOrNull { it.createdAt }
         ?.takeIf { agent.state == "waiting" }
     val detailScroll = rememberLazyListState()
+    val detailRotary = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { detailRotary.requestFocus() } }
     ScreenScaffold(scrollState = detailScroll) {
     LazyColumn(
         state = detailScroll,
-        modifier = Modifier.fillMaxSize().background(Ink).rotaryScroll(detailScroll),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Ink)
+            .rotaryScrollable(
+                RotaryScrollableDefaults.behavior(detailScroll),
+                focusRequester = detailRotary,
+            ),
         contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 26.dp, bottom = 34.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -529,7 +550,12 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
         }
         item {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(agent.name, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                Text(
+                    agentLabel(agent.name, agent.project),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                )
                 Text(agent.state.uppercase(), color = color, fontSize = 10.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(7.dp))
                 Text(
@@ -643,17 +669,6 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, com
             }
         }
     }
-    }
-}
-
-@Composable
-private fun rememberFastListFlingBehavior(): FlingBehavior {
-    val platformFling = ScrollableDefaults.flingBehavior()
-    return remember(platformFling) {
-        object : FlingBehavior {
-            override suspend fun ScrollScope.performFling(initialVelocity: Float): Float =
-                with(platformFling) { performFling(initialVelocity * 1.3f) }
-        }
     }
 }
 
