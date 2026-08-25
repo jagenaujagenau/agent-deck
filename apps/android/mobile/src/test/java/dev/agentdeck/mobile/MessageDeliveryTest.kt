@@ -1,5 +1,9 @@
 package dev.agentdeck.mobile
 
+import dev.agentdeck.shared.MessageDelivery
+import dev.agentdeck.shared.deliveryFor
+import dev.agentdeck.shared.deliveryNotice
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull

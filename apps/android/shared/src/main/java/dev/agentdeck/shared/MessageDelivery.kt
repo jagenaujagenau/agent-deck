@@ -1,4 +1,4 @@
-package dev.agentdeck.mobile
+package dev.agentdeck.shared
 
 /**
  * What actually happens to a message after the bridge accepts it.
@@ -21,7 +21,7 @@ enum class MessageDelivery {
     Unreachable,
 }
 
-internal fun deliveryFor(agentState: String): MessageDelivery = when (agentState) {
+fun deliveryFor(agentState: String): MessageDelivery = when (agentState) {
     "running" -> MessageDelivery.AtEndOfTurn
     "offline" -> MessageDelivery.Unreachable
     // idle, waiting, paused and anything a newer runtime reports: no turn is in
@@ -30,7 +30,7 @@ internal fun deliveryFor(agentState: String): MessageDelivery = when (agentState
 }
 
 /** How that reads on the composer, or null when it needs no explanation. */
-internal fun deliveryNotice(agentState: String): String? = when (deliveryFor(agentState)) {
+fun deliveryNotice(agentState: String): String? = when (deliveryFor(agentState)) {
     // A turn is running and will end on its own, which is the normal case and
     // needs no commentary.
     MessageDelivery.AtEndOfTurn -> null

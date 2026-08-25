@@ -33,6 +33,11 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.08.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    // Wear Compose, not the phone Material 3 this module used to render with.
+    // The watch conventions - the clock overlay, edge-aware lists, the
+    // swipe-back gesture, the rotating crown - live here and nowhere else.
+    implementation("androidx.wear.compose:compose-material3:1.6.2")
+    implementation("androidx.wear.compose:compose-foundation:1.6.2")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.core:core-ktx:1.19.0")

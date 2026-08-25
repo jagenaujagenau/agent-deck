@@ -29,7 +29,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
+import androidx.compose.material3.Surface
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.CircularProgressIndicator
+import androidx.wear.compose.material3.Icon
+import androidx.wear.compose.material3.IconButton
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.OutlinedButton
+import androidx.wear.compose.material3.Text
+import androidx.wear.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +49,6 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.focusable
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -65,6 +73,13 @@ import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import java.util.UUID
 import dev.agentdeck.shared.agentCardActivity
+import dev.agentdeck.shared.supportsCapability
+import dev.agentdeck.shared.deliveryNotice
+import androidx.wear.compose.material3.AppScaffold
+import androidx.wear.compose.material3.TimeText
+import androidx.wear.compose.material3.SwipeToDismissBox
+import androidx.wear.compose.material3.ColorScheme
+import androidx.wear.compose.material3.ScreenScaffold
 
 private val Ink = Color(0xFF090C10)
 private val Surface = Color(0xFF171C22)
@@ -83,6 +98,9 @@ class WearActivity : ComponentActivity() {
         setContent { WearTheme { WearDeck() } }
     }
 }
+
+/** Control actions that ride the command queue rather than a waiting runtime. */
+private val QUEUED_ACTIONS = setOf("pause", "resume", "stop")
 
 class WearDeckViewModel(application: Application) : AndroidViewModel(application),
     com.google.android.gms.wearable.DataClient.OnDataChangedListener,
@@ -161,10 +179,21 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         sendToPhone(REFRESH_PATH, ByteArray(0), fallback = { repository.refresh() })
     }
 
+    private val _commandNotice = MutableStateFlow<String?>(null)
+
+    /** What becomes of the last command, when it is not simply collected. */
+    val commandNotice = _commandNotice.asStateFlow()
+
     fun control(agent: Agent, action: String) {
         val commandId = UUID.randomUUID().toString()
         _busy.value = agent.id
         _deliveryError.value = null
+        // An approval is collected by a runtime already blocked waiting for it,
+        // so it arrives whatever the session is doing. A pause, resume or stop
+        // goes on the same queue a message does, and a session running no turn
+        // has nothing to collect it with until it moves.
+        _commandNotice.value =
+            if (action in QUEUED_ACTIONS) deliveryNotice(agent.state) else null
         pendingCommands[commandId] = agent.id
         val payloadText = JSONObject().put("commandId", commandId).put("agentId", agent.id).put("action", action).toString()
         commandOutbox.put(commandId, payloadText)
@@ -183,6 +212,7 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         val commandId = UUID.randomUUID().toString()
         _busy.value = agent.id
         _deliveryError.value = null
+        _commandNotice.value = null
         pendingCommands[commandId] = agent.id
         val question = event.detail ?: event.summary
         val payloadText = JSONObject()
@@ -271,7 +301,15 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
 @Composable
 private fun WearTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = darkColorScheme(primary = Signal, onPrimary = Ink, background = Ink, surface = Surface, onSurface = Text, onBackground = Text, error = Danger),
+        colorScheme = ColorScheme(
+            primary = Signal,
+            onPrimary = Ink,
+            background = Ink,
+            onBackground = Text,
+            surfaceContainer = Surface,
+            onSurface = Text,
+            error = Danger,
+        ),
     ) {
         Surface(modifier = Modifier.fillMaxSize(), color = Ink, contentColor = Text) { content() }
     }
@@ -282,6 +320,7 @@ private fun WearDeck(vm: WearDeckViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val deliveryError by vm.deliveryError.collectAsStateWithLifecycle()
+    val commandNotice by vm.commandNotice.collectAsStateWithLifecycle()
     var selected by remember { mutableStateOf<String?>(null) }
     val snapshot = when (val current = state) {
         is BridgeState.Ready -> current.snapshot
@@ -290,9 +329,31 @@ private fun WearDeck(vm: WearDeckViewModel = viewModel()) {
     }
     val selectedAgent = snapshot?.agents?.firstOrNull { it.id == selected }
 
-    AnimatedContent(targetState = selectedAgent, label = "wear-navigation") { agent ->
-        if (agent == null) AgentList(snapshot, state, vm::refresh) { selected = it.id }
-        else AgentDetail(agent, busy == agent.id, deliveryError, onBack = { selected = null }, onAnswer = { event, option -> vm.answer(agent, event, option) }) { vm.control(agent, it) }
+    // AppScaffold puts the clock over every screen, which is what a watch is
+    // for: an app that hides the time is one the user has to leave to check it.
+    AppScaffold(timeText = { TimeText() }) {
+        AnimatedContent(targetState = selectedAgent, label = "wear-navigation") { agent ->
+            if (agent == null) {
+                AgentList(snapshot, state, vm::refresh) { selected = it.id }
+            } else {
+                // Swiping right is how a watch goes back, everywhere on the
+                // platform. The button stays for reachability, not instead.
+                SwipeToDismissBox(onDismissed = { selected = null }) { isBackground ->
+                    if (isBackground) {
+                        Box(Modifier.fillMaxSize().background(Ink))
+                    } else {
+                        AgentDetail(
+                            agent,
+                            busy == agent.id,
+                            deliveryError,
+                            commandNotice,
+                            onBack = { selected = null },
+                            onAnswer = { event, option -> vm.answer(agent, event, option) },
+                        ) { vm.control(agent, it) }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -438,10 +499,10 @@ private fun WearAgentCard(agent: Agent, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, onBack: () -> Unit, onAnswer: (AgentEvent, String) -> Unit, onControl: (String) -> Unit) {
+private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, commandNotice: String?, onBack: () -> Unit, onAnswer: (AgentEvent, String) -> Unit, onControl: (String) -> Unit) {
     val color = statusColor(agent.state)
     val haptics = LocalHapticFeedback.current
-    val supports: (String) -> Boolean = { action -> agent.capabilities?.contains(action) != false }
+    val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
     val latest = agent.events.maxByOrNull { it.createdAt }
     val hasApproval = agent.state == "waiting" && agent.pendingApproval != null
     // Only a question with preset options is answerable from a watch; free-text belongs on the host.
@@ -450,6 +511,7 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, onB
         .maxByOrNull { it.createdAt }
         ?.takeIf { agent.state == "waiting" }
     val detailScroll = rememberLazyListState()
+    ScreenScaffold(scrollState = detailScroll) {
     LazyColumn(
         state = detailScroll,
         modifier = Modifier.fillMaxSize().background(Ink).rotaryScroll(detailScroll),
@@ -482,6 +544,11 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, onB
         if (busy) item { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) }
         deliveryError?.let { message ->
             item { Text(message, color = Danger, fontSize = 11.sp, textAlign = TextAlign.Center) }
+        }
+        if (deliveryError == null) {
+            commandNotice?.let { notice ->
+                item { Text(notice, color = Muted, fontSize = 11.sp, textAlign = TextAlign.Center) }
+            }
         }
         if (hasApproval) {
             // What is being approved, before the button that approves it. A
@@ -575,6 +642,7 @@ private fun AgentDetail(agent: Agent, busy: Boolean, deliveryError: String?, onB
                 }
             }
         }
+    }
     }
 }
 
