@@ -16,6 +16,7 @@ import {
 } from "./approval-policy";
 import { mutatesFile, readFileForDiff } from "../../packages/agent-adapter/src/file-snapshot";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
+import { askedQuestion, isAskUserQuestionTool } from "./questions";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const COMMAND_INTERVAL_MS = 2_000;
@@ -460,21 +461,8 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
   pi.on("tool_call", async (event, nextCtx) => {
     adopt(nextCtx);
     const input = event.input as Record<string, unknown>;
-    if (/ask.?user.?question/i.test(event.toolName)) {
-      const questions = Array.isArray(input.questions)
-        ? (input.questions as Array<Record<string, unknown>>)
-        : [];
-      const first = questions[0] ?? input;
-      const question = String(first.question ?? first.header ?? "Agent needs your answer");
-      const options = Array.isArray(first.options)
-        ? first.options
-            .map((option) =>
-              typeof option === "object" && option
-                ? String((option as Record<string, unknown>).label ?? "")
-                : String(option),
-            )
-            .filter(Boolean)
-        : [];
+    if (isAskUserQuestionTool(event.toolName)) {
+      const { question, options } = askedQuestion(input);
       if (options.length === 0 || QUESTION_TIMEOUT_MS === 0) {
         // No preset choices means nothing a phone or watch could safely answer with — show it and
         // let the host terminal take it.
@@ -525,8 +513,17 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
 
   pi.on("tool_execution_start", (event, nextCtx) => {
     adopt(nextCtx);
-    state = "running";
     const args = event.args as Record<string, unknown>;
+    // A question tool only gets this far when the deck could not take it: no
+    // options to offer, or nobody answered in time. Reaching execution means it
+    // is now asking the host terminal and the session is blocked on a person -
+    // so saying "running" here described the one case that most needs saying.
+    if (isAskUserQuestionTool(event.toolName)) {
+      state = "waiting";
+      task = clip(askedQuestion(args).question, 180);
+    } else {
+      state = "running";
+    }
     const itemId = String(
       (event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID(),
     );
@@ -546,7 +543,7 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
         pendingFileEdits.set(itemId, { target, before });
       }
     }
-    void publishRuntime(
+    const started = publishRuntime(
       "item.started",
       {
         tool: event.toolName,
@@ -555,6 +552,20 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
       },
       { id: `item-started:${agentId()}:${itemId}`, itemId, turnId: activeTurnId },
     ).catch(() => {});
+    // The deck reads this runtime's state from its event stream, and item.started
+    // means "running" there. A blocked question therefore has to say so *after*
+    // that lands: published side by side the two race, and the deck keeps
+    // whichever arrived last. Chained, the answer is the same every time.
+    if (isAskUserQuestionTool(event.toolName)) {
+      const blocked = task;
+      void started.then(() =>
+        publishRuntime("session.state.changed", { state: "waiting", task: blocked }).catch(
+          () => {},
+        ),
+      );
+    } else {
+      void started;
+    }
     publishEvent(
       "tool",
       `Using ${event.toolName}`,
@@ -583,6 +594,10 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
       (event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID(),
     );
     const summary = `${event.toolName} ${event.isError ? "failed" : "completed"}`;
+    // The terminal question has been answered, so the session is a running
+    // agent again. Said here rather than left to the next tool call, which may
+    // be a whole model response away.
+    if (isAskUserQuestionTool(event.toolName)) state = "running";
     // Upgrade the coarse diff published at start to real unified hunks. The bridge merges by event
     // id, so this replaces the placeholder rather than appending a second entry.
     const pending = pendingFileEdits.get(itemId);
