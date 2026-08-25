@@ -17,6 +17,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,6 +30,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -48,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -92,6 +96,9 @@ import kotlin.math.sin
 import kotlin.math.roundToInt
 import java.text.NumberFormat
 import dev.agentdeck.shared.supportsCapability
+import dev.agentdeck.shared.ConversationDays
+import dev.agentdeck.shared.Harnesses
+import dev.agentdeck.shared.Harness
 import dev.agentdeck.shared.agentCardActivity
 import dev.agentdeck.shared.deliveryNotice
 
@@ -888,17 +895,39 @@ private fun HomeStateHeader(state: HomeAgentState, count: Int) {
     }
 }
 
-private enum class AgentHarness(val label: String, val color: Color) {
-    Pi("Pi", Blue), Claude("Claude Code", Color(0xFFD97757)), Codex("Codex", Text), Other("Agent", Muted),
+/**
+ * A runtime, with its own mark where one exists.
+ *
+ * `icon` points at the vendor's actual artwork, shared with the home screen
+ * widget and the watch tile so all three draw the same thing. Pi ships no mark,
+ * so its initial stands in - and the field is null rather than a placeholder
+ * precisely so the drawing code can tell the difference.
+ */
+private enum class AgentHarness(val label: String, val color: Color, val icon: Int?) {
+    Pi("Pi", Blue, null),
+    Claude("Claude Code", Color(0xFFD97757), dev.agentdeck.shared.R.drawable.harness_claude),
+    Codex("Codex", Text, dev.agentdeck.shared.R.drawable.harness_codex),
+    OpenCode("OpenCode", Signal, dev.agentdeck.shared.R.drawable.harness_opencode),
+    Managed("Managed Claude", Color(0xFFD97757), dev.agentdeck.shared.R.drawable.harness_claude),
+    Other("Agent", Muted, null),
 }
 
 private data class ProviderIdentity(val name: String, val model: String, val color: Color)
 
-private fun harnessFor(agent: Agent) = when {
-    agent.name.startsWith("Pi", ignoreCase = true) -> AgentHarness.Pi
-    agent.name.startsWith("Claude", ignoreCase = true) -> AgentHarness.Claude
-    agent.name.startsWith("Codex", ignoreCase = true) -> AgentHarness.Codex
-    else -> AgentHarness.Other
+/**
+ * Which runtime a session belongs to, decided once for the whole product.
+ *
+ * Reading the display name missed OpenCode entirely - its sessions showed as
+ * "Agent" on the phone while the widget named them correctly, because the
+ * widget asked the shared derivation and this did not.
+ */
+private fun harnessFor(agent: Agent) = when (Harnesses.of(agent.id, agent.name)) {
+    Harness.Pi -> AgentHarness.Pi
+    Harness.Claude -> AgentHarness.Claude
+    Harness.Codex -> AgentHarness.Codex
+    Harness.OpenCode -> AgentHarness.OpenCode
+    Harness.Managed -> AgentHarness.Managed
+    Harness.Unknown -> AgentHarness.Other
 }
 
 private fun providerFor(agent: Agent): ProviderIdentity {
@@ -1132,7 +1161,9 @@ private fun HarnessMark(harness: AgentHarness, running: Boolean, statusColor: Co
         Box(Modifier.size(diameter * 0.82f)) {
             Surface(
                 shape = CircleShape,
-                color = harness.color.copy(alpha = if (harness == AgentHarness.Codex) 0.1f else 0.14f),
+                // Neutral, not tinted by the harness: a white mark on its own
+                // pale halo is invisible, and the widget's badge is this colour.
+                color = SurfaceSunken,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 Box(contentAlignment = Alignment.Center) { AgentLogo(harness, Modifier.size(diameter * 0.4f)) }
@@ -1157,32 +1188,23 @@ private fun HarnessMark(harness: AgentHarness, running: Boolean, statusColor: Co
 
 @Composable
 private fun AgentLogo(harness: AgentHarness, modifier: Modifier = Modifier) {
-    when (harness) {
-        AgentHarness.Pi -> Box(modifier, contentAlignment = Alignment.Center) {
-            Text("π", color = harness.color, fontSize = 18.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.offset(x = 0.5.dp, y = (-1).dp), style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)))
+    val icon = harness.icon
+    if (icon != null) {
+        // The vendor's own artwork rather than an approximation of it. This used
+        // to draw eight radiating lines for Claude and six circles for Codex -
+        // close enough to recognise, not close enough to be the mark.
+        Image(painterResource(icon), harness.label, modifier)
+    } else {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text(
+                if (harness == AgentHarness.Pi) "π" else "··",
+                color = harness.color,
+                fontSize = 16.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false)),
+            )
         }
-        AgentHarness.Claude -> Canvas(modifier) {
-            val center = this.center
-            val inner = size.minDimension * 0.13f
-            val outer = size.minDimension * 0.39f
-            repeat(8) { index ->
-                val angle = index * PI.toFloat() / 4f
-                drawLine(
-                    harness.color,
-                    start = androidx.compose.ui.geometry.Offset(center.x + cos(angle) * inner, center.y + sin(angle) * inner),
-                    end = androidx.compose.ui.geometry.Offset(center.x + cos(angle) * outer, center.y + sin(angle) * outer),
-                    strokeWidth = size.minDimension * 0.105f,
-                    cap = StrokeCap.Round,
-                )
-            }
-        }
-        AgentHarness.Codex -> Canvas(modifier) {
-            repeat(6) { index ->
-                val angle = index * PI.toFloat() / 3f
-                drawCircle(harness.color, size.minDimension * 0.13f, androidx.compose.ui.geometry.Offset(center.x + cos(angle) * size.minDimension * 0.28f, center.y + sin(angle) * size.minDimension * 0.28f))
-            }
-        }
-        AgentHarness.Other -> Icon(Icons.Rounded.SmartToy, null, tint = harness.color, modifier = modifier)
     }
 }
 
@@ -1255,58 +1277,59 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
 
     Surface(Modifier.fillMaxSize(), color = Ink) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            Surface(color = SurfaceRaised) {
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+            Column {
+                // Three floating pills rather than a bar: back, who this is,
+                // and what can be done to it. The status moved into the middle
+                // pill as its second line, which removed an entire row - it was
+                // the only thing that row carried besides the buttons now on
+                // the right.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    HeaderPill(shape = CircleShape) {
                         IconButton(onClick = onDismiss, modifier = Modifier.size(44.dp)) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back to agents")
-                        }
-                        HarnessMark(harness, running = agent.state == "running", statusColor = stateColor, diameter = 40.dp)
-                        Spacer(Modifier.width(9.dp))
-                        Column(Modifier.weight(1f)) {
-                            // The project leads, because that is what a person
-                            // is looking for. The runtime is a detail about it,
-                            // and the session's hex id identified nothing a
-                            // person recognises - the same reason it came off
-                            // the watch.
-                            Text(agent.project, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${harness.label} · ${provider.model}", color = Muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        // Icon only: the word cost a third of the title's width
-                        // for an action taken once in a session's life.
-                        IconButton(onClick = onArchiveToggle, modifier = Modifier.size(44.dp)) {
-                            Icon(
-                                if (archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
-                                if (archived) "Restore session" else "Archive session",
-                                tint = Muted,
-                                modifier = Modifier.size(20.dp),
-                            )
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back to agents", tint = Text)
                         }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 2.dp, bottom = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        StatusLabel(agent.state, stateColor)
-                        Text(" · ", color = Muted.copy(alpha = 0.65f), fontSize = 12.sp)
-                        Text(activity, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        val pauseAction = if (isPaused) "resume" else "pause"
-                        if (supports(pauseAction)) FilledTonalIconButton(onClick = { onControl(pauseAction, null) }, enabled = !busy, modifier = Modifier.size(40.dp)) {
-                            Icon(if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, if (isPaused) "Resume agent" else "Pause agent", modifier = if (isPaused) Modifier.offset(x = 1.dp) else Modifier.size(20.dp))
-                        }
-                        if (supports("stop")) {
-                            Spacer(Modifier.width(5.dp))
-                            FilledTonalIconButton(
-                                onClick = { confirmingStop = true },
-                                enabled = !busy,
-                                modifier = Modifier.size(40.dp),
-                                colors = IconButtonDefaults.filledTonalIconButtonColors(contentColor = Danger),
-                            ) { Icon(Icons.Rounded.Stop, "Stop agent", modifier = Modifier.size(19.dp)) }
+                    HeaderPill(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            HarnessMark(harness, running = agent.state == "running", statusColor = stateColor, diameter = 36.dp)
+                            Spacer(Modifier.width(9.dp))
+                            Column {
+                                Text(agent.project, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    StatusLabel(agent.state, stateColor)
+                                    Text(" · ", color = Muted.copy(alpha = 0.65f), fontSize = 11.sp)
+                                    Text(activity, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
                         }
                     }
+                    HeaderPill {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val pauseAction = if (isPaused) "resume" else "pause"
+                            if (supports(pauseAction)) IconButton(onClick = { onControl(pauseAction, null) }, enabled = !busy, modifier = Modifier.size(40.dp)) {
+                                Icon(if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, if (isPaused) "Resume agent" else "Pause agent", tint = Text, modifier = Modifier.size(20.dp))
+                            }
+                            if (supports("stop")) IconButton(onClick = { confirmingStop = true }, enabled = !busy, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Rounded.Stop, "Stop agent", tint = Danger, modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(onClick = onArchiveToggle, modifier = Modifier.size(40.dp)) {
+                                Icon(
+                                    if (archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
+                                    if (archived) "Restore session" else "Archive session",
+                                    tint = Muted,
+                                    modifier = Modifier.size(19.dp),
+                                )
+                            }
+                        }
+                    }
+                }
                     if (hasAttention) {
                         Surface(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).clip(RoundedCornerShape(12.dp)).clickable { mode = AgentViewMode.Responses },
@@ -1324,7 +1347,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                             }
                         }
                     }
-                    PrimaryTabRow(selectedTabIndex = mode.ordinal, containerColor = SurfaceRaised, divider = { HorizontalDivider(color = Line) }) {
+                    PrimaryTabRow(selectedTabIndex = mode.ordinal, containerColor = Color.Transparent, divider = {}) {
                         // The same icons the views themselves already use for
                         // these ideas, so the tab and the thing it opens agree.
                         Tab(selected = mode == AgentViewMode.Responses, onClick = { mode = AgentViewMode.Responses }, text = { SessionTabLabel(Icons.Rounded.Forum, "Chat", attention = hasAttention) })
@@ -1332,7 +1355,6 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                         Tab(selected = mode == AgentViewMode.Diff, onClick = { mode = AgentViewMode.Diff }, text = { SessionTabLabel(Icons.Rounded.Difference, "Changes", fileChanges.size) })
                         Tab(selected = mode == AgentViewMode.Terminal, onClick = { mode = AgentViewMode.Terminal }, text = { SessionTabLabel(Icons.Rounded.Terminal, "Terminal", terminalCount) })
                     }
-                }
             }
             when (mode) {
                 AgentViewMode.Responses -> ResponsesView(
@@ -1369,6 +1391,38 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
             ) { Text("Stop") }
         },
         dismissButton = { TextButton(onClick = { confirmingStop = false }) { Text("Cancel") } },
+    )
+}
+
+/** The day a run of messages belongs to, floating over the conversation. */
+@Composable
+private fun DaySeparator(label: String) {
+    Box(Modifier.fillMaxWidth().padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
+        Surface(shape = CircleShape, color = SurfaceRaised, border = BorderStroke(1.dp, Line)) {
+            Text(
+                label,
+                color = Muted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+            )
+        }
+    }
+}
+
+/** One floating piece of the header, lifted off the conversation behind it. */
+@Composable
+private fun HeaderPill(
+    modifier: Modifier = Modifier,
+    shape: Shape = CircleShape,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        modifier = modifier.shadow(6.dp, shape),
+        shape = shape,
+        color = SurfaceRaised,
+        border = BorderStroke(1.dp, Line),
+        content = content,
     )
 }
 
@@ -1493,7 +1547,15 @@ private fun ResponsesView(
             if (entries.isEmpty() && pendingApproval == null && pendingQuestion == null) item {
                 EmptyConversation(supportsMessaging = listOf("prompt", "steer", "follow_up").any(supports))
             }
-            items(entries, key = { "message:${it.event.id}" }) { entry -> ConversationBubble(entry, providerFor(agent)) }
+            itemsIndexed(entries, key = { _, entry -> "message:${entry.event.id}" }) { index, entry ->
+                // A session open since yesterday reads as one unbroken run, and
+                // the stamps only give the hour - "09:14" under "23:47" looks
+                // like four minutes, not ten hours.
+                ConversationDays
+                    .separatorBefore(entries.getOrNull(index - 1)?.event?.createdAt, entry.event.createdAt)
+                    ?.let { DaySeparator(it) }
+                ConversationBubble(entry, providerFor(agent))
+            }
             pendingQuestion?.let { question ->
                 item(key = "question:${question.id}") {
                     QuestionCard(question, answerable = question.options.isNotEmpty(), busy = busy) { onQuestionAnswer(question, it) }
@@ -1637,8 +1699,11 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
             // borders around the same thing - and the slash button lives inside
             // it because it acts on what is being typed, not on the session.
             Surface(
-                modifier = Modifier.weight(1f).shadow(8.dp, RoundedCornerShape(24.dp)),
-                shape = RoundedCornerShape(24.dp),
+                // Fully rounded, and a floor height the send button matches, so
+                // the two share a baseline instead of meeting at whatever height
+                // the text field happened to be.
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp).shadow(8.dp, CircleShape),
+                shape = CircleShape,
                 color = SurfaceRaised,
                 border = BorderStroke(1.dp, Line),
             ) {
@@ -1683,7 +1748,7 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
             FilledIconButton(
                 onClick = { val content = message.trim(); onControl(action, content); message = "" },
                 enabled = message.isNotBlank() && !busy,
-                modifier = Modifier.size(46.dp),
+                modifier = Modifier.size(48.dp),
                 shape = CircleShape,
             ) {
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
