@@ -34,11 +34,11 @@ interface HookState {
 }
 
 /**
- * Reads a session's recorded state, or nothing if the deck does not know it.
+ * Reads a session's recorded state, or nothing if there is no state file.
  *
- * The hooks write one file per session they manage, so a missing file is the
- * local answer to "is this terminal part of the deck at all" - Herdr manages
- * plenty that are not.
+ * Only the hook runtimes write one. A plugin runtime like OpenCode reports
+ * straight from its own process and keeps no file here, so an absent file is
+ * not the same as an unknown session - see `knownToDeck`.
  */
 function readHookState(agentId: string): HookState | undefined {
   try {
@@ -63,6 +63,21 @@ function applyCorrection(agentId: string, correction: "block" | "clear") {
   } catch {
     return false;
   }
+}
+
+/**
+ * The agents the bridge is actually holding.
+ *
+ * A state file used to stand in for this, which was true only while every
+ * adapter was a hook. OpenCode reports from inside its own process and writes
+ * no file, so asking the bridge is the question that was always meant: does the
+ * deck know this session, whatever put it there.
+ */
+async function knownToDeck(): Promise<ReadonlySet<string>> {
+  const snapshot = await client
+    .request<{ agents: ReadonlyArray<{ id: string }> }>("/snapshot")
+    .catch(() => undefined);
+  return new Set(snapshot?.agents.map((agent) => agent.id) ?? []);
 }
 
 const holdingApproval = (stored: HookState) =>
@@ -93,18 +108,26 @@ async function deliver(agent: HerdrAgent, agentId: string) {
 
 async function pass() {
   const agents = await listAgents().catch(() => []);
+  if (agents.length === 0) return;
+  const known = await knownToDeck();
+
   for (const agent of agents) {
     if (!isDeckRuntime(agent.kind)) continue;
     const agentId = deckAgentId(agent.kind, agent.sessionId);
-    const stored = readHookState(agentId);
-    if (stored === undefined) continue;
+    if (!known.has(agentId)) continue;
 
-    const correction = correctionFor(agent.status, {
-      state: String(stored.state ?? ""),
-      task: String(stored.task ?? ""),
-      holdingApproval: holdingApproval(stored),
-    });
-    if (correction) applyCorrection(agentId, correction);
+    // Only a hook runtime has a file to correct. A plugin runtime describes its
+    // own state from inside the process, where it can see more than Herdr can,
+    // so there is nothing here worth overruling.
+    const stored = readHookState(agentId);
+    if (stored !== undefined) {
+      const correction = correctionFor(agent.status, {
+        state: String(stored.state ?? ""),
+        task: String(stored.task ?? ""),
+        holdingApproval: holdingApproval(stored),
+      });
+      if (correction) applyCorrection(agentId, correction);
+    }
 
     if (acceptsPrompt(agent.status)) await deliver(agent, agentId);
   }

@@ -28,8 +28,13 @@ describe("isDeckRuntime", () => {
     expect(isDeckRuntime("codex")).toBe(true);
   });
 
+  test("claims OpenCode, which now has a plugin", () => {
+    expect(isDeckRuntime("opencode")).toBe(true);
+  });
+
   test("leaves other agents Herdr manages alone", () => {
-    expect(isDeckRuntime("opencode")).toBe(false);
+    expect(isDeckRuntime("cursor")).toBe(false);
+    expect(isDeckRuntime("droid")).toBe(false);
   });
 });
 

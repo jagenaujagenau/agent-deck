@@ -33,11 +33,11 @@ export interface HerdrAgent {
 }
 
 /**
- * The runtimes the deck's hooks install into, and so the only ones whose ids it
- * can be holding. Herdr manages others - opencode, among them - and those are
- * left alone rather than published under an id nothing else uses.
+ * The runtimes the deck has an adapter for, and so the only ones whose ids it
+ * can be holding. Herdr manages others too, and those are left alone rather
+ * than published under an id nothing else uses.
  */
-const DECK_RUNTIMES = new Set(["claude", "codex"]);
+const DECK_RUNTIMES = new Set(["claude", "codex", "opencode"]);
 
 /**
  * The deck's id for a session, derived exactly as the hooks derive it.

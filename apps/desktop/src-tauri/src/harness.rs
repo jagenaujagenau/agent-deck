@@ -78,6 +78,20 @@ pub fn list() -> Vec<Harness> {
             config_path: codex.to_string_lossy().into(),
         },
         Harness {
+            id: "opencode".into(),
+            name: "OpenCode".into(),
+            // A plugin, like Pi - so the installed artifact is what "installed"
+            // means, not a line in a settings file.
+            installed: home
+                .join(".config/opencode/plugins/agent-deck.js")
+                .is_file(),
+            present: home.join(".config/opencode").is_dir(),
+            config_path: home
+                .join(".config/opencode/plugins/agent-deck.js")
+                .to_string_lossy()
+                .into(),
+        },
+        Harness {
             id: "pi".into(),
             name: "Pi".into(),
             // Pi loads an extension rather than firing hooks, so the symlink
@@ -92,6 +106,7 @@ pub fn list() -> Vec<Harness> {
 fn installer_for(id: &str) -> Option<&'static str> {
     match id {
         "claude" | "codex" => Some("integrations/runtime-hooks/install.ts"),
+        "opencode" => Some("integrations/opencode/install.ts"),
         "pi" => Some("integrations/pi/install.ts"),
         _ => None,
     }
