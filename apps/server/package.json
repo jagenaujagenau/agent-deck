@@ -1,7 +1,7 @@
 {
   "name": "server",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "src/effect/main.ts",
   "scripts": {
     "check-types": "tsc --noEmit",
     "compile": "bun build --compile --minify --sourcemap --bytecode ./src/effect/main.ts --outfile server",
@@ -17,7 +17,6 @@
   "devDependencies": {
     "@agent-control-dashboard/config": "workspace:*",
     "@types/bun": "catalog:",
-    "tsdown": "^0.16.5",
     "typescript": "catalog:"
   }
 }

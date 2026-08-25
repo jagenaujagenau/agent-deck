@@ -19,7 +19,7 @@ import { Schema } from "effect";
  */
 const optionalField = <S extends Schema.Top>(schema: S) => Schema.optional(Schema.NullOr(schema));
 
-export const EventKind = Schema.Literals([
+const EventKind = Schema.Literals([
   "thought",
   "tool",
   "output",
@@ -28,7 +28,7 @@ export const EventKind = Schema.Literals([
   "question",
   "user",
 ]);
-export type EventKind = typeof EventKind.Type;
+type EventKind = typeof EventKind.Type;
 
 export const AgentEvent = Schema.Struct({
   id: Schema.String,
@@ -120,39 +120,18 @@ export const Heartbeat = Schema.Struct({
 });
 export interface Heartbeat extends Schema.Schema.Type<typeof Heartbeat> {}
 
-export const RequestStatus = Schema.Literals([
-  "pending",
-  "approved",
-  "rejected",
-  "answered",
-  "expired",
-  "unavailable",
-]);
-export type RequestStatus = typeof RequestStatus.Type;
-
 /** Body for resolving a durable approval or question. */
-export const ResolveRequest = Schema.Struct({
-  status: RequestStatus,
-  value: optionalField(Schema.Unknown),
-});
-
 export const ControlCommand = Schema.Struct({
   action: ControlAction,
   value: optionalField(Schema.String),
   commandId: optionalField(Schema.String),
 });
 
-export const SlashCommand = Schema.Struct({
-  name: Schema.String,
-  description: optionalField(Schema.String),
-  source: Schema.String,
-});
-
 /**
  * The statuses a caller may resolve a request to. "pending" is deliberately
  * absent: reopening a settled request is not something the wire allows.
  */
-export const ResolvableStatus = Schema.Literals([
+const ResolvableStatus = Schema.Literals([
   "approved",
   "rejected",
   "answered",
@@ -196,8 +175,4 @@ export const PairingRequest = Schema.Struct({
 /** Only the routing field is read here; the event itself is validated downstream. */
 export const RuntimeEventEnvelope = Schema.Struct({
   agentId: Schema.String,
-});
-
-export const SlashCommandCatalog = Schema.Struct({
-  commands: Schema.Array(SlashCommand),
 });

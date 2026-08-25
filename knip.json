@@ -11,5 +11,6 @@
     "packages/agent-adapter": {
       "entry": ["src/**/*.test.ts"]
     }
-  }
+  },
+  "ignoreDependencies": ["@earendil-works/pi-coding-agent"]
 }
