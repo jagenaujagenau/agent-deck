@@ -34,8 +34,9 @@ fun deliveryNotice(agentState: String): String? = when (deliveryFor(agentState))
     // A turn is running and will end on its own, which is the normal case and
     // needs no commentary.
     MessageDelivery.AtEndOfTurn -> null
-    MessageDelivery.WhenSessionResumes ->
-        "Queued. This session is not running a turn, so it arrives the next time it does."
-    MessageDelivery.Unreachable ->
-        "Queued, but this session is offline and may never collect it."
+    // Short enough to sit on one line above the composer. The old wording
+    // explained the mechanism over two lines every time someone opened a resting
+    // session, which is most of the time.
+    MessageDelivery.WhenSessionResumes -> "Queued · delivers at the next turn"
+    MessageDelivery.Unreachable -> "Queued · session is offline"
 }

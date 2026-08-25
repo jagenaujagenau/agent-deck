@@ -97,6 +97,8 @@ import dev.agentdeck.shared.deliveryNotice
 private val Ink = Color(0xFF090C10)
 private val Surface = Color(0xFF11161C)
 private val SurfaceRaised = Color(0xFF181E25)
+/** Darker than the bar it sits in, so the composer reads as a well. */
+private val SurfaceSunken = Color(0xFF0E1319)
 private val Line = Color(0xFF252D36)
 private val Text = Color(0xFFF2F5F7)
 private val Muted = Color(0xFF8D99A6)
@@ -1264,17 +1266,23 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                         HarnessMark(harness, running = agent.state == "running", statusColor = stateColor, diameter = 40.dp)
                         Spacer(Modifier.width(9.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("${harness.label}${sessionSuffix(agent)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("${agent.project} · ${provider.model}", color = Muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            // The project leads, because that is what a person
+                            // is looking for. The runtime is a detail about it,
+                            // and the session's hex id identified nothing a
+                            // person recognises - the same reason it came off
+                            // the watch.
+                            Text(agent.project, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${harness.label} · ${provider.model}", color = Muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        TextButton(
-                            onClick = onArchiveToggle,
-                            modifier = Modifier.heightIn(min = 44.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-                        ) {
-                            Icon(if (archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive, null, modifier = Modifier.size(17.dp))
-                            Spacer(Modifier.width(5.dp))
-                            Text(if (archived) "Restore" else "Archive")
+                        // Icon only: the word cost a third of the title's width
+                        // for an action taken once in a session's life.
+                        IconButton(onClick = onArchiveToggle, modifier = Modifier.size(44.dp)) {
+                            Icon(
+                                if (archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
+                                if (archived) "Restore session" else "Archive session",
+                                tint = Muted,
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
                     }
                     Row(
@@ -1363,26 +1371,25 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
 
 @Composable
 private fun SessionTabLabel(label: String, count: Int = 0, attention: Boolean = false) {
-    // Four equal-width tabs leave ~100dp each: the label must yield to the badge, or a two-digit
-    // count gets squeezed to zero width and wraps one digit per line off the edge of the row.
+    // A count, not a number. Every tab in a working session reads "99+", which
+    // says only that there is a lot of everything - while squeezing the label
+    // it sits beside into "Reaso…". A dot says the same thing in no space, and
+    // the real number is visible the moment the tab is open.
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
-        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, modifier = Modifier.weight(1f, fill = false))
-        if (attention) {
+        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+        if (attention || count > 0) {
             Spacer(Modifier.width(5.dp))
-            Box(Modifier.size(6.dp).clip(CircleShape).background(Amber))
-        } else if (count > 0) {
-            Spacer(Modifier.width(4.dp))
-            Text(
-                if (count > 99) "99+" else count.toString(),
-                color = Muted,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                softWrap = false,
+            Box(
+                Modifier
+                    .size(if (attention) 6.dp else 4.dp)
+                    .clip(CircleShape)
+                    // Amber is reserved for something wanting a person; anything
+                    // else is just content waiting to be read.
+                    .background(if (attention) Amber else Muted.copy(alpha = 0.55f)),
             )
         }
     }
@@ -1597,24 +1604,62 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-            OutlinedTextField(
-                value = message,
-                onValueChange = { message = it },
+            // One rounded field, the way every messaging app draws one. The
+            // outlined variant put a visible box inside a raised bar - two
+            // borders around the same thing - and the slash button lives inside
+            // it because it acts on what is being typed, not on the session.
+            Surface(
                 modifier = Modifier.weight(1f),
-                placeholder = { Text(if (action == "steer") "Reply or steer…" else "Message agent…") },
-                shape = RoundedCornerShape(20.dp),
-                minLines = 1,
-                maxLines = 4,
-            )
+                shape = RoundedCornerShape(24.dp),
+                color = SurfaceSunken,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { message = if (message.startsWith("/")) message else "/$message" },
+                        modifier = Modifier.size(42.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.Bolt,
+                            "Slash command",
+                            tint = if (message.startsWith("/")) Signal else Muted,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    TextField(
+                        value = message,
+                        onValueChange = { message = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = {
+                            Text(
+                                if (action == "steer") "Reply or steer…" else "Message agent…",
+                                color = Muted,
+                                fontSize = 15.sp,
+                            )
+                        },
+                        textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
+                        minLines = 1,
+                        maxLines = 4,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        ),
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
             FilledIconButton(
                 onClick = { val content = message.trim(); onControl(action, content); message = "" },
                 enabled = message.isNotBlank() && !busy,
-                modifier = Modifier.size(52.dp),
+                modifier = Modifier.size(46.dp),
+                shape = CircleShape,
             ) {
-                if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.ArrowUpward, "Send message")
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Rounded.ArrowUpward, "Send message", modifier = Modifier.size(20.dp))
             }
         }
     }
