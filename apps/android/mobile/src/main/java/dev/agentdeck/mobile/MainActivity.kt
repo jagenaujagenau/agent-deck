@@ -46,6 +46,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -1324,10 +1325,12 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                         }
                     }
                     PrimaryTabRow(selectedTabIndex = mode.ordinal, containerColor = SurfaceRaised, divider = { HorizontalDivider(color = Line) }) {
-                        Tab(selected = mode == AgentViewMode.Responses, onClick = { mode = AgentViewMode.Responses }, text = { SessionTabLabel("Chat", attention = hasAttention) })
-                        Tab(selected = mode == AgentViewMode.Reasoning, onClick = { mode = AgentViewMode.Reasoning }, text = { SessionTabLabel("Reasoning", reasoningCount) })
-                        Tab(selected = mode == AgentViewMode.Diff, onClick = { mode = AgentViewMode.Diff }, text = { SessionTabLabel("Changes", fileChanges.size) })
-                        Tab(selected = mode == AgentViewMode.Terminal, onClick = { mode = AgentViewMode.Terminal }, text = { SessionTabLabel("Terminal", terminalCount) })
+                        // The same icons the views themselves already use for
+                        // these ideas, so the tab and the thing it opens agree.
+                        Tab(selected = mode == AgentViewMode.Responses, onClick = { mode = AgentViewMode.Responses }, text = { SessionTabLabel(Icons.Rounded.Forum, "Chat", attention = hasAttention) })
+                        Tab(selected = mode == AgentViewMode.Reasoning, onClick = { mode = AgentViewMode.Reasoning }, text = { SessionTabLabel(Icons.Rounded.Psychology, "Reasoning", reasoningCount) })
+                        Tab(selected = mode == AgentViewMode.Diff, onClick = { mode = AgentViewMode.Diff }, text = { SessionTabLabel(Icons.Rounded.Difference, "Changes", fileChanges.size) })
+                        Tab(selected = mode == AgentViewMode.Terminal, onClick = { mode = AgentViewMode.Terminal }, text = { SessionTabLabel(Icons.Rounded.Terminal, "Terminal", terminalCount) })
                     }
                 }
             }
@@ -1369,27 +1372,49 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     )
 }
 
+/** A line above the composer, legible over whatever the conversation put behind it. */
 @Composable
-private fun SessionTabLabel(label: String, count: Int = 0, attention: Boolean = false) {
-    // A count, not a number. Every tab in a working session reads "99+", which
-    // says only that there is a lot of everything - while squeezing the label
-    // it sits beside into "Reaso…". A dot says the same thing in no space, and
-    // the real number is visible the moment the tab is open.
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+private fun FloatingNotice(text: String, tint: Color) {
+    Surface(
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = SurfaceRaised,
+        border = BorderStroke(1.dp, Line),
     ) {
-        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+        Text(
+            text,
+            color = tint,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun SessionTabLabel(
+    icon: ImageVector,
+    description: String,
+    count: Int = 0,
+    attention: Boolean = false,
+) {
+    // An icon rather than a word. Four labels sharing the width truncated to
+    // "Reaso…" and "Termi…", which name nothing; the icons are the ones these
+    // views already use for themselves, so the tab and its content agree.
+    //
+    // The dot is what a count used to be. In any working session every count
+    // read "99+", which says only that there is a lot of everything.
+    Box(contentAlignment = Alignment.Center) {
+        Icon(icon, description, modifier = Modifier.size(21.dp))
         if (attention || count > 0) {
-            Spacer(Modifier.width(5.dp))
             Box(
                 Modifier
-                    .size(if (attention) 6.dp else 4.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 5.dp, y = (-3).dp)
+                    .size(if (attention) 7.dp else 5.dp)
                     .clip(CircleShape)
                     // Amber is reserved for something wanting a person; anything
-                    // else is just content waiting to be read.
-                    .background(if (attention) Amber else Muted.copy(alpha = 0.55f)),
+                    // else is content waiting to be read.
+                    .background(if (attention) Amber else Muted.copy(alpha = 0.7f)),
             )
         }
     }
@@ -1591,16 +1616,18 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
     }
     val query = slashCommandQuery(message)
     val matches = remember(query, slashCommands) { query?.let { matchSlashCommands(it, slashCommands) }.orEmpty() }
-    Surface(color = SurfaceRaised, tonalElevation = 2.dp) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 10.dp)) {
+    // Floating: no bar across the bottom. The composer sits on the conversation
+    // with air around it, so the chat reads as continuing underneath rather than
+    // stopping at a wall.
+    Box(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 8.dp)) {
             if (matches.isNotEmpty()) SlashCommandPicker(matches) { message = "/${it.name} " }
             else if (query != null && slashCommands.isEmpty()) {
                 Text("No commands reported by this runtime.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
             }
-            commandError?.let { Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
-            if (commandError == null) {
-                commandNotice?.let { Text(it, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
-            }
+            // Over the conversation now, so each notice carries its own ground.
+            commandError?.let { FloatingNotice(it, Danger) }
+            if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
@@ -1610,9 +1637,10 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
             // borders around the same thing - and the slash button lives inside
             // it because it acts on what is being typed, not on the session.
             Surface(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).shadow(8.dp, RoundedCornerShape(24.dp)),
                 shape = RoundedCornerShape(24.dp),
-                color = SurfaceSunken,
+                color = SurfaceRaised,
+                border = BorderStroke(1.dp, Line),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
@@ -2068,10 +2096,9 @@ private fun TerminalCommandComposer(
     var command by rememberSaveable(agent.id) { mutableStateOf("") }
     Surface(color = Color(0xFF0C1014), tonalElevation = 2.dp) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 10.dp)) {
-            commandError?.let { Text(it, color = Danger, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
-            if (commandError == null) {
-                commandNotice?.let { Text(it, color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
-            }
+            // Over the conversation now, so each notice carries its own ground.
+            commandError?.let { FloatingNotice(it, Danger) }
+            if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
             Row(Modifier.padding(start = 8.dp, bottom = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.VerifiedUser, null, tint = Muted, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(6.dp))
