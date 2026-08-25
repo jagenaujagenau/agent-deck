@@ -54,8 +54,15 @@ data class DeckLine(
     val agentId: String,
     /** Project rather than the full session name: it is what fits and what identifies. */
     val project: String,
-    /** What it is waiting on, or what it is doing. */
+    /**
+     * What the session is thinking, or the last thing it said.
+     *
+     * Not its tool activity. "Bash completed" says the machine is busy, which
+     * the state already says; the reasoning or the reply is the part a person
+     * glances at a widget to read.
+     */
     val detail: String,
+    val harness: Harness = Harness.Unknown,
     val needsYou: Boolean = false,
 )
 
@@ -81,9 +88,8 @@ object DeckSummaries {
                 DeckLine(
                     agentId = agent.id,
                     project = agent.project.ifBlank { agent.name },
-                    detail = agent.task.ifBlank {
-                        if (agent.state == "waiting") "Needs your attention" else agent.state
-                    },
+                    detail = detailFor(agent),
+                    harness = Harnesses.of(agent.id, agent.name),
                     needsYou = agent.state == "waiting",
                 )
             },
@@ -93,6 +99,40 @@ object DeckSummaries {
             observedAt = observedAt,
             reachedBridge = true,
         )
+    }
+
+    /** Long enough to be worth reading, short enough for two lines on a watch. */
+    private const val DETAIL_LIMIT = 140
+
+    /**
+     * What a session is thinking, or the last thing it said.
+     *
+     * Thinking wins only when it is the most recent thing to happen: a stale
+     * thought shown beside a finished reply would report the session as still
+     * working it out. Falling back to the task is what covers a relay that
+     * carried no events at all - the watch is sent one event per session, and
+     * it may not be either of these.
+     */
+    fun detailFor(agent: Agent): String {
+        val latest = agent.events.maxByOrNull { it.createdAt }
+        if (latest?.kind == "thought") {
+            latest.detail?.takeIf { it.isNotBlank() }?.let { return clip(it) }
+        }
+        val reply = agent.events
+            .filter { it.kind == "output" && it.summary == "Response" }
+            .maxByOrNull { it.createdAt }
+            ?.detail
+            ?.takeIf { it.isNotBlank() }
+        if (reply != null) return clip(reply)
+        return agent.task.ifBlank {
+            if (agent.state == "waiting") "Needs your attention" else agent.state
+        }
+    }
+
+    /** One line's worth, with the newlines a transcript is full of flattened out. */
+    private fun clip(value: String): String {
+        val flat = value.replace(Regex("\\s+"), " ").trim()
+        return if (flat.length <= DETAIL_LIMIT) flat else flat.take(DETAIL_LIMIT - 1).trimEnd() + "…"
     }
 
     /**

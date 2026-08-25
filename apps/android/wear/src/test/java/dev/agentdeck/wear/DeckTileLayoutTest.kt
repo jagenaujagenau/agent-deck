@@ -3,6 +3,7 @@ package dev.agentdeck.wear
 import androidx.wear.protolayout.LayoutElementBuilders
 import dev.agentdeck.shared.DeckSummary
 import dev.agentdeck.shared.DeckLine
+import dev.agentdeck.shared.Harness
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,7 +27,9 @@ class DeckTileLayoutTest {
 
     /** The rendered strings with the prompt and markers stripped, for comparing. */
     private fun lines(element: LayoutElementBuilders.LayoutElement): List<String> =
-        texts(element).map { it.trim() }.filter { it.isNotEmpty() && it != "❯" && it != "●" && it != "○" }
+        texts(element).map { it.trim() }.filter { line ->
+            line.isNotEmpty() && line != "❯" && Harness.entries.none { it.mark == line }
+        }
 
     /** A 45mm round watch, which is what these are drawn for. */
     private val ROUND = Screen(widthDp = 227f, heightDp = 227f, round = true)
@@ -130,5 +133,36 @@ class DeckTileGeometryTest {
     @Test
     fun `a square face may show more, since it has the corners`() {
         assertTrue(rowsThatFit(square) >= rowsThatFit(round))
+    }
+}
+
+class DeckTileHarnessTest {
+    private val round = Screen(widthDp = 227f, heightDp = 227f, round = true)
+
+    private fun texts(element: LayoutElementBuilders.LayoutElement): List<String> = when (element) {
+        is LayoutElementBuilders.Text -> listOf(element.text?.value.orEmpty())
+        is LayoutElementBuilders.Column -> element.contents.flatMap { texts(it) }
+        is LayoutElementBuilders.Row -> element.contents.flatMap { texts(it) }
+        is LayoutElementBuilders.Box -> element.contents.flatMap { texts(it) }
+        else -> emptyList()
+    }
+
+    @Test
+    fun `the harness is named on every row`() {
+        val rendered = texts(
+            layout(
+                DeckSummary(
+                    lines = listOf(
+                        DeckLine("claude-a", "fx-ruby", "Weighing two approaches", Harness.Claude),
+                        DeckLine("opencode-b", "ai-2026", "Read the file", Harness.OpenCode),
+                    ),
+                    running = 2,
+                    reachedBridge = true,
+                ),
+                round,
+            ),
+        ).map { it.trim() }
+        assertTrue("saw $rendered", rendered.contains(Harness.Claude.mark))
+        assertTrue("saw $rendered", rendered.contains(Harness.OpenCode.mark))
     }
 }

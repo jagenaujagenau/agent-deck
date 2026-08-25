@@ -85,6 +85,8 @@ private const val FOREGROUND = 0xFFC9D1D9.toInt()
 private const val MUTED = 0xFF8B949E.toInt()
 private const val PROMPT = 0xFF3FB950.toInt()
 private const val ATTENTION = 0xFFD29922.toInt()
+private const val CARD = 0xFF141920.toInt()
+private const val BADGE = 0xFF20262F.toInt()
 
 /**
  * How far in from the edge content has to start.
@@ -104,30 +106,29 @@ internal fun rowsThatFit(screen: Screen): Int =
         .coerceIn(0, if (screen.round) 3 else DeckSummaries.MAX_LINES)
 
 private const val HEADLINE_HEIGHT = 26f
-private const val ROW_HEIGHT = 34f
+private const val ROW_HEIGHT = 52f
 
 /** Opens the watch app, at one session when the tap named one. */
 private fun openApp(agentId: String?): ModifiersBuilders.Modifiers =
-    ModifiersBuilders.Modifiers.Builder()
-        .setClickable(
-            ModifiersBuilders.Clickable.Builder()
-                .setId(agentId ?: "deck")
-                .setOnClick(
-                    ActionBuilders.LaunchAction.Builder()
-                        .setAndroidActivity(
-                            ActionBuilders.AndroidActivity.Builder()
-                                .setPackageName("dev.agentdeck")
-                                .setClassName("dev.agentdeck.wear.WearActivity")
-                                .apply {
-                                    if (agentId != null) {
-                                        addKeyToExtraMapping(
-                                            WearActivity.EXTRA_AGENT_ID,
-                                            ActionBuilders.stringExtra(agentId),
-                                        )
-                                    }
-                                }
-                                .build(),
-                        )
+    ModifiersBuilders.Modifiers.Builder().setClickable(clickable(agentId)).build()
+
+private fun clickable(agentId: String?): ModifiersBuilders.Clickable =
+    ModifiersBuilders.Clickable.Builder()
+        .setId(agentId ?: "deck")
+        .setOnClick(
+            ActionBuilders.LaunchAction.Builder()
+                .setAndroidActivity(
+                    ActionBuilders.AndroidActivity.Builder()
+                        .setPackageName("dev.agentdeck")
+                        .setClassName("dev.agentdeck.wear.WearActivity")
+                        .apply {
+                            if (agentId != null) {
+                                addKeyToExtraMapping(
+                                    WearActivity.EXTRA_AGENT_ID,
+                                    ActionBuilders.stringExtra(agentId),
+                                )
+                            }
+                        }
                         .build(),
                 )
                 .build(),
@@ -159,98 +160,176 @@ private fun text(
     )
     .build()
 
+/**
+ * The tile, in the shape Wear tiles are: a badge, a title, one card, a button.
+ *
+ * Matched to the system's own tiles rather than invented. A tile that lays
+ * itself out differently from every other tile in the carousel reads as a
+ * foreign object no matter how good it looks on its own.
+ */
 internal fun layout(
     summary: DeckSummary,
     screen: Screen,
 ): LayoutElementBuilders.LayoutElement {
     val inset = horizontalInset(screen)
     val shown = summary.lines.take(rowsThatFit(screen))
-
-    val column = LayoutElementBuilders.Column.Builder()
+    val card = LayoutElementBuilders.Column.Builder()
         .setWidth(expand())
-        .setModifiers(openApp(null))
-        .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+        .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_START)
 
-    // The prompt and the headline on one line, so the tile opens the way the
-    // widget does rather than merely sharing its colours.
-    column.addContent(
-        LayoutElementBuilders.Row.Builder()
-            .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
-            .addContent(text("❯ ", 14f, PROMPT, weight = LayoutElementBuilders.FONT_WEIGHT_BOLD))
-            .addContent(
-                text(
-                    DeckSummaries.headline(summary),
-                    15f,
-                    if (summary.attention > 0) ATTENTION else FOREGROUND,
-                    weight = LayoutElementBuilders.FONT_WEIGHT_MEDIUM,
-                    // Tracking is the nearest ProtoLayout gets to a terminal face.
-                    tracking = 0.04f,
-                ),
-            )
-            .build(),
-    )
-
-    for (line in shown) {
-        column.addContent(spacer(9f))
-        column.addContent(deckRow(line))
+    if (shown.isEmpty()) {
+        card.addContent(text(DeckSummaries.headline(summary), 13f, MUTED))
     }
-
+    shown.forEachIndexed { index, line ->
+        if (index > 0) card.addContent(spacer(9f))
+        card.addContent(deckRow(line))
+    }
     val hidden = DeckSummaries.overflow(summary, shown.size)
     if (hidden > 0) {
-        column.addContent(spacer(7f))
+        card.addContent(spacer(6f))
         // Said rather than truncated: two of five shown without a word would
         // report that the other three do not need you.
-        column.addContent(text("… $hidden more", 12f, MUTED))
+        card.addContent(text("… $hidden more", 11f, MUTED))
     }
 
-    return LayoutElementBuilders.Box.Builder()
+    return LayoutElementBuilders.Column.Builder()
         .setWidth(expand())
         .setHeight(expand())
+        .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
         .setModifiers(
             ModifiersBuilders.Modifiers.Builder()
                 .setPadding(
                     ModifiersBuilders.Padding.Builder()
-                        .setStart(dp(inset))
-                        .setEnd(dp(inset))
+                        .setStart(dp(inset)).setEnd(dp(inset))
+                        .setTop(dp(screen.heightDp * 0.05f))
+                        .setBottom(dp(screen.heightDp * 0.05f))
                         .build(),
                 )
                 .build(),
         )
-        .addContent(column.build())
+        // The app's own badge, the way every tile in the carousel opens.
+        .addContent(appBadge(summary))
+        .addContent(spacer(4f))
+        .addContent(
+            text(
+                DeckSummaries.headline(summary),
+                15f,
+                if (summary.attention > 0) ATTENTION else FOREGROUND,
+                weight = LayoutElementBuilders.FONT_WEIGHT_MEDIUM,
+            ),
+        )
+        .addContent(spacer(7f))
+        // One card holding the whole deck, which is the shape of a Wear tile.
+        .addContent(
+            LayoutElementBuilders.Box.Builder()
+                .setWidth(expand())
+                .setModifiers(cardSurface(CARD, 22f, null))
+                .addContent(card.build())
+                .build(),
+        )
         .build()
 }
 
-private fun deckRow(line: DeckLine): LayoutElementBuilders.LayoutElement =
-    LayoutElementBuilders.Column.Builder()
+/** The circular mark every Wear tile leads with, so this one is recognisable too. */
+private fun appBadge(summary: DeckSummary): LayoutElementBuilders.LayoutElement =
+    LayoutElementBuilders.Box.Builder()
+        .setWidth(dp(26f))
+        .setHeight(dp(26f))
+        .setModifiers(
+            ModifiersBuilders.Modifiers.Builder()
+                .setBackground(
+                    ModifiersBuilders.Background.Builder()
+                        .setColor(argb(BADGE))
+                        .setCorner(ModifiersBuilders.Corner.Builder().setRadius(dp(13f)).build())
+                        .build(),
+                )
+                .setClickable(clickable(null))
+                .build(),
+        )
+        .addContent(
+            text(
+                "❯",
+                13f,
+                if (summary.attention > 0) ATTENTION else PROMPT,
+                weight = LayoutElementBuilders.FONT_WEIGHT_BOLD,
+            ),
+        )
+        .build()
+
+/** A rounded surface that opens a session, which is what makes a row a card. */
+private fun cardSurface(color: Int, radius: Float, agentId: String?) =
+    ModifiersBuilders.Modifiers.Builder()
+        .setBackground(
+            ModifiersBuilders.Background.Builder()
+                .setColor(argb(color))
+                .setCorner(ModifiersBuilders.Corner.Builder().setRadius(dp(radius)).build())
+                .build(),
+        )
+        .setPadding(
+            ModifiersBuilders.Padding.Builder()
+                .setStart(dp(7f)).setEnd(dp(7f)).setTop(dp(6f)).setBottom(dp(6f))
+                .build(),
+        )
+        .setClickable(clickable(agentId))
+        .build()
+
+/**
+ * One session as a card: an avatar on the left, what it is doing on the right.
+ *
+ * The avatar is a fixed square so every card shares a text edge, and the
+ * activity wraps inside the right column rather than running back under the
+ * badge.
+ */
+private fun deckRow(line: DeckLine): LayoutElementBuilders.LayoutElement {
+    val accent = if (line.needsYou) ATTENTION else PROMPT
+    return LayoutElementBuilders.Box.Builder()
         .setWidth(expand())
-        .setModifiers(openApp(line.agentId))
-        // Left-aligned, unlike the headline above it. Centring each row
-        // independently put every marker at a different distance from the edge,
-        // which reads as a ragged list rather than a centred one.
-        .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_START)
+        .setModifiers(cardSurface(CARD, 8f, line.agentId))
         .addContent(
             LayoutElementBuilders.Row.Builder()
-                .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
-                // The marker differs in shape as well as colour, so the state
-                // survives a watch face someone has set to greyscale.
+                .setWidth(expand())
+                .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_TOP)
+                .addContent(avatar(line, accent))
+                .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(dp(7f)).build())
                 .addContent(
-                    text(
-                        if (line.needsYou) "● " else "○ ",
-                        10f,
-                        if (line.needsYou) ATTENTION else MUTED,
-                    ),
-                )
-                .addContent(
-                    text(
-                        line.project,
-                        14f,
-                        if (line.needsYou) ATTENTION else FOREGROUND,
-                        weight = LayoutElementBuilders.FONT_WEIGHT_MEDIUM,
-                    ),
+                    LayoutElementBuilders.Column.Builder()
+                        .setWidth(expand())
+                        .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_START)
+                        .addContent(
+                            text(
+                                line.project,
+                                13f,
+                                if (line.needsYou) ATTENTION else FOREGROUND,
+                                weight = LayoutElementBuilders.FONT_WEIGHT_MEDIUM,
+                            ),
+                        )
+                        // The activity feed: thinking, or the last thing said.
+                        .addContent(text(line.detail, 11f, MUTED, maxLines = 2))
+                        .build(),
                 )
                 .build(),
         )
-        .addContent(text(line.detail, 12f, MUTED, maxLines = 2))
+        .build()
+}
+
+/** The harness mark, boxed so it reads as a badge rather than a prefix. */
+private fun avatar(line: DeckLine, accent: Int): LayoutElementBuilders.LayoutElement =
+    LayoutElementBuilders.Box.Builder()
+        .setWidth(dp(24f))
+        .setHeight(dp(24f))
+        .setModifiers(
+            ModifiersBuilders.Modifiers.Builder()
+                .setBackground(
+                    ModifiersBuilders.Background.Builder()
+                        .setColor(argb(BADGE))
+                        .setCorner(ModifiersBuilders.Corner.Builder().setRadius(dp(5f)).build())
+                        .build(),
+                )
+                .build(),
+        )
+        .addContent(
+            text(line.harness.mark, 11f, accent, weight = LayoutElementBuilders.FONT_WEIGHT_BOLD),
+        )
         .build()
 
 private fun spacer(height: Float) =

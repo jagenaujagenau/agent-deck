@@ -20,6 +20,7 @@ import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Alignment
+import androidx.glance.layout.Box
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
@@ -27,6 +28,7 @@ import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
+import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.text.FontFamily
 import androidx.glance.text.FontWeight
@@ -72,6 +74,8 @@ private val Window = Color(0xFF0D1117)
 private val TitleBar = Color(0xFF161B22)
 private val Foreground = Color(0xFFC9D1D9)
 private val Muted = Color(0xFF8B949E)
+private val Card = Color(0xFF141920)
+private val Badge = Color(0xFF20262F)
 private val Prompt = Color(0xFF3FB950)
 private val Attention = Color(0xFFD29922)
 private val Close = Color(0xFFFF5F57)
@@ -80,7 +84,7 @@ private val Zoom = Color(0xFF28C840)
 
 private const val TITLE_BAR_HEIGHT = 30f
 private const val PROMPT_HEIGHT = 26f
-private const val ROW_HEIGHT = 34f
+private const val ROW_HEIGHT = 46f
 
 /** How many sessions fit under the title bar and the prompt line. */
 internal fun rowsThatFit(height: Dp): Int =
@@ -113,8 +117,8 @@ private fun TerminalWindow(summary: DeckSummary) {
         Column(modifier = GlanceModifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
             PromptLine(summary)
             for (line in shown) {
-                Spacer(GlanceModifier.height(4.dp))
-                SessionLine(line)
+                Spacer(GlanceModifier.height(5.dp))
+                SessionCard(line)
             }
             val hidden = DeckSummaries.overflow(summary, shown.size)
             if (hidden > 0) {
@@ -170,27 +174,53 @@ private fun PromptLine(summary: DeckSummary) {
     }
 }
 
+/**
+ * One session as a card: an avatar on the left, what it is doing on the right.
+ *
+ * The two columns are the point. The avatar holds a fixed width so every card
+ * has the same text edge, and the activity wraps inside the right column rather
+ * than running back under the badge - a wrapped line that reaches the card's
+ * edge loses the column it belonged to.
+ */
 @Composable
-private fun SessionLine(line: DeckLine) {
-    Column(
+private fun SessionCard(line: DeckLine) {
+    val accent = if (line.needsYou) Attention else Prompt
+    Row(
+        // Centred against the whole card, so the badge sits level with the pair
+        // of lines beside it rather than riding up against the project name.
+        verticalAlignment = Alignment.CenterVertically,
         modifier = GlanceModifier
             .fillMaxWidth()
+            .background(Card)
+            .cornerRadius(6.dp)
+            .padding(horizontal = 8.dp, vertical = 7.dp)
             .clickable(actionStartActivity(deckIntent(line.agentId))),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // State survives a launcher that tints widget text, because the
-            // marker differs in shape as well as colour.
-            Text(
-                text = if (line.needsYou) "● " else "○ ",
-                style = mono(10f, if (line.needsYou) Attention else Muted),
-            )
+        Avatar(line, accent)
+        Spacer(GlanceModifier.width(8.dp))
+        Column(modifier = GlanceModifier.defaultWeight()) {
             Text(
                 text = line.project,
-                style = mono(12f, if (line.needsYou) Attention else Foreground),
+                style = mono(12f, if (line.needsYou) Attention else Foreground, FontWeight.Medium),
                 maxLines = 1,
             )
+            // The activity feed: what it is thinking, or the last thing it said.
+            Text(text = line.detail, style = mono(10f, Muted), maxLines = 2)
         }
-        Text(text = "  ${line.detail}", style = mono(10f, Muted), maxLines = 1)
+    }
+}
+
+/** The harness mark, boxed so it reads as a badge rather than a prefix. */
+@Composable
+private fun Avatar(line: DeckLine, accent: Color) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = GlanceModifier
+            .size(26.dp)
+            .background(Badge)
+            .cornerRadius(5.dp),
+    ) {
+        Text(text = line.harness.mark, style = mono(11f, accent, FontWeight.Bold))
     }
 }
 

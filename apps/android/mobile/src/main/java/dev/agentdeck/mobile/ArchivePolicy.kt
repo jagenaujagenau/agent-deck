@@ -2,6 +2,7 @@ package dev.agentdeck.mobile
 
 import android.content.Context
 import dev.agentdeck.shared.Agent
+import dev.agentdeck.shared.AgentEvent
 import dev.agentdeck.shared.BridgeSnapshot
 
 internal fun agentArchiveKey(agent: Agent) = agent.id
@@ -38,14 +39,21 @@ internal fun wearRelaySnapshot(context: Context, snapshot: BridgeSnapshot): Brid
 internal fun wearRelaySnapshot(snapshot: BridgeSnapshot, archived: Set<String>): BridgeSnapshot {
     val visible = archiveFilteredSnapshot(snapshot, archived)
     val agents = visible.agents.filter { it.state != "offline" }.map { agent ->
-        val latest = agent.events.maxByOrNull { it.createdAt }?.let { event ->
-            event.copy(
-                detail = event.detail?.take(1_200),
-                command = event.command?.take(1_200),
-                diff = event.diff?.take(1_200),
-            )
-        }
-        agent.copy(events = listOfNotNull(latest))
+        fun trim(event: AgentEvent) = event.copy(
+            detail = event.detail?.take(1_200),
+            command = event.command?.take(1_200),
+            diff = event.diff?.take(1_200),
+        )
+        val latest = agent.events.maxByOrNull { it.createdAt }
+        // The latest event is usually a tool call, and the watch reads a
+        // session by what it is thinking or last said. Carrying the newest of
+        // those alongside is what stops the tile falling back to "Bash
+        // completed" for a session that had just explained itself.
+        val spoken = agent.events
+            .filter { it.kind == "thought" || (it.kind == "output" && it.summary == "Response") }
+            .maxByOrNull { it.createdAt }
+            ?.takeIf { it.id != latest?.id }
+        agent.copy(events = listOfNotNull(spoken, latest).map(::trim))
     }
     return visible.copy(
         agents = agents,

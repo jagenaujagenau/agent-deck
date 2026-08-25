@@ -160,3 +160,121 @@ class DeckSummaryStoreTest {
         assertTrue(DeckSummaryStore.differs(one, other))
     }
 }
+
+class HarnessTest {
+    @Test
+    fun `every adapter that prefixes its ids is recognised by it`() {
+        assertEquals(Harness.Claude, Harnesses.of("claude-abc", "Claude · fx · 1"))
+        assertEquals(Harness.Codex, Harnesses.of("codex-abc", "Codex · fx · 1"))
+        assertEquals(Harness.OpenCode, Harnesses.of("opencode-abc", "OpenCode · fx · 1"))
+        assertEquals(Harness.Managed, Harnesses.of("managed-abc", "Managed Claude"))
+    }
+
+    @Test
+    fun `Pi is read from its name, having no prefix to read`() {
+        // Pi names sessions from the runtime's own id, which carries no prefix.
+        assertEquals(Harness.Pi, Harnesses.of("01a02e7b-3852-794f", "Pi · agent-control-dashboard"))
+    }
+
+    @Test
+    fun `an unfamiliar runtime is marked as unknown rather than guessed at`() {
+        assertEquals(Harness.Unknown, Harnesses.of("cursor-abc", "Cursor · fx"))
+    }
+
+    @Test
+    fun `a project merely named after a runtime is not that runtime`() {
+        // "Pipeline" starts with Pi. The separator is what makes it a name.
+        assertEquals(Harness.Unknown, Harnesses.of("x-1", "Pipeline · fx"))
+    }
+}
+
+class DeckDetailTest {
+    private fun agent(
+        state: String = "running",
+        task: String = "Bash completed",
+        events: List<AgentEvent> = emptyList(),
+    ) = Agent(
+        id = "claude-a",
+        name = "Claude · fx · 1",
+        project = "fx",
+        model = "Claude Code",
+        state = state,
+        task = task,
+        tokens = 0L,
+        costUsd = 0.0,
+        lastSeenAt = "2026-08-25T10:00:00Z",
+        events = events,
+    )
+
+    private fun event(kind: String, summary: String, detail: String, at: String) =
+        AgentEvent(id = at, kind = kind, summary = summary, detail = detail, createdAt = at)
+
+    @Test
+    fun `thinking is shown while it is the latest thing to happen`() {
+        val detail = DeckSummaries.detailFor(
+            agent(events = listOf(event("thought", "Reasoning", "Weighing two approaches", "T3"))),
+        )
+        assertEquals("Weighing two approaches", detail)
+    }
+
+    @Test
+    fun `a finished reply supersedes the thinking that led to it`() {
+        // A stale thought beside a finished reply reports a session as still
+        // working something out that it has already answered.
+        val detail = DeckSummaries.detailFor(
+            agent(
+                events = listOf(
+                    event("thought", "Reasoning", "Weighing two approaches", "T1"),
+                    event("output", "Response", "Went with the second one", "T2"),
+                ),
+            ),
+        )
+        assertEquals("Went with the second one", detail)
+    }
+
+    @Test
+    fun `tool chatter is never the detail`() {
+        // "Bash completed" says the machine is busy, which the state says too.
+        val detail = DeckSummaries.detailFor(
+            agent(
+                events = listOf(
+                    event("output", "Response", "Here is what I found", "T1"),
+                    event("tool", "Using Bash", "ls -la", "T2"),
+                ),
+            ),
+        )
+        assertEquals("Here is what I found", detail)
+    }
+
+    @Test
+    fun `the task carries it when no events arrived`() {
+        // The watch is relayed one event per session, and it may be neither.
+        assertEquals("Bash completed", DeckSummaries.detailFor(agent(events = emptyList())))
+    }
+
+    @Test
+    fun `a waiting session with nothing at all still says something`() {
+        assertEquals(
+            "Needs your attention",
+            DeckSummaries.detailFor(agent(state = "waiting", task = "", events = emptyList())),
+        )
+    }
+
+    @Test
+    fun `a transcript's newlines are flattened into one readable line`() {
+        val detail = DeckSummaries.detailFor(
+            agent(events = listOf(event("thought", "Reasoning", "First.\n\n  Then second.", "T1"))),
+        )
+        assertEquals("First. Then second.", detail)
+    }
+
+    @Test
+    fun `a long thought is clipped rather than filling the widget`() {
+        val long = "word ".repeat(200)
+        val detail = DeckSummaries.detailFor(
+            agent(events = listOf(event("thought", "Reasoning", long, "T1"))),
+        )
+        assertTrue(detail.length <= 140)
+        assertTrue(detail.endsWith("…"))
+    }
+}

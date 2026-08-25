@@ -15,9 +15,11 @@ import org.junit.Test
  */
 class DeckWidgetSizeTest {
     @Test
-    fun `a tall widget fills with sessions`() {
-        // Roughly the four-by-three placement on the home screen.
-        assertTrue(rowsThatFit(280.dp) >= 5)
+    fun `a tall widget fills with session cards`() {
+        // Roughly the four-by-three placement on the home screen. A card holds
+        // an avatar beside two lines of text, so fewer fit than the single
+        // lines this replaced - the number is smaller and still fills.
+        assertTrue(rowsThatFit(280.dp) >= 4)
     }
 
     @Test
