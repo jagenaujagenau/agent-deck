@@ -2827,8 +2827,13 @@ private fun ConnectionDialog(
                 OutlinedTextField(
                     credential,
                     { credential = it.filterNot(Char::isWhitespace); error = null },
-                    label = { Text("Pairing code (optional)") },
-                    supportingText = { Text(error ?: "Leave blank to keep this device's secure token") },
+                    label = { Text("Pairing code or token") },
+                    // The raw-token route has always worked - six digits pairs,
+                    // anything else is used as the token - and nothing said so.
+                    // It is the one that does not expire, so it is worth naming.
+                    supportingText = {
+                        Text(error ?: "Six digits to pair, or paste a bridge token. Blank keeps this device's.")
+                    },
                     isError = error != null,
                     singleLine = true,
                     enabled = !working,
