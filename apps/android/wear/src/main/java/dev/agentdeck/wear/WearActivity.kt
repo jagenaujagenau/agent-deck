@@ -8,6 +8,7 @@ import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -225,7 +227,9 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
     /** Which session could not be fetched and why, so "empty" is not shown for "refused". */
     internal val historyFailed = _historyFailed.asStateFlow()
 
-    fun loadHistory(agentId: String) = viewModelScope.launch {
+    // Explicit return type: this retries by calling itself, and inference
+    // cannot chase its own tail.
+    fun loadHistory(agentId: String): kotlinx.coroutines.Job = viewModelScope.launch {
         _historyLoading.value = agentId
         _historyFailed.value = null
         // Credentials and the address arrive from the phone after this view
@@ -266,7 +270,19 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
             // The phone holds the credential this watch is missing, and sends
             // it on its own only when someone happens to open the phone app.
             // A watch left with a rotated token stayed broken until they did.
-            if (refused) sendToPhone(CREDENTIAL_REQUEST_PATH, ByteArray(0)) {}
+            if (refused) {
+                sendToPhone(CREDENTIAL_REQUEST_PATH, ByteArray(0)) {}
+                // And then use it. The phone answers in a moment; without
+                // trying again the fresh credential sat unused until the
+                // session was closed and reopened, which made the repair look
+                // like it had not worked.
+                delay(2_500)
+                if (SecureTokenStore(getApplication()).get().let { it.isNotBlank() && it != token }) {
+                    _historyLoading.value = null
+                    loadHistory(agentId)
+                    return@launch
+                }
+            }
         }
         _historyLoading.value = null
     }
@@ -438,42 +454,52 @@ private fun WearDeck(openAgentId: String? = null, vm: WearDeckViewModel = viewMo
     // AppScaffold puts the clock over every screen, which is what a watch is
     // for: an app that hides the time is one the user has to leave to check it.
     AppScaffold(timeText = { TimeText() }) {
-        AnimatedContent(targetState = selectedAgent, label = "wear-navigation") { agent ->
+        // The pager lives out here, and the transition keys on which session
+        // is open rather than on the Agent object. A snapshot arrives every few
+        // seconds carrying a new Agent, and keying the animation on that object
+        // restarted the transition each time - which tore the pages down and
+        // put the reader back on the controls mid-read.
+        val sessionPager = key(selected) { rememberPagerState(pageCount = { 3 }) }
+        AnimatedContent(targetState = selectedAgent?.id, label = "wear-navigation") { openId ->
+            val agent = openId?.let { id -> snapshot?.agents?.firstOrNull { it.id == id } }
             if (agent == null) {
                 AgentList(snapshot, state, vm::refresh) { selected = it.id }
             } else {
-                // Swiping right is how a watch goes back, everywhere on the
-                // platform. The button stays for reachability, not instead.
-                SwipeToDismissBox(onDismissed = { selected = null }) { isBackground ->
-                    if (isBackground) {
-                        Box(Modifier.fillMaxSize().background(Ink))
-                    } else {
-                        // Controls, reasoning and conversation are pages of one
-                        // session rather than screens to navigate between: a
-                        // wrist has no room for a tab bar, and a sideways swipe
-                        // is already how this app moves.
-                        val events = sessionEvents[agent.id].orEmpty()
-                        LaunchedEffect(agent.id) { vm.loadHistory(agent.id) }
-                        // One vertical screen, not pages. A HorizontalPager
-                        // inside SwipeToDismissBox fights it for the same drag,
-                        // and with only the latest of each thing to show there
-                        // is not enough here to be worth a second page.
-                        AgentDetail(
-                            agent,
-                            busy == agent.id,
-                            deliveryError,
-                            commandNotice,
-                            onAnswer = { event, option -> vm.answer(agent, event, option) },
-                            sendAction = remoteMessageAction(agent.state) { action ->
-                                supportsCapability(agent.capabilities, action)
-                            },
-                            onSend = { text, action -> vm.control(agent, action, text) },
-                            latest = latestOf(events),
-                            historyLoading = historyLoading == agent.id,
-                            historyFailure = historyFailed?.takeIf { it.first == agent.id }?.second,
-                        ) { vm.control(agent, it) }
-                    }
-                }
+                // Controls, message and reasoning are pages of one session
+                // rather than screens to navigate between: a wrist has no room
+                // for a tab bar, and a sideways swipe is already how this app
+                // moves.
+                //
+                // No SwipeToDismissBox around them. Wear's claims a horizontal
+                // drag in either direction whether or not `userSwipeEnabled`
+                // arms it to act on one, so with it in the tree no page could
+                // ever be swiped to - which is what made pages look impossible
+                // the first time this was tried. Back is the system gesture and
+                // the side button, both of which reach BackHandler.
+                BackHandler { selected = null }
+                val events = sessionEvents[agent.id].orEmpty()
+                // Keyed on the live event window as well as the session, so a
+                // working session refetches as it works. The transition no
+                // longer rebuilds this on every snapshot, and without a second
+                // key a single failed fetch would stick for as long as the
+                // session stayed open.
+                val liveActivity = "${'$'}{agent.events.size}:${'$'}{agent.events.firstOrNull()?.id}"
+                LaunchedEffect(agent.id, liveActivity) { vm.loadHistory(agent.id) }
+                AgentDetail(
+                    agent,
+                    busy == agent.id,
+                    deliveryError,
+                    commandNotice,
+                    onAnswer = { event, option -> vm.answer(agent, event, option) },
+                    sendAction = remoteMessageAction(agent.state) { action ->
+                        supportsCapability(agent.capabilities, action)
+                    },
+                    onSend = { text, action -> vm.control(agent, action, text) },
+                    latest = latestOf(events),
+                    historyLoading = historyLoading == agent.id,
+                    historyFailure = historyFailed?.takeIf { it.first == agent.id }?.second,
+                    pagerState = sessionPager,
+                ) { vm.control(agent, it) }
             }
         }
     }
@@ -659,7 +685,7 @@ private fun WearAgentCard(agent: Agent, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AgentDetail(
+private fun SessionControls(
     agent: Agent,
     busy: Boolean,
     deliveryError: String?,
@@ -667,9 +693,6 @@ private fun AgentDetail(
     onAnswer: (AgentEvent, String) -> Unit,
     sendAction: String?,
     onSend: (String, String) -> Unit,
-    latest: List<LatestSection>,
-    historyLoading: Boolean,
-    historyFailure: HistoryFailure?,
     onControl: (String) -> Unit,
 ) {
     val color = statusColor(agent.state)
@@ -820,43 +843,131 @@ private fun AgentDetail(
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
             ) { Icon(Icons.Rounded.Stop, null); Spacer(Modifier.width(6.dp)); Text("Stop") }
         }
-        // The newest message, thought and command, which is what "what is it
-        // doing" actually asks. Fetched from the bridge rather than the phone
-        // relay, which carries one event per agent.
-        if (latest.isEmpty()) {
-            item {
-                Text(
-                    when {
-                        historyLoading -> "Loading…"
-                        // Unreachable, refused and empty all look the same
-                        // unless each says so. The refused case is the one a
-                        // person can do something about, so it says what.
-                        historyFailure == HistoryFailure.Refused ->
-                            "This watch's access expired · open Agent Deck on your phone"
-                        historyFailure == HistoryFailure.Unreachable -> "Could not reach the bridge"
-                        else -> "Nothing recorded yet"
-                    },
-                    color = Muted,
-                    fontSize = 11.sp,
-                    textAlign = TextAlign.Center,
+    }
+    }
+}
+
+/**
+ * One session, as three pages: what you can do, what it said, what it thought.
+ *
+ * They were stacked vertically, which meant scrolling past every control to
+ * reach a sentence - and the controls are what a wrist is for. Pages were
+ * turned down once because a plain HorizontalPager fights SwipeToDismissBox for
+ * the same drag. Wear's own pager is built for exactly this: it hands the
+ * gesture back at the first page, so a swipe right there still leaves the
+ * session rather than turning to nothing.
+ */
+@Composable
+private fun AgentDetail(
+    agent: Agent,
+    busy: Boolean,
+    deliveryError: String?,
+    commandNotice: String?,
+    onAnswer: (AgentEvent, String) -> Unit,
+    sendAction: String?,
+    onSend: (String, String) -> Unit,
+    latest: List<LatestSection>,
+    historyLoading: Boolean,
+    historyFailure: HistoryFailure?,
+    pagerState: PagerState,
+    onControl: (String) -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+            run {
+                when (page) {
+                    0 -> SessionControls(
+                        agent = agent,
+                        busy = busy,
+                        deliveryError = deliveryError,
+                        commandNotice = commandNotice,
+                        onAnswer = onAnswer,
+                        sendAction = sendAction,
+                        onSend = onSend,
+                        onControl = onControl,
+                    )
+                    1 -> SessionExcerpt(
+                        section = latest.firstOrNull { it.label == "LATEST MESSAGE" },
+                        empty = "Nothing said yet",
+                        historyLoading = historyLoading,
+                        historyFailure = historyFailure,
+                    )
+                    else -> SessionExcerpt(
+                        section = latest.firstOrNull { it.label == "REASONING" },
+                        empty = "No reasoning shared",
+                        historyLoading = historyLoading,
+                        historyFailure = historyFailure,
+                    )
+                }
+            }
+        }
+        // Three pages are only discoverable if something says there are three.
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            repeat(3) { index ->
+                Box(
+                    Modifier
+                        .size(if (index == pagerState.currentPage) 6.dp else 4.dp)
+                        .clip(CircleShape)
+                        .background(if (index == pagerState.currentPage) Text else Line),
                 )
             }
         }
-        items(latest.size) { index ->
-            val section = latest[index]
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Surface)
-                    .padding(13.dp),
-            ) {
-                Text(section.label, color = section.tint, fontSize = 9.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(5.dp))
-                Text(section.body, fontSize = 12.sp)
-            }
-        }
     }
+}
+
+/**
+ * A page holding one excerpt, or the reason there is none.
+ *
+ * Scrollable on its own, because a 500-character excerpt is taller than the
+ * screen and the page it sits on no longer scrolls past anything else.
+ */
+@Composable
+private fun SessionExcerpt(
+    section: LatestSection?,
+    empty: String,
+    historyLoading: Boolean,
+    historyFailure: HistoryFailure?,
+) {
+    val scroll = rememberLazyListState()
+    val rotary = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { rotary.requestFocus() } }
+    val message = when {
+        section != null -> null
+        historyLoading -> "Loading…"
+        // Unreachable, refused and empty all look the same unless each says so.
+        // The refused case is the one a person can do something about.
+        historyFailure == HistoryFailure.Refused ->
+            "This watch's access expired · open Agent Deck on your phone"
+        historyFailure == HistoryFailure.Unreachable -> "Could not reach the bridge"
+        else -> empty
+    }
+    LazyColumn(
+        state = scroll,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Ink)
+            .rotaryScrollable(RotaryScrollableDefaults.behavior(scroll), focusRequester = rotary),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (message != null) {
+            item { Text(message, color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center) }
+        } else if (section != null) {
+            item {
+                Text(
+                    section.label,
+                    color = section.tint,
+                    fontSize = 10.sp,
+                    letterSpacing = 1.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            item { Text(section.body, fontSize = 13.sp, lineHeight = 18.sp) }
+        }
     }
 }
 

@@ -26,14 +26,15 @@ internal data class LatestSection(val label: String, val body: String, val tint:
  * comfortably, not act on, not correct - and it was pushing the controls that
  * matter further down a screen that already could not fit them.
  */
-internal fun latestOf(events: List<AgentEvent>): List<LatestSection> {
-    val sections = mutableListOf<LatestSection>()
+internal fun latestOf(events: List<AgentEvent>): List<LatestSection> =
+    listOfNotNull(latestMessage(events), latestReasoning(events))
 
-    conversationEntries(events).lastOrNull { it.role == ConversationRole.Agent }?.let {
-        sections += LatestSection("LATEST MESSAGE", it.content.take(WATCH_EXCERPT), Signal)
-    }
-    reasoningEvents(events).lastOrNull()?.detail?.takeIf { it.isNotBlank() }?.let {
-        sections += LatestSection("REASONING", it.take(WATCH_EXCERPT), Blue)
-    }
-    return sections
-}
+/** The newest thing the agent said, if it has said anything. */
+internal fun latestMessage(events: List<AgentEvent>): LatestSection? =
+    conversationEntries(events).lastOrNull { it.role == ConversationRole.Agent }
+        ?.let { LatestSection("LATEST MESSAGE", it.content.take(WATCH_EXCERPT), Signal) }
+
+/** The newest thing it was thinking, where the provider shares that at all. */
+internal fun latestReasoning(events: List<AgentEvent>): LatestSection? =
+    reasoningEvents(events).lastOrNull()?.detail?.takeIf { it.isNotBlank() }
+        ?.let { LatestSection("REASONING", it.take(WATCH_EXCERPT), Blue) }
