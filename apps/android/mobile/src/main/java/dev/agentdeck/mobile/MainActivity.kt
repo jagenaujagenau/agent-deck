@@ -1987,11 +1987,13 @@ private fun ResponsesView(
                 Text("New messages")
             }
         }
-        // No composer under a lens. A message goes to the session, never to
-        // one of its subagents, and offering the field here says otherwise.
-        if (!lensed) {
-            MessageComposer(agent, busy, commandError, commandNotice, supports, slashCommands, onControl, autoFocus)
-        }
+        // The composer stays under a lens. A subagent has no inbox - it is
+        // spawned with a prompt and returns once, and nothing in the stack can
+        // address one: messages are drained per session. So a reply can only
+        // go to the session. Hiding the field said "you cannot reply" instead,
+        // which is a bigger lie than the one it was avoiding; the placeholder
+        // names where the message lands.
+        MessageComposer(agent, busy, commandError, commandNotice, supports, slashCommands, onControl, autoFocus, lensed)
     }
 }
 
@@ -2037,7 +2039,9 @@ private fun EmptyConversation(supportsMessaging: Boolean, lensed: Boolean = fals
             when {
                 // "Send a message to begin" is not true of a subagent: it is
                 // not addressable, and most of them only ever run tools.
-                lensed -> "Its work is under Changes and Terminal."
+                // A running subagent has said nothing yet; a finished one's
+                // message arrives with its completion.
+                lensed -> "It reports back when it finishes. Its work is under Changes and Terminal."
                 supportsMessaging -> "Send a message to begin."
                 else -> "This runtime is monitoring-only."
             },
@@ -2078,7 +2082,7 @@ private fun SlashCommandPicker(matches: List<SlashCommand>, onPick: (SlashComman
 }
 
 @Composable
-private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit, autoFocus: Boolean) {
+private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit, autoFocus: Boolean, lensed: Boolean = false) {
     var message by rememberSaveable(agent.id) { mutableStateOf("") }
     val composerFocus = remember { FocusRequester() }
     // Switching to a view that can be typed into means wanting to type into it.
@@ -2138,7 +2142,12 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
                     ComposerField(
                         value = message,
                         onValueChange = { message = it },
-                        placeholder = if (action == "steer") "Reply or steer…" else "Message agent…",
+                        placeholder = when {
+                            // Under a lens the field is still the session's.
+                            lensed -> "Message the session…"
+                            action == "steer" -> "Reply or steer…"
+                            else -> "Message agent…"
+                        },
                         modifier = Modifier.weight(1f),
                         focusRequester = composerFocus,
                     )
