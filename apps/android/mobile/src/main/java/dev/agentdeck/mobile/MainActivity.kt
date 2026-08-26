@@ -60,6 +60,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -2472,6 +2473,11 @@ private fun TerminalView(
     modifier: Modifier = Modifier,
 ) {
     val events = remember(agent.events) { terminalEvents(agent.events) }
+    var speed by rememberSaveable(agent.id) { mutableStateOf(TerminalTypeSpeed.Normal) }
+    // Everything already on screen when this tab opened is scrollback and is
+    // drawn whole. Only what arrives afterwards is typed, so re-entering a
+    // session does not replay an hour of shell.
+    val scrollback = remember(agent.id) { events.map { it.id }.toSet() }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = events.lastIndex.coerceAtLeast(0))
     val scope = rememberCoroutineScope()
     var followNewest by remember(agent.id) { mutableStateOf(true) }
@@ -2560,7 +2566,16 @@ private fun TerminalView(
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                                 Text("\$", color = Signal, fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.width(10.dp))
-                                Text(event.command.orEmpty(), color = Text.copy(alpha = 0.92f), fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f))
+                                val full = event.command.orEmpty()
+                                val shown = typedText(full, animate = event.id !in scrollback, speed = speed)
+                                Text(shown, color = Text.copy(alpha = 0.92f), fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f))
+                                // The caret rides the end of the line while it
+                                // is still being typed, and leaves when it is
+                                // whole - which is how a terminal shows the
+                                // difference between working and finished.
+                                if (shown.length < full.length) {
+                                    BlinkingCaret(Signal, width = 8.dp, height = 16.dp)
+                                }
                             }
                         }
                     }
@@ -2586,6 +2601,21 @@ private fun TerminalView(
                 Text("New commands")
             }
         }
+        // The status line a terminal actually has, in the place it has it:
+        // under the scrollback, above the prompt. The speed segment is the
+        // control for the typing above - a terminal puts its settings in its
+        // status line rather than in a menu.
+        PowerlineBar(
+            segments = listOfNotNull(
+                PowerlineCell(agent.project.take(18), Signal, Ink),
+                PowerlineCell(agent.state.uppercase(), SurfaceRaised, statusColor(agent.state)),
+                PowerlineCell("${events.size} CMD", Surface, Muted),
+                PowerlineCell("TYPE ${speed.label}", Surface, if (speed == TerminalTypeSpeed.Off) Muted else Blue) {
+                    speed = speed.next()
+                },
+            ),
+            modifier = Modifier.padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
+        )
         TerminalCommandComposer(agent, busy, commandError, commandNotice, supports, onControl, autoFocus)
     }
 }
@@ -2607,47 +2637,49 @@ private fun TerminalCommandComposer(
     // merely opening the session does not.
     LaunchedEffect(Unit) { if (autoFocus) runCatching { composerFocus.requestFocus() } }
 
-    // The same floating composer as the chat, in the terminal's own voice: a
-    // monospace field behind a green prompt rather than a slash button.
-    Box(Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 10.dp, vertical = 8.dp)) {
-            commandError?.let { FloatingNotice(it, Danger) }
-            if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
-            Row(verticalAlignment = Alignment.Bottom) {
-                ComposerPill(
-                    modifier = Modifier.weight(1f),
-                    leading = {
-                        Text(
-                            "\$",
-                            color = Signal,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            modifier = Modifier.padding(start = 16.dp, end = 2.dp),
-                        )
-                    },
-                    field = {
-                        ComposerField(
-                            value = command,
-                            onValueChange = { command = it },
-                            placeholder = "Command for agent…",
-                            modifier = Modifier.weight(1f),
-                            monospace = true,
-                            focusRequester = composerFocus,
-                        )
-                    },
-                    action = {
-                        ComposerSendButton(
-                            hasText = command.isNotBlank(),
-                            busy = busy,
-                            onSend = {
-                                onControl(action, terminalCommandInstruction(command.trim()))
-                                command = ""
-                            },
-                        )
-                    },
+    // Not a pill. A terminal's prompt is a line at the bottom of the window,
+    // flush with the scrollback above it - a floating rounded field inside a
+    // terminal window is a chat box wearing a monospace font.
+    var focused by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
+        commandError?.let { FloatingNotice(it, Danger) }
+        if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF080B0E))
+                .padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "\$",
+                color = Signal,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+            )
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f).onFocusChanged { focused = it.isFocused }) {
+                ComposerField(
+                    value = command,
+                    onValueChange = { command = it },
+                    placeholder = "",
+                    monospace = true,
+                    focusRequester = composerFocus,
                 )
             }
+            // The caret only stands in while the field is not focused. Once it
+            // is, the text field draws a real one, and two cursors on a prompt
+            // is worse than none.
+            if (!focused && command.isEmpty()) BlinkingCaret(Signal)
+            ComposerSendButton(
+                hasText = command.isNotBlank(),
+                busy = busy,
+                onSend = {
+                    onControl(action, terminalCommandInstruction(command.trim()))
+                    command = ""
+                },
+            )
         }
     }
 }
