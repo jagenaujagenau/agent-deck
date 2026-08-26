@@ -462,7 +462,7 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = DeckNavSpace),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    item { AgentsHeader(boardAgents, homeNow) }
+                    item { AgentsHeader(boardAgents, homeNow, connected = state is BridgeState.Ready, bridgeName = data.bridge.name) }
                     item {
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -473,6 +473,10 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                                 FilterChip(
                                     selected = filter == item,
                                     onClick = { filter = item },
+                                    // Fully rounded. Material's default is a
+                                    // softened rectangle, which reads as a
+                                    // button; a filter is a pill.
+                                    shape = CircleShape,
                                     label = { Text(item.label) },
                                     leadingIcon = if (item == HomeFilter.Attention && attention > 0) {
                                         { Text(attention.toString(), fontWeight = FontWeight.Bold) }
@@ -638,15 +642,15 @@ private fun AnalyticsScreen(
         item {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AnalyticsRange.entries.forEach { item ->
-                    FilterChip(selected = range == item, onClick = { range = item }, label = { Text(item.label) })
+                    FilterChip(selected = range == item, onClick = { range = item }, shape = CircleShape, label = { Text(item.label) })
                 }
             }
         }
         if (data.filters.projects.isNotEmpty()) item {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = project == null, onClick = { project = null }, label = { Text("All projects") })
+                FilterChip(selected = project == null, onClick = { project = null }, shape = CircleShape, label = { Text("All projects") })
                 data.filters.projects.forEach { name ->
-                    FilterChip(selected = project == name, onClick = { project = name }, label = { Text(name, maxLines = 1) })
+                    FilterChip(selected = project == name, onClick = { project = name }, shape = CircleShape, label = { Text(name, maxLines = 1) })
                 }
             }
         }
@@ -883,15 +887,20 @@ private fun formatMoney(value: Double): String = if (value < 0.01 && value > 0) 
 @Composable
 private fun DeckTopBar(connected: Boolean, bridgeName: String, onSettings: () -> Unit, onRefresh: () -> Unit) {
     TopAppBar(
+        // The product's name, set like one. It used to be a 12sp all-caps
+        // label with the bridge underneath, which read as a system tray rather
+        // than the top of an app. What the bridge is doing moved down to the
+        // line that already counts the sessions, since both answer "is this
+        // thing working" and neither needs a row to itself.
         title = {
-            Column {
-                Text("AGENT DECK", fontSize = 12.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold, color = Signal)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(7.dp).clip(CircleShape).background(if (connected) Signal else Danger))
-                    Spacer(Modifier.width(7.dp))
-                    Text(bridgeName, fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
+            Text(
+                "Agent Deck",
+                fontSize = 26.sp,
+                lineHeight = 30.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp,
+                color = Signal,
+            )
         },
         actions = {
             IconButton(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, "Refresh") }
@@ -903,11 +912,24 @@ private fun DeckTopBar(connected: Boolean, bridgeName: String, onSettings: () ->
 }
 
 @Composable
-private fun AgentsHeader(agents: List<Agent>, now: Instant) {
+private fun AgentsHeader(agents: List<Agent>, now: Instant, connected: Boolean, bridgeName: String) {
     val attention = agents.count { homeAgentState(it, now = now).attention }
     val running = agents.count { homeAgentState(it, now = now) == HomeAgentState.Running }
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text("Agents", style = MaterialTheme.typography.headlineLarge)
+    // No "Agents" heading: it named the screen the bottom bar already names,
+    // directly above a list of agents. The row it cost now carries the two
+    // things that were worth reading - which bridge, and what it is doing.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(7.dp).clip(CircleShape).background(if (connected) Signal else Danger))
+        Spacer(Modifier.width(7.dp))
+        Text(
+            bridgeName,
+            fontSize = 13.sp,
+            color = Muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Text(" · ", fontSize = 13.sp, color = Muted.copy(alpha = 0.6f))
         Text(
             when {
                 attention > 0 && running > 0 -> "$attention need${if (attention == 1) "s" else ""} you · $running running"
@@ -917,6 +939,7 @@ private fun AgentsHeader(agents: List<Agent>, now: Instant) {
             },
             color = if (attention > 0) Amber else Muted,
             fontSize = 13.sp,
+            maxLines = 1,
         )
     }
 }
