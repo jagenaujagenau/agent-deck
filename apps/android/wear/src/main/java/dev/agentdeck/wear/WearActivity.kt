@@ -178,8 +178,42 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         }
-        viewModelScope.launch { repository.stream() }
+        viewModelScope.launch { superviseDirectStream() }
         retryQueuedCommands()
+    }
+
+    /**
+     * Holds a stream of the watch's own only while the phone is not relaying.
+     *
+     * The relay is this app's primary source and the direct route its fallback,
+     * but the stream was opened unconditionally beside it - and pointed at the
+     * `url` the phone synced, which is a tailnet name the watch cannot resolve.
+     * So it failed, backed off to its sixteen-second ceiling and retried a host
+     * it could never reach, about two hundred times an hour, for as long as the
+     * app was alive. Nothing showed, because the relay kept delivering.
+     *
+     * Now it opens only when the relay has gone quiet, aims at the address that
+     * last answered, and waits minutes rather than seconds between attempts.
+     */
+    private suspend fun superviseDirectStream() {
+        var stream: kotlinx.coroutines.Job? = null
+        while (true) {
+            val relaying = lastRelayAt > 0 &&
+                System.currentTimeMillis() - lastRelayAt < RELAY_TRUST_MS
+            if (relaying) {
+                stream?.cancel()
+                stream = null
+            } else if (stream?.isActive != true) {
+                repository.configure(
+                    addresses.candidates(BuildConfig.BRIDGE_URL).first(),
+                    SecureTokenStore(getApplication()).get(),
+                )
+                stream = viewModelScope.launch {
+                    repository.stream(maxReconnectDelayMs = WATCH_MAX_RECONNECT_MS)
+                }
+            }
+            delay(RELAY_CHECK_MS)
+        }
     }
 
     override fun onDataChanged(events: DataEventBuffer) {
@@ -414,6 +448,16 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         const val ANSWER_PATH = "/agent-deck/answer"
         /** Asks the phone to send this watch a fresh bridge credential. */
         const val CREDENTIAL_REQUEST_PATH = "/agent-deck/request-token"
+
+        /**
+         * How long a relayed snapshot is taken as proof the phone is still
+         * relaying. Comfortably longer than the phone's own cadence, so a
+         * quiet deck does not read as a dead relay.
+         */
+        const val RELAY_TRUST_MS = 3 * 60_000L
+        const val RELAY_CHECK_MS = 30_000L
+        /** A watch learns nothing by retrying every sixteen seconds. */
+        const val WATCH_MAX_RECONNECT_MS = 5 * 60_000L
     }
 }
 

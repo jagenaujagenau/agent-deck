@@ -210,7 +210,7 @@ class AgentRepository(private val client: BridgeClient) {
     val state: StateFlow<BridgeState> = _state.asStateFlow()
     val connection: StateFlow<ConnectionStatus> = _connection.asStateFlow()
 
-    suspend fun stream(reconnectDelayMs: Long = 1_500) {
+    suspend fun stream(reconnectDelayMs: Long = 1_500, maxReconnectDelayMs: Long = 16_000) {
         var retryDelay = reconnectDelayMs
         var attempt = 0
         while (kotlin.coroutines.coroutineContext.isActive) {
@@ -235,7 +235,11 @@ class AgentRepository(private val client: BridgeClient) {
             }
             if (_connection.value.phase == "blocked") wakeups.receive()
             else withTimeoutOrNull(retryDelay) { wakeups.receive() }
-            if (!synchronized) retryDelay = ConnectionPolicy.retryDelay(reconnectDelayMs, attempt + 1) else attempt = 0
+            if (!synchronized) {
+                retryDelay = ConnectionPolicy.retryDelay(reconnectDelayMs, attempt + 1, maxReconnectDelayMs)
+            } else {
+                attempt = 0
+            }
         }
     }
 
