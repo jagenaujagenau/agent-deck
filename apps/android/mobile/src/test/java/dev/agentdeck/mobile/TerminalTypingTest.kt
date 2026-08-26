@@ -47,4 +47,14 @@ class TerminalTypingTest {
         val fast = typingDurationMs(100, TerminalTypeSpeed.Fast.charsPerSecond)
         assertTrue(slow > normal && normal > fast)
     }
+
+    @Test
+    fun `a line costs its own length, so long lines take longer`() {
+        // The budget is characters across the whole command, spent line by
+        // line - not an equal slice each, which would make a one-word line and
+        // a wrapped one take the same time and read as nothing in particular.
+        val short = typingDurationMs("ls".length, TerminalTypeSpeed.Normal.charsPerSecond)
+        val long = typingDurationMs("ls -la /very/long/path/indeed".length, TerminalTypeSpeed.Normal.charsPerSecond)
+        assertTrue(long > short)
+    }
 }

@@ -2600,17 +2600,31 @@ private fun TerminalView(
                                 when (val line = remember(event.id, event.command) { terminalLine(event.command.orEmpty()) }) {
                                     is TerminalLine.FileWrite -> FileWriteLine(line, Modifier.weight(1f))
                                     is TerminalLine.Shell -> Column(Modifier.weight(1f)) {
-                                        val shown = typedText(line.text, animate = event.id !in scrollback, speed = speed)
-                                        Row {
-                                        Text(shown, color = Text.copy(alpha = 0.92f), fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f))
-                                        // The caret rides the end of the line
-                                        // while it is still being typed, and
-                                        // leaves when it is whole - which is
-                                        // how a terminal shows the difference
-                                        // between working and finished.
-                                        if (shown.length < line.text.length) {
-                                            BlinkingCaret(Signal, width = 8.dp, height = 16.dp)
-                                        }
+                                        val output = typedOutput(line.text, animate = event.id !in scrollback, speed = speed)
+                                        // One Text per source line, so output
+                                        // arrives a line at a time instead of
+                                        // the whole block reflowing on every
+                                        // frame like a paragraph being written.
+                                        output.lines.forEachIndexed { index, text ->
+                                            Row {
+                                                Text(
+                                                    text,
+                                                    color = Text.copy(alpha = 0.92f),
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 14.sp,
+                                                    lineHeight = 21.sp,
+                                                    modifier = Modifier.weight(1f, fill = false),
+                                                )
+                                                // The caret sits on the line
+                                                // being written, and leaves
+                                                // when the command is whole -
+                                                // which is how a terminal shows
+                                                // the difference between
+                                                // working and finished.
+                                                if (output.typing && index == output.lines.lastIndex) {
+                                                    BlinkingCaret(Signal, width = 8.dp, height = 16.dp)
+                                                }
+                                            }
                                         }
                                         // What the command was fed, counted
                                         // rather than printed.

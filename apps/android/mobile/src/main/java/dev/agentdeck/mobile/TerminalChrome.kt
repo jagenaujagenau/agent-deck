@@ -59,15 +59,26 @@ internal fun typingDurationMs(length: Int, charsPerSecond: Int): Int =
     if (charsPerSecond <= 0 || length <= 0) 0 else (length * 1000 / charsPerSecond).coerceAtLeast(16)
 
 /**
- * The text as far as it has been typed.
+ * How much of a command has printed, as whole lines plus the one in progress.
  *
- * Only what arrived after this screen opened is animated. Replaying a session's
- * whole scrollback every time it recomposes would be unreadable, and would
- * re-type the same line each time the list scrolled it back into view.
+ * A terminal prints a line at a time. Typing straight through a multi-line
+ * command instead reflows the whole block on every frame, so a wrapped command
+ * grows like a paragraph being written rather than output arriving - which is
+ * the opposite of the thing being imitated.
+ */
+internal data class TypedOutput(val lines: List<String>, val typing: Boolean)
+
+/**
+ * The command as far as it has printed.
+ *
+ * Only what arrived after this screen opened is animated. Replaying a
+ * session's whole scrollback every time it recomposes would be unreadable, and
+ * would re-type the same line each time the list scrolled it back into view.
  */
 @Composable
-internal fun typedText(text: String, animate: Boolean, speed: TerminalTypeSpeed): String {
-    if (!animate || speed.charsPerSecond <= 0 || text.isEmpty()) return text
+internal fun typedOutput(text: String, animate: Boolean, speed: TerminalTypeSpeed): TypedOutput {
+    val all = remember(text) { text.lines() }
+    if (!animate || speed.charsPerSecond <= 0 || text.isEmpty()) return TypedOutput(all, typing = false)
     val progress = remember(text, speed) { Animatable(0f) }
     LaunchedEffect(text, speed) {
         progress.snapTo(0f)
@@ -76,7 +87,27 @@ internal fun typedText(text: String, animate: Boolean, speed: TerminalTypeSpeed)
             animationSpec = tween(typingDurationMs(text.length, speed.charsPerSecond), easing = LinearEasing),
         )
     }
-    return text.take((text.length * progress.value).roundToInt())
+    // Character count across the whole command, then spent line by line, so a
+    // long line takes proportionally longer than a short one - which is what
+    // makes the rate read as one terminal working rather than each line
+    // getting an equal slice regardless of length.
+    var budget = (text.length * progress.value).roundToInt()
+    val shown = mutableListOf<String>()
+    for (line in all) {
+        if (budget <= 0) break
+        if (budget >= line.length) {
+            shown += line
+            // The newline costs a character too, which is what paces the gap
+            // between one line finishing and the next starting.
+            budget -= line.length + 1
+        } else {
+            shown += line.take(budget)
+            budget = 0
+            break
+        }
+    }
+    val done = shown.size == all.size && shown.lastOrNull() == all.lastOrNull()
+    return TypedOutput(if (shown.isEmpty()) listOf("") else shown, typing = !done)
 }
 
 /**
