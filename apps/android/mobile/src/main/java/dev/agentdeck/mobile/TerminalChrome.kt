@@ -196,3 +196,93 @@ internal data class PowerlineCell(
     val foreground: Color,
     val onClick: (() -> Unit)? = null,
 )
+
+/**
+ * What a terminal line should actually show.
+ *
+ * A heredoc that writes a file arrives as the whole file: measured on this
+ * bridge, `cat > … <<'EOF'` commands are eight thousand characters, clipped.
+ * Printing that is not showing the command, it is burying the session in the
+ * file's own contents - and the one fact worth reading, which file was
+ * written, is on the first line and then lost.
+ */
+internal sealed interface TerminalLine {
+    /**
+     * An ordinary command.
+     *
+     * `hiddenLines` is the heredoc body that follows it. Measured on one real
+     * session: 955 commands carried a heredoc, and between them 41,187 lines
+     * of payload. Printing those is not showing the session's commands, it is
+     * showing the files and scripts they happened to carry - so the command is
+     * kept and its input is counted.
+     */
+    data class Shell(val text: String, val hiddenLines: Int = 0) : TerminalLine
+
+    /** A write to a file, shown as the act rather than the payload. */
+    data class FileWrite(val verb: String, val path: String) : TerminalLine {
+        val name: String get() = path.substringAfterLast('/').ifEmpty { path }
+        /** The directory, trimmed to something that fits a phone. */
+        val parent: String
+            get() = path.substringBeforeLast('/', "").let { dir ->
+                if (dir.length <= 34) dir else "…" + dir.takeLast(33)
+            }
+    }
+}
+
+// `cat > path`, `cat >> path` - the redirect carries whether it replaces or appends.
+private val CAT_WRITE = Regex("""\bcat\s*(>>|>)\s*("[^"]+"|'[^']+'|[^\s<>|;&]+)""")
+
+// `tee path`, `tee -a path` - the flag carries it instead.
+private val TEE_WRITE = Regex("""\btee\s+(-a\s+)?("[^"]+"|'[^']+'|[^\s<>|;&]+)""")
+
+private fun unquote(value: String) = value.trim('"', '\'')
+
+/**
+ * Whether this looks like a path worth naming rather than a stream.
+ *
+ * `/dev/null` and `/dev/stdout` are redirections, not edits, and calling them
+ * an edit would be the same overclaiming this is meant to remove.
+ */
+private fun isFilePath(value: String): Boolean =
+    value.isNotBlank() && !value.startsWith("/dev/") && (value.contains('/') || value.contains('.'))
+
+/** How a command should be drawn: as itself, or as the file it writes. */
+internal fun terminalLine(command: String): TerminalLine {
+    val lines = command.lines()
+    // The heredoc opener is not always on the first line - a command that cds
+    // first and then pipes a script puts it on the second, which is the common
+    // shape here. Everything up to and including that line is the command;
+    // everything after it is what the command was fed.
+    val opener = lines.indexOfFirst { HEREDOC.containsMatchIn(it) }
+    val head = if (opener >= 0) lines.take(opener + 1).joinToString("\n") else command
+
+    CAT_WRITE.find(head)?.let { match ->
+        val path = unquote(match.groupValues[2])
+        if (isFilePath(path)) {
+            return TerminalLine.FileWrite(
+                verb = if (match.groupValues[1] == ">>") "Appending to" else "Editing",
+                path = path,
+            )
+        }
+    }
+    TEE_WRITE.find(head)?.let { match ->
+        val path = unquote(match.groupValues[2])
+        if (isFilePath(path)) {
+            return TerminalLine.FileWrite(
+                verb = if (match.groupValues[1].isNotBlank()) "Appending to" else "Editing",
+                path = path,
+            )
+        }
+    }
+
+    // Anything else with a heredoc keeps its command and drops the body. What a
+    // script writes is not worth guessing at - a piped python could do anything
+    // - but the fact that it carried input is worth saying.
+    if (opener >= 0 && lines.size > opener + 1) {
+        return TerminalLine.Shell(head, hiddenLines = lines.size - opener - 1)
+    }
+    return TerminalLine.Shell(command)
+}
+
+/** The shapes bash accepts for a heredoc tag. */
+private val HEREDOC = Regex("<<-?\\s*[\"']?[A-Za-z_][A-Za-z0-9_]*[\"']?")

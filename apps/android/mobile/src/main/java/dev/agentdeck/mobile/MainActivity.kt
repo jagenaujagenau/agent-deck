@@ -1446,6 +1446,37 @@ private fun screenCornerRadius(inset: Dp, fallback: Dp = 28.dp): Dp {
     return (radius - inset).coerceAtLeast(8.dp)
 }
 
+/**
+ * A write to a file, drawn as the act rather than its payload.
+ *
+ * Set apart from the shell around it because it is not a command anyone reads:
+ * the interesting half is which file, and the rest is the file's own contents.
+ */
+@Composable
+private fun FileWriteLine(line: TerminalLine.FileWrite, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        color = Blue.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, Blue.copy(alpha = 0.3f)),
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.EditNote, null, tint = Blue, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Row {
+                    Text(line.verb, color = Blue, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(6.dp))
+                    Text(line.name, color = Text, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                if (line.parent.isNotBlank()) {
+                    Text(line.parent, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
 /** The three dots that make a rectangle read as a window. */
 @Composable
 private fun WindowSemaphore() {
@@ -2566,15 +2597,33 @@ private fun TerminalView(
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                                 Text("\$", color = Signal, fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.width(10.dp))
-                                val full = event.command.orEmpty()
-                                val shown = typedText(full, animate = event.id !in scrollback, speed = speed)
-                                Text(shown, color = Text.copy(alpha = 0.92f), fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f))
-                                // The caret rides the end of the line while it
-                                // is still being typed, and leaves when it is
-                                // whole - which is how a terminal shows the
-                                // difference between working and finished.
-                                if (shown.length < full.length) {
-                                    BlinkingCaret(Signal, width = 8.dp, height = 16.dp)
+                                when (val line = remember(event.id, event.command) { terminalLine(event.command.orEmpty()) }) {
+                                    is TerminalLine.FileWrite -> FileWriteLine(line, Modifier.weight(1f))
+                                    is TerminalLine.Shell -> Column(Modifier.weight(1f)) {
+                                        val shown = typedText(line.text, animate = event.id !in scrollback, speed = speed)
+                                        Row {
+                                        Text(shown, color = Text.copy(alpha = 0.92f), fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f))
+                                        // The caret rides the end of the line
+                                        // while it is still being typed, and
+                                        // leaves when it is whole - which is
+                                        // how a terminal shows the difference
+                                        // between working and finished.
+                                        if (shown.length < line.text.length) {
+                                            BlinkingCaret(Signal, width = 8.dp, height = 16.dp)
+                                        }
+                                        }
+                                        // What the command was fed, counted
+                                        // rather than printed.
+                                        if (line.hiddenLines > 0) {
+                                            Text(
+                                                "+${line.hiddenLines} lines of input",
+                                                color = Muted.copy(alpha = 0.8f),
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(top = 2.dp),
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

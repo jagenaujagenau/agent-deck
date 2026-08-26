@@ -18,6 +18,8 @@ data class AgentFileChange(
     val hunks: List<AgentDiffHunk>,
     val additions: Int,
     val deletions: Int,
+    /** When this file was last touched, which is what orders the list. */
+    val lastChangedAt: String = "",
 ) {
     /** Runtimes that emit bare `-`/`+` pairs carry no positions; the gutter stays off for those. */
     val hasLineNumbers: Boolean = hunks.any { hunk -> hunk.lines.any { it.oldLine != null || it.newLine != null } }
@@ -43,9 +45,13 @@ internal fun agentFileChanges(events: List<AgentEvent>): List<AgentFileChange> =
             hunks = hunks,
             additions = hunks.sumOf { hunk -> hunk.lines.count { it.kind == DiffLineKind.Addition } },
             deletions = hunks.sumOf { hunk -> hunk.lines.count { it.kind == DiffLineKind.Deletion } },
+            lastChangedAt = hunks.maxOf { it.createdAt },
         )
     }
-    .sortedBy { it.path.lowercase() }
+    // Newest first. Alphabetical order is stable but says nothing: on a session
+    // that has touched forty files, what someone opening this tab wants is what
+    // just changed, not what starts with an "a".
+    .sortedByDescending { it.lastChangedAt }
 
 private val HUNK_HEADER = Regex("""^@@+ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@""")
 

@@ -85,3 +85,40 @@ class AgentDiffTest {
         diff = diff,
     )
 }
+class AgentDiffOrderTest {
+    private fun change(id: String, path: String, at: String) = dev.agentdeck.shared.AgentEvent(
+        id = id,
+        kind = "output",
+        summary = "Edit completed",
+        createdAt = at,
+        path = path,
+        diff = "+ added a line",
+    )
+
+    @Test
+    fun `the file that changed last comes first`() {
+        // Alphabetical is stable but says nothing. Opening this tab is asking
+        // what just changed.
+        val files = agentFileChanges(
+            listOf(
+                change("1", "a/alpha.kt", "2026-08-26T10:00:00Z"),
+                change("2", "z/zulu.kt", "2026-08-26T10:05:00Z"),
+                change("3", "m/mike.kt", "2026-08-26T10:02:00Z"),
+            ),
+        )
+        assertEquals(listOf("z/zulu.kt", "m/mike.kt", "a/alpha.kt"), files.map { it.path })
+    }
+
+    @Test
+    fun `a file touched twice is ordered by its latest touch`() {
+        val files = agentFileChanges(
+            listOf(
+                change("1", "early.kt", "2026-08-26T10:00:00Z"),
+                change("2", "other.kt", "2026-08-26T10:01:00Z"),
+                change("3", "early.kt", "2026-08-26T10:09:00Z"),
+            ),
+        )
+        assertEquals(listOf("early.kt", "other.kt"), files.map { it.path })
+        assertEquals("2026-08-26T10:09:00Z", files.first().lastChangedAt)
+    }
+}
