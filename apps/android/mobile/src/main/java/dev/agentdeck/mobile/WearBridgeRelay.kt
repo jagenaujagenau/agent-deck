@@ -20,6 +20,16 @@ object WearBridgeRelay {
     const val REFRESH_PATH = "/agent-deck/refresh"
     const val ANSWER_PATH = "/agent-deck/answer"
     const val CONTROL_RESULT_PATH = "/agent-deck/control-result"
+
+    /**
+     * The watch asking for a bridge credential it can use.
+     *
+     * Sent when the bridge turns the watch away. Until this existed the phone
+     * offered the token only from its own `onCreate`, so a watch holding a
+     * rotated one stayed refused - reporting the bridge unreachable, which it
+     * was not - until somebody happened to open the phone app.
+     */
+    const val CREDENTIAL_REQUEST_PATH = "/agent-deck/request-token"
     private val json = Json { ignoreUnknownKeys = true }
 
     fun publish(context: Context, snapshot: BridgeSnapshot) {
@@ -34,6 +44,13 @@ object WearBridgeRelay {
 
 class WearControlListenerService : WearableListenerService() {
     override fun onMessageReceived(event: MessageEvent) {
+        if (event.path == WearBridgeRelay.CREDENTIAL_REQUEST_PATH) {
+            // Answered without a bridge call: the phone already holds this, and
+            // a watch that cannot authenticate cannot be helped by asking the
+            // bridge anything on its behalf.
+            WearCredentialSync.send(this, SecureTokenStore(this).get())
+            return
+        }
         if (event.path !in setOf(WearBridgeRelay.CONTROL_PATH, WearBridgeRelay.REFRESH_PATH, WearBridgeRelay.ANSWER_PATH)) return
         runBlocking(Dispatchers.IO) {
             runCatching {

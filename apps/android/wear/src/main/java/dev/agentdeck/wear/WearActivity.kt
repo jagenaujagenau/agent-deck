@@ -112,6 +112,16 @@ class WearActivity : ComponentActivity() {
     }
 }
 
+/**
+ * Why a session's history could not be fetched.
+ *
+ * The two are not the same problem and do not have the same fix. A watch off
+ * the network cannot be helped from here; a watch holding a credential the
+ * bridge no longer accepts can ask the phone for a new one, and did not,
+ * because both failures came out of one boolean reading "could not reach".
+ */
+internal enum class HistoryFailure { Unreachable, Refused }
+
 /** Control actions that ride the command queue rather than a waiting runtime. */
 private val QUEUED_ACTIONS = setOf("pause", "resume", "stop")
 
@@ -210,10 +220,10 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
     private val _historyLoading = MutableStateFlow<String?>(null)
     val historyLoading = _historyLoading.asStateFlow()
 
-    private val _historyFailed = MutableStateFlow<String?>(null)
+    private val _historyFailed = MutableStateFlow<Pair<String, HistoryFailure>?>(null)
 
-    /** Which session could not be fetched, so "empty" is not shown for "unreachable". */
-    val historyFailed = _historyFailed.asStateFlow()
+    /** Which session could not be fetched and why, so "empty" is not shown for "refused". */
+    internal val historyFailed = _historyFailed.asStateFlow()
 
     fun loadHistory(agentId: String) = viewModelScope.launch {
         _historyLoading.value = agentId
@@ -224,18 +234,40 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         // phone's route to the bridge is not always the watch's.
         val token = SecureTokenStore(getApplication()).get()
         var loaded = false
+        // A credential the bridge refuses is worth telling apart from a bridge
+        // that is not there: an empty token counts as refused before a request
+        // is even made, because it is one.
+        var refused = token.isBlank()
         for (candidate in addresses.candidates(BuildConfig.BRIDGE_URL)) {
             repository.configure(candidate, token)
             // The tail, not the whole session: a long run's full history is
             // most of a megabyte, and only the newest of each is shown here.
-            val events = runCatching { repository.history(agentId, limit = WATCH_HISTORY_LIMIT) }
-                .getOrNull() ?: continue
+            val attempt = runCatching { repository.history(agentId, limit = WATCH_HISTORY_LIMIT) }
+            val events = attempt.getOrNull()
+            if (events == null) {
+                // The client puts the status in the message. Reaching the
+                // bridge and being turned away means the address is right and
+                // the credential is not, so the other addresses are no help.
+                if (attempt.exceptionOrNull()?.message?.contains("401") == true) {
+                    refused = true
+                    addresses.remember(candidate)
+                    break
+                }
+                continue
+            }
             addresses.remember(candidate)
             _sessionEvents.update { it + (agentId to events) }
             loaded = true
             break
         }
-        if (!loaded) _historyFailed.value = agentId
+        if (!loaded) {
+            _historyFailed.value =
+                agentId to if (refused) HistoryFailure.Refused else HistoryFailure.Unreachable
+            // The phone holds the credential this watch is missing, and sends
+            // it on its own only when someone happens to open the phone app.
+            // A watch left with a rotated token stayed broken until they did.
+            if (refused) sendToPhone(CREDENTIAL_REQUEST_PATH, ByteArray(0)) {}
+        }
         _historyLoading.value = null
     }
 
@@ -364,6 +396,8 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         const val REFRESH_PATH = "/agent-deck/refresh"
         const val CONTROL_RESULT_PATH = "/agent-deck/control-result"
         const val ANSWER_PATH = "/agent-deck/answer"
+        /** Asks the phone to send this watch a fresh bridge credential. */
+        const val CREDENTIAL_REQUEST_PATH = "/agent-deck/request-token"
     }
 }
 
@@ -436,7 +470,7 @@ private fun WearDeck(openAgentId: String? = null, vm: WearDeckViewModel = viewMo
                             onSend = { text, action -> vm.control(agent, action, text) },
                             latest = latestOf(events),
                             historyLoading = historyLoading == agent.id,
-                            historyFailed = historyFailed == agent.id,
+                            historyFailure = historyFailed?.takeIf { it.first == agent.id }?.second,
                         ) { vm.control(agent, it) }
                     }
                 }
@@ -635,7 +669,7 @@ private fun AgentDetail(
     onSend: (String, String) -> Unit,
     latest: List<LatestSection>,
     historyLoading: Boolean,
-    historyFailed: Boolean,
+    historyFailure: HistoryFailure?,
     onControl: (String) -> Unit,
 ) {
     val color = statusColor(agent.state)
@@ -794,8 +828,12 @@ private fun AgentDetail(
                 Text(
                     when {
                         historyLoading -> "Loading…"
-                        // Unreachable and empty look the same unless one says so.
-                        historyFailed -> "Could not reach the bridge"
+                        // Unreachable, refused and empty all look the same
+                        // unless each says so. The refused case is the one a
+                        // person can do something about, so it says what.
+                        historyFailure == HistoryFailure.Refused ->
+                            "This watch's access expired · open Agent Deck on your phone"
+                        historyFailure == HistoryFailure.Unreachable -> "Could not reach the bridge"
                         else -> "Nothing recorded yet"
                     },
                     color = Muted,
