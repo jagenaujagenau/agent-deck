@@ -95,8 +95,18 @@ fun remoteMessageAction(state: String, supports: (String) -> Boolean): String? =
     else -> null
 }
 
-private fun isAgentResponse(event: AgentEvent) = event.kind == "output" && !event.summary.startsWith("Remote command:") && event.tool == null && event.command == null &&
-    (event.summary == "Response" || !event.detail.isNullOrBlank() || (event.summary != "Activity" && !event.summary.endsWith(" completed")))
+private fun isAgentResponse(event: AgentEvent) =
+    // A subagent speaks exactly once, in the detail of its completion. It
+    // carries a tool ("Task") and so failed every test below, which left a
+    // session read through a subagent showing tool calls and not one word.
+    isSubagentMessage(event) ||
+        (
+            event.kind == "output" && !event.summary.startsWith("Remote command:") && event.tool == null && event.command == null &&
+                (event.summary == "Response" || !event.detail.isNullOrBlank() || (event.summary != "Activity" && !event.summary.endsWith(" completed")))
+            )
+
+private fun isSubagentMessage(event: AgentEvent) =
+    event.subagentId != null && event.tool == "Task" && !event.detail.isNullOrBlank()
 
 private fun closeInTime(first: String, second: String): Boolean = runCatching {
     Duration.between(Instant.parse(first), Instant.parse(second)).abs() < Duration.ofSeconds(10)

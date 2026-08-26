@@ -98,3 +98,41 @@ class SubagentsTest {
         assertEquals(listOf("2"), eventsOfSubagent(events, "aaa").map { it.id })
     }
 }
+
+class SubagentMessageTest {
+    private fun completion(detail: String?) = AgentEvent(
+        id = "c1",
+        kind = "output",
+        summary = "general-purpose subagent finished",
+        detail = detail,
+        createdAt = "2026-08-26T10:00:00Z",
+        tool = "Task",
+        subagentId = "aaa",
+        subagentType = "general-purpose",
+    )
+
+    @Test
+    fun `a subagent's parting message is conversation`() {
+        // It is the only thing a subagent ever says, and it arrives carrying a
+        // tool - which every other rule here treats as chatter.
+        val entries = conversationEntries(listOf(completion("Here is what I found.")))
+        assertEquals(1, entries.size)
+        assertEquals(ConversationRole.Agent, entries.single().role)
+        assertEquals("Here is what I found.", entries.single().content)
+    }
+
+    @Test
+    fun `a completion with nothing to say is not a message`() {
+        assertEquals(emptyList<ConversationEntry>(), conversationEntries(listOf(completion(null))))
+    }
+
+    @Test
+    fun `an ordinary tool event is still not a message`() {
+        val tool = AgentEvent(
+            id = "t1", kind = "output", summary = "Bash completed",
+            detail = "rendered tool call", createdAt = "2026-08-26T10:00:00Z",
+            tool = "Bash", subagentId = "aaa",
+        )
+        assertEquals(emptyList<ConversationEntry>(), conversationEntries(listOf(tool)))
+    }
+}

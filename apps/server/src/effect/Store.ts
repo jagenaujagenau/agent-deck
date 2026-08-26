@@ -112,8 +112,15 @@ export class BridgeStore extends Context.Service<
           id: row.id,
           kind: row.kind as AgentEvent["kind"],
           summary: row.summary,
-          // A tool event's detail is the rendered tool call, which no tab shows.
-          detail: row.tool ? undefined : (row.detail ?? undefined),
+          // A tool event's detail is the rendered tool call, which no tab
+          // shows - except a subagent's completion, whose detail is the only
+          // thing that subagent ever says. Dropping it with the rest meant a
+          // session read through a subagent showed its tool calls and none of
+          // its words.
+          detail:
+            row.tool && !(row.tool === "Task" && row.subagent_id)
+              ? undefined
+              : (row.detail ?? undefined),
           tool: row.tool ?? undefined,
           command: row.command === null ? undefined : clip(row.command, HISTORY_COMMAND_LIMIT),
           path: row.path ?? undefined,
@@ -133,6 +140,10 @@ export class BridgeStore extends Context.Service<
           WHERE agent_id = ${agentId}
             AND (kind = 'user' OR summary LIKE 'Remote command:%'
                  OR (kind = 'thought' AND summary = 'Received instruction')
+                 -- A subagent's parting message is conversation, not chatter.
+                 -- Left in the recency bucket it was evicted by the subagent's
+                 -- own tool calls, which outnumber it by two hundred to one.
+                 OR (tool = 'Task' AND subagent_id IS NOT NULL)
                  OR (kind = 'output' AND tool IS NULL AND command IS NULL))
           ORDER BY created_at DESC LIMIT 500`;
         const recent = yield* sql<any>`
@@ -141,13 +152,29 @@ export class BridgeStore extends Context.Service<
           WHERE agent_id = ${agentId}
           ORDER BY created_at DESC LIMIT 600`;
         const byId = new Map<string, AgentEvent>();
-        for (const event of rowsToEvents(conversation)) byId.set(event.id, event);
+        const spoken = new Set<string>();
+        for (const event of rowsToEvents(conversation)) {
+          byId.set(event.id, event);
+          spoken.add(event.id);
+        }
         for (const event of rowsToEvents(recent)) byId.set(event.id, event);
         const ordered = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-        // Trimming takes the newest, because a conversation is read from its end.
-        return limit !== undefined && limit > 0 && ordered.length > limit
-          ? ordered.slice(-limit)
-          : ordered;
+        if (limit === undefined || limit <= 0 || ordered.length <= limit) return ordered;
+        // Trim the chatter, not the conversation. Fetching them separately
+        // above is pointless if the two are then trimmed together: a session
+        // running a subagent produces tool events at two hundred to one, so a
+        // flat newest-N evicts every word said more than an hour ago - which
+        // is how a subagent's only message was lost while four hundred of its
+        // `Bash completed` lines survived.
+        const words = ordered.filter((event) => spoken.has(event.id)).slice(-limit);
+        const kept = new Set(words.map((event) => event.id));
+        const room = limit - kept.size;
+        if (room > 0) {
+          for (const event of ordered.filter((item) => !kept.has(item.id)).slice(-room)) {
+            kept.add(event.id);
+          }
+        }
+        return ordered.filter((event) => kept.has(event.id));
       }, Effect.orDie);
 
       const fileChanges = Effect.fn("BridgeStore.fileChanges")(function* (agentId: string) {
