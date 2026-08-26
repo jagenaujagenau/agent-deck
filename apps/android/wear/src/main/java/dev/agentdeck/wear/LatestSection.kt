@@ -16,10 +16,15 @@ private const val WATCH_EXCERPT = 500
 internal data class LatestSection(val label: String, val body: String, val tint: Color)
 
 /**
- * The newest message, thought and command.
+ * The newest message and thought.
  *
- * Not a conversation: a wrist is consulted rather than read, and these three
+ * Not a conversation: a wrist is consulted rather than read, and these two
  * answer "what is it doing" without any scrolling through history at all.
+ *
+ * The last shell command used to sit here too. It went because a command line
+ * is the one thing on this screen a wrist can do nothing with - not read
+ * comfortably, not act on, not correct - and it was pushing the controls that
+ * matter further down a screen that already could not fit them.
  */
 internal fun latestOf(events: List<AgentEvent>): List<LatestSection> {
     val sections = mutableListOf<LatestSection>()
@@ -29,9 +34,6 @@ internal fun latestOf(events: List<AgentEvent>): List<LatestSection> {
     }
     reasoningEvents(events).lastOrNull()?.detail?.takeIf { it.isNotBlank() }?.let {
         sections += LatestSection("REASONING", it.take(WATCH_EXCERPT), Blue)
-    }
-    events.filter { !it.command.isNullOrBlank() }.maxByOrNull { it.createdAt }?.command?.let {
-        sections += LatestSection("LAST COMMAND", it.take(WATCH_EXCERPT), Muted)
     }
     return sections
 }

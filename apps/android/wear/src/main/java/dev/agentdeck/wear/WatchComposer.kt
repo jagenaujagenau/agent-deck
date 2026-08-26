@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -45,7 +46,11 @@ internal fun WatchComposer(
         enabled = enabled,
         modifier = modifier.fillMaxWidth(),
     ) {
-        Text(label, fontSize = 13.sp)
+        // Centred, because a Wear button lays its content out from the left and
+        // this one sits at the bottom of the screen. Measured on a round 384px
+        // display the label landed at x=56-126 while the glass at that height
+        // only reaches x=111 - the word was mostly under the bezel.
+        Text(label, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
     }
     Spacer(Modifier.height(2.dp))
 }

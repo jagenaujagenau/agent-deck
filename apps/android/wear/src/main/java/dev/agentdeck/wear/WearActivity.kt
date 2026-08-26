@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.FlingBehavior
 import androidx.compose.foundation.gestures.ScrollScope
@@ -41,6 +42,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
@@ -510,9 +512,22 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
                 // app could draw a page at all, so it reported the one state a
                 // person can already see. A bridge that cannot be reached says
                 // so where it matters instead.
-                Text(page.label, color = pageColor, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                Text("${agents.size} ${if (agents.size == 1) "agent" else "agents"}", color = Muted, fontSize = 11.sp)
-                Spacer(Modifier.height(6.dp))
+                // Title and count on one line, and smaller than they were.
+                // Measured on a 384px round screen, the header ran to y=212 and
+                // the first card's text began at y=252 - two thirds of the way
+                // down, with one agent visible on a page reporting two. The
+                // count is the half worth keeping small: it is the only thing
+                // here that says there is more below the fold.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(page.label, color = pageColor, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    // Not on an empty page, where the list says "No paused
+                    // agents" directly underneath and a "0" beside the title
+                    // only says it again.
+                    if (agents.isNotEmpty()) {
+                        Text(agents.size.toString(), color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     pages.indices.forEach { index ->
                         Box(
@@ -572,8 +587,21 @@ private fun WearAgentCard(agent: Agent, label: String, onClick: () -> Unit) {
         // and a chevron together left the name too little space to be read, and
         // a full-width card on a watch already announces that it is tappable.
         Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            // The runtime's own mark, not the state's. Each page of this list
+            // already holds one state, so a state icon was identical on every
+            // card in view - 32dp of a 192dp screen saying what the page title
+            // said. The disc keeps the state colour, so nothing is lost, and
+            // the tile next door has always drawn the harness this way.
+            val harness = remember(agent.id, agent.name) { Harnesses.of(agent.id, agent.name) }
             Box(Modifier.size(32.dp).clip(CircleShape).background(color.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                Icon(statusIcon(agent.state), null, tint = color, modifier = Modifier.size(17.dp))
+                val icon = harness.icon
+                if (icon != null) {
+                    Image(painterResource(icon), harness.label, modifier = Modifier.size(18.dp))
+                } else {
+                    // A runtime that ships no mark gets its monogram rather
+                    // than an empty disc, which would read as a missing icon.
+                    Text(harness.mark, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
@@ -649,7 +677,12 @@ private fun AgentDetail(
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                 )
-                Text(agent.state.uppercase(), color = color, fontSize = 10.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
+                // "WAITING" over "APPROVAL REQUIRED" says one thing twice, and
+                // the row it costs is the one that pushes Approve off the
+                // bottom of a 384px screen. The card below carries the colour.
+                if (!wantsDecision) {
+                    Text(agent.state.uppercase(), color = color, fontSize = 10.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.Bold)
+                }
                 Spacer(Modifier.height(7.dp))
                 if (!wantsDecision) {
                     Text(
@@ -709,7 +742,11 @@ private fun AgentDetail(
         } else if (pendingQuestion != null) {
             item {
                 Text(
-                    pendingQuestion.detail ?: pendingQuestion.summary,
+                    // The summary is the question and the detail is the note
+                    // explaining it. Reading the detail put the note above the
+                    // options and never asked what they were a choice between.
+                    pendingQuestion.summary.takeIf { it.isNotBlank() && !it.equals("Question", true) }
+                        ?: pendingQuestion.detail.orEmpty(),
                     color = Amber, fontSize = 12.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                 )

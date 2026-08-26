@@ -21,24 +21,31 @@ class LatestSectionTest {
             event("2", "thought", "Reasoning", "2026-08-25T10:01:00Z", detail = "older thought"),
             event("3", "output", "Response", "2026-08-25T10:02:00Z", detail = "newest reply"),
             event("4", "thought", "Reasoning", "2026-08-25T10:03:00Z", detail = "newest thought"),
-            event("5", "output", "Bash completed", "2026-08-25T10:04:00Z", command = "bun test"),
         )
 
         val sections = latestOf(events)
-        assertEquals(listOf("LATEST MESSAGE", "REASONING", "LAST COMMAND"), sections.map { it.label })
+        assertEquals(listOf("LATEST MESSAGE", "REASONING"), sections.map { it.label })
         assertEquals("newest reply", sections[0].body)
         assertEquals("newest thought", sections[1].body)
-        assertEquals("bun test", sections[2].body)
     }
 
     @Test
     fun `leaves out what the session has not produced`() {
-        // A session that has only run commands shows one section, not three
-        // empty ones.
+        // A session that has only thought shows one section, not two empty ones.
         val sections = latestOf(
-            listOf(event("1", "output", "Bash completed", "2026-08-25T10:00:00Z", command = "ls")),
+            listOf(event("1", "thought", "Reasoning", "2026-08-25T10:00:00Z", detail = "weighing it")),
         )
-        assertEquals(listOf("LAST COMMAND"), sections.map { it.label })
+        assertEquals(listOf("REASONING"), sections.map { it.label })
+    }
+
+    @Test
+    fun `a shell command is not something a wrist can use`() {
+        // The last command used to get a section of its own. A command line is
+        // the one thing here a watch can neither read comfortably nor act on.
+        val sections = latestOf(
+            listOf(event("1", "output", "Bash completed", "2026-08-25T10:00:00Z", command = "bun test")),
+        )
+        assertEquals(emptyList<LatestSection>(), sections)
     }
 
     @Test
