@@ -29,7 +29,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS bridge_activity (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, project TEXT NOT NULL, runtime TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_file_changes (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, path TEXT, tool TEXT, diff TEXT NOT NULL, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_slash_commands (agent_id TEXT PRIMARY KEY, commands TEXT NOT NULL, updated_at TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS bridge_session_events (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT, tool TEXT, command TEXT, path TEXT, options TEXT, created_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS bridge_session_events (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT, tool TEXT, command TEXT, path TEXT, options TEXT, subagent_id TEXT, subagent_type TEXT, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS bridge_session_events_agent_idx ON bridge_session_events(agent_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS bridge_file_changes_agent_idx ON bridge_file_changes(agent_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS bridge_activity_created_idx ON bridge_activity(created_at)`,
@@ -70,6 +70,14 @@ export const BridgeSchema = Layer.effectDiscard(
       yield* sql.unsafe(
         "ALTER TABLE bridge_devices ADD COLUMN scopes TEXT NOT NULL DEFAULT 'read,control'",
       );
+    }
+
+    // Subagent attribution arrived after session events shipped, so a database
+    // created before it has the table but not the columns.
+    const eventColumns = yield* sql<{ name: string }>`PRAGMA table_info(bridge_session_events)`;
+    if (!eventColumns.some((column) => column.name === "subagent_id")) {
+      yield* sql.unsafe("ALTER TABLE bridge_session_events ADD COLUMN subagent_id TEXT");
+      yield* sql.unsafe("ALTER TABLE bridge_session_events ADD COLUMN subagent_type TEXT");
     }
 
     // Tool hooks may run from nested directories, so a fact can arrive tagged

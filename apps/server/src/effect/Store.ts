@@ -101,6 +101,8 @@ export class BridgeStore extends Context.Service<
           command: string | null;
           path: string | null;
           options: string | null;
+          subagent_id: string | null;
+          subagent_type: string | null;
           created_at: string;
         }>,
       ): ReadonlyArray<AgentEvent> =>
@@ -116,6 +118,8 @@ export class BridgeStore extends Context.Service<
           command: row.command === null ? undefined : clip(row.command, HISTORY_COMMAND_LIMIT),
           path: row.path ?? undefined,
           options: parseOptions(row.options),
+          subagentId: row.subagent_id ?? undefined,
+          subagentType: row.subagent_type ?? undefined,
           createdAt: row.created_at,
         }));
 
@@ -124,7 +128,7 @@ export class BridgeStore extends Context.Service<
         // outnumber messages by an order of magnitude, so a flat "most recent
         // N" would keep the chatter and drop the conversation.
         const conversation = yield* sql<any>`
-          SELECT id, kind, summary, detail, tool, command, path, options, created_at
+          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, created_at
           FROM bridge_session_events
           WHERE agent_id = ${agentId}
             AND (kind = 'user' OR summary LIKE 'Remote command:%'
@@ -132,7 +136,7 @@ export class BridgeStore extends Context.Service<
                  OR (kind = 'output' AND tool IS NULL AND command IS NULL))
           ORDER BY created_at DESC LIMIT 500`;
         const recent = yield* sql<any>`
-          SELECT id, kind, summary, detail, tool, command, path, options, created_at
+          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, created_at
           FROM bridge_session_events
           WHERE agent_id = ${agentId}
           ORDER BY created_at DESC LIMIT 600`;

@@ -288,12 +288,14 @@ export class BridgeState extends Context.Service<
         );
 
       const persistSessionEvent = (agentId: string, event: AgentEvent) =>
-        sql`INSERT INTO bridge_session_events (id, agent_id, kind, summary, detail, tool, command, path, options, created_at)
+        sql`INSERT INTO bridge_session_events (id, agent_id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, created_at)
             VALUES (${event.id}, ${agentId}, ${event.kind}, ${event.summary}, ${event.detail ?? null},
                     ${event.tool ?? null}, ${event.command ?? null}, ${event.path ?? null},
-                    ${event.options?.length ? JSON.stringify(event.options) : null}, ${event.createdAt})
+                    ${event.options?.length ? JSON.stringify(event.options) : null},
+                    ${event.subagentId ?? null}, ${event.subagentType ?? null}, ${event.createdAt})
             ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, summary = excluded.summary, detail = excluded.detail,
-              tool = excluded.tool, command = excluded.command, path = excluded.path, options = excluded.options`.pipe(
+              tool = excluded.tool, command = excluded.command, path = excluded.path, options = excluded.options,
+              subagent_id = excluded.subagent_id, subagent_type = excluded.subagent_type`.pipe(
           Effect.orDie,
         );
 

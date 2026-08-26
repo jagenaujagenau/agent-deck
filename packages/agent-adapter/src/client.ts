@@ -72,6 +72,9 @@ export type AgentEventInput = {
   command?: string;
   diff?: string;
   options?: string[];
+  /** Which subagent produced this, where a subagent did. */
+  subagentId?: string;
+  subagentType?: string;
 };
 
 export type RemoteCommand = {

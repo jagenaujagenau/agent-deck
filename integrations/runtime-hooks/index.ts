@@ -292,6 +292,13 @@ const publish = (
     kind,
     summary: clip(summary, 120),
     detail: detail ? clipMultiline(detail) : undefined,
+    // Claude Code tags every hook fired inside a subagent with that subagent's
+    // own id and type, and this dropped both - so three subagents working at
+    // once arrived as one undifferentiated stream in the parent, which is what
+    // made a busy session unreadable. Absent on the parent's own calls, which
+    // is exactly the distinction wanted.
+    ...(input.agentId ? { subagentId: input.agentId } : {}),
+    ...(input.agentType ? { subagentType: input.agentType } : {}),
     ...extra,
   });
 

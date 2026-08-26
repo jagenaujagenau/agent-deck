@@ -112,6 +112,9 @@ import dev.agentdeck.shared.ConversationDays
 import dev.agentdeck.shared.Harnesses
 import dev.agentdeck.shared.Harness
 import dev.agentdeck.shared.agentCardActivity
+import dev.agentdeck.shared.SubagentRun
+import dev.agentdeck.shared.eventsOfSubagent
+import dev.agentdeck.shared.subagentRuns
 import dev.agentdeck.shared.deliveryNotice
 
 private val Ink = Color(0xFF090C10)
@@ -1480,15 +1483,31 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
         val merged = mergeSessionEvents(sessionHistory, agent.events)
         if (merged === agent.events) agent else agent.copy(events = merged)
     }
+    // Which subagent is being read, or the whole session when null. A session
+    // that farms work out to three subagents reported their tool calls mixed
+    // into its own, so "what is it doing" had no answer smaller than all of it.
+    var lens by rememberSaveable(agent.id) { mutableStateOf<String?>(null) }
+    var lensPickerOpen by rememberSaveable(agent.id) { mutableStateOf(false) }
+    val runs = remember(sessionAgent.events) { subagentRuns(sessionAgent.events) }
+    // A subagent that has left the retained window is no longer a lens.
+    LaunchedEffect(runs, lens) { if (lens != null && runs.none { it.id == lens }) lens = null }
+    val activeRun = runs.firstOrNull { it.id == lens }
+    // The tabs are handed a session narrowed to one subagent's work, so chat,
+    // reasoning, changes and terminal all read as that subagent without a
+    // second set of screens existing.
+    val viewedAgent = remember(sessionAgent, lens) {
+        lens?.let { id -> sessionAgent.copy(events = eventsOfSubagent(sessionAgent.events, id)) }
+            ?: sessionAgent
+    }
     val pendingQuestion = latestEvent(sessionAgent) { it.kind == "question" }?.takeIf { agent.state == "waiting" }
     val harness = harnessFor(agent)
     val provider = providerFor(agent)
     val stateColor = statusColor(agent.state)
     val activity = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { agentCardActivity(agent) }
-    val reasoningCount = remember(sessionAgent.events) { reasoningEvents(sessionAgent.events).size }
+    val reasoningCount = remember(viewedAgent.events) { reasoningEvents(viewedAgent.events).size }
     // Prefer the bridge's full history; fall back to whatever the live window still holds while it loads.
     val fileChanges = remember(sessionChanges) { agentFileChanges(sessionChanges) }
-    val terminalCount = remember(sessionAgent.events) { terminalEvents(sessionAgent.events).size }
+    val terminalCount = remember(viewedAgent.events) { terminalEvents(viewedAgent.events).size }
     val hasAttention = pendingApproval != null || pendingQuestion != null
     val isPaused = agent.state == "paused"
     // Live events already merge over the fetched history, so a refetch is only needed to recover
@@ -1530,23 +1549,59 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                     }
                     HeaderPill(modifier = Modifier.weight(1f)) {
                         Row(
-                            modifier = Modifier.padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+                            modifier = Modifier
+                                // Only tappable when there is something behind
+                                // it. A control that opens an empty list is
+                                // worse than no control.
+                                .then(
+                                    if (runs.isEmpty()) Modifier
+                                    else Modifier.clickable { lensPickerOpen = true },
+                                )
+                                .padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             HarnessMark(harness, running = agent.state == "running", statusColor = stateColor, diameter = 42.dp)
                             Spacer(Modifier.width(9.dp))
-                            Column {
-                                Text(agent.project, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Column(Modifier.weight(1f, fill = false)) {
+                                Text(
+                                    activeRun?.type ?: agent.project,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = if (activeRun != null) Blue else Text,
+                                )
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    StatusLabel(agent.state, stateColor)
-                                    // A waiting session's activity is already
-                                    // named by the banner, or by the card in
-                                    // the chat behind it. Repeating it here
-                                    // only had room to say "Review requi…".
-                                    if (!hasAttention) {
+                                    if (activeRun != null) {
+                                        // Under a lens the state word belongs
+                                        // to the subagent, not the session.
+                                        StatusLabel(
+                                            if (activeRun.finished) "done" else "running",
+                                            if (activeRun.finished) Muted else Blue,
+                                        )
                                         Text(" · ", color = Muted.copy(alpha = 0.65f), fontSize = 11.sp)
-                                        Text(activity, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(agent.project, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    } else {
+                                        StatusLabel(agent.state, stateColor)
+                                        // A waiting session's activity is already
+                                        // named by the banner, or by the card in
+                                        // the chat behind it. Repeating it here
+                                        // only had room to say "Review requi…".
+                                        if (!hasAttention) {
+                                            Text(" · ", color = Muted.copy(alpha = 0.65f), fontSize = 11.sp)
+                                            Text(activity, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
                                     }
+                                }
+                            }
+                            if (runs.isNotEmpty()) {
+                                Spacer(Modifier.width(6.dp))
+                                // How many, and that there is something to open.
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.AccountTree, null, tint = Blue, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(3.dp))
+                                    Text(runs.size.toString(), color = Blue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Icon(Icons.Rounded.ExpandMore, null, tint = Muted, modifier = Modifier.size(15.dp))
                                 }
                             }
                         }
@@ -1602,7 +1657,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
             }
             when (mode) {
                 AgentViewMode.Responses -> ResponsesView(
-                    agent = sessionAgent,
+                    agent = viewedAgent,
                     busy = busy,
                     pendingApproval = pendingApproval,
                     pendingQuestion = pendingQuestion,
@@ -1613,14 +1668,21 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                     onControl = onControl,
                     onQuestionAnswer = onQuestionAnswer,
                     autoFocus = tabChosen,
+                    lensed = activeRun != null,
                     modifier = Modifier.weight(1f),
                 )
-                AgentViewMode.Reasoning -> ReasoningView(sessionAgent, Modifier.weight(1f).navigationBarsPadding())
+                AgentViewMode.Reasoning -> ReasoningView(viewedAgent, Modifier.weight(1f).navigationBarsPadding())
                 AgentViewMode.Diff -> DiffView(fileChanges, changesLoaded, Modifier.weight(1f).navigationBarsPadding())
-                AgentViewMode.Terminal -> TerminalView(sessionAgent, busy, commandError, commandNotice, supports, onControl, tabChosen, Modifier.weight(1f))
+                AgentViewMode.Terminal -> TerminalView(viewedAgent, busy, commandError, commandNotice, supports, onControl, tabChosen, Modifier.weight(1f))
             }
         }
     }
+    if (lensPickerOpen) SubagentPicker(
+        runs = runs,
+        selected = lens,
+        onPick = { lens = it; lensPickerOpen = false },
+        onDismiss = { lensPickerOpen = false },
+    )
     if (confirmingStop) AlertDialog(
         onDismissRequest = { confirmingStop = false },
         icon = { Icon(Icons.Rounded.StopCircle, null, tint = Danger) },
@@ -1637,6 +1699,84 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
         },
         dismissButton = { TextButton(onClick = { confirmingStop = false }) { Text("Cancel") } },
     )
+}
+
+/**
+ * Which subagent to read, or the whole session.
+ *
+ * A list rather than a switch, because a session can be running several at
+ * once and they are told apart by what they are doing, not by their ids.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SubagentPicker(
+    runs: List<SubagentRun>,
+    selected: String?,
+    onPick: (String?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface) {
+        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp)) {
+            Text("Subagents", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "Work this session handed to an agent of its own.",
+                color = Muted,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            Spacer(Modifier.height(14.dp))
+            SubagentRow(
+                title = "Whole session",
+                subtitle = "Everything, including this session's own work",
+                tint = Signal,
+                running = false,
+                selected = selected == null,
+            ) { onPick(null) }
+            runs.forEach { run ->
+                Spacer(Modifier.height(8.dp))
+                SubagentRow(
+                    title = run.type,
+                    subtitle = run.activity,
+                    tint = Blue,
+                    running = !run.finished,
+                    selected = selected == run.id,
+                ) { onPick(run.id) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubagentRow(
+    title: String,
+    subtitle: String,
+    tint: Color,
+    running: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) tint.copy(alpha = 0.13f) else SurfaceRaised,
+        border = if (selected) BorderStroke(1.dp, tint.copy(alpha = 0.4f)) else null,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(if (running) tint else Muted.copy(alpha = 0.5f)))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(2.dp))
+                Text(subtitle, color = Muted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (selected) {
+                Spacer(Modifier.width(8.dp))
+                Icon(Icons.Rounded.Check, "Showing this", tint = tint, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
 }
 
 /** The day a run of messages belongs to, floating over the conversation. */
@@ -1732,6 +1872,8 @@ private fun ResponsesView(
     onControl: (String, String?) -> Unit,
     onQuestionAnswer: (AgentEvent, String) -> Unit,
     autoFocus: Boolean,
+    /** Reading one subagent rather than the session. */
+    lensed: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val entries = remember(agent.events) { conversationEntries(agent.events) }
@@ -1794,7 +1936,10 @@ private fun ResponsesView(
                 verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
             ) {
             if (entries.isEmpty() && pendingApproval == null && pendingQuestion == null) item {
-                EmptyConversation(supportsMessaging = listOf("prompt", "steer", "follow_up").any(supports))
+                EmptyConversation(
+                    supportsMessaging = listOf("prompt", "steer", "follow_up").any(supports),
+                    lensed = lensed,
+                )
             }
             itemsIndexed(entries, key = { _, entry -> "message:${entry.event.id}" }) { index, entry ->
                 // A session open since yesterday reads as one unbroken run, and
@@ -1842,7 +1987,11 @@ private fun ResponsesView(
                 Text("New messages")
             }
         }
-        MessageComposer(agent, busy, commandError, commandNotice, supports, slashCommands, onControl, autoFocus)
+        // No composer under a lens. A message goes to the session, never to
+        // one of its subagents, and offering the field here says otherwise.
+        if (!lensed) {
+            MessageComposer(agent, busy, commandError, commandNotice, supports, slashCommands, onControl, autoFocus)
+        }
     }
 }
 
@@ -1876,15 +2025,26 @@ private fun ConversationBubble(entry: ConversationEntry, provider: ProviderIdent
 }
 
 @Composable
-private fun EmptyConversation(supportsMessaging: Boolean) {
+private fun EmptyConversation(supportsMessaging: Boolean, lensed: Boolean = false) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Icon(Icons.Rounded.Forum, null, tint = Muted, modifier = Modifier.size(30.dp))
-        Text("No responses yet", fontWeight = FontWeight.SemiBold)
-        Text(if (supportsMessaging) "Send a message to begin." else "This runtime is monitoring-only.", color = Muted, fontSize = 13.sp)
+        Text(if (lensed) "This subagent hasn't spoken" else "No responses yet", fontWeight = FontWeight.SemiBold)
+        Text(
+            when {
+                // "Send a message to begin" is not true of a subagent: it is
+                // not addressable, and most of them only ever run tools.
+                lensed -> "Its work is under Changes and Terminal."
+                supportsMessaging -> "Send a message to begin."
+                else -> "This runtime is monitoring-only."
+            },
+            color = Muted,
+            fontSize = 13.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
     }
 }
 

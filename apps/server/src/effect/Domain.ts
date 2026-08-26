@@ -40,6 +40,16 @@ export const AgentEvent = Schema.Struct({
   command: optionalField(Schema.String),
   diff: optionalField(Schema.String),
   options: optionalField(Schema.Array(Schema.String)),
+  /**
+   * Which subagent did this, where one did.
+   *
+   * Claude Code tags every tool hook made inside a subagent with its own id and
+   * type. The adapter used to drop both, so a subagent's work arrived in the
+   * parent's stream indistinguishable from the parent's own - which is exactly
+   * what made a session running three of them unreadable.
+   */
+  subagentId: optionalField(Schema.String),
+  subagentType: optionalField(Schema.String),
   createdAt: Schema.String,
 });
 export interface AgentEvent extends Schema.Schema.Type<typeof AgentEvent> {}
@@ -55,6 +65,8 @@ export const AgentEventInput = Schema.Struct({
   command: optionalField(Schema.String),
   diff: optionalField(Schema.String),
   options: optionalField(Schema.Array(Schema.String)),
+  subagentId: optionalField(Schema.String),
+  subagentType: optionalField(Schema.String),
 });
 export interface AgentEventInput extends Schema.Schema.Type<typeof AgentEventInput> {}
 

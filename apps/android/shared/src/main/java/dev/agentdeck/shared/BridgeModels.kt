@@ -87,6 +87,15 @@ data class AgentEvent(
     val command: String? = null,
     val diff: String? = null,
     val options: List<String> = emptyList(),
+    /**
+     * Which subagent produced this, where a subagent did.
+     *
+     * Absent on the parent's own work, which is the whole distinction: a
+     * session running three subagents used to report their tool calls mixed
+     * into its own with nothing to tell them apart.
+     */
+    val subagentId: String? = null,
+    val subagentType: String? = null,
 )
 
 @Serializable
