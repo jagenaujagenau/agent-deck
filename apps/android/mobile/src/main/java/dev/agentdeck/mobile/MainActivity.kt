@@ -13,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.viewModels
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
@@ -136,7 +137,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         targetAgentId = intent.data?.takeIf { it.scheme == "agentdeck" && it.host == "agent" }?.lastPathSegment
-        enableEdgeToEdge()
+        // Both system bars belong to the app's world, and that world is a
+        // single committed dark one. The argument-less call takes its icon
+        // colour from the *system* theme instead, so a phone set to light drew
+        // dark status icons over a near-black app - 1.07:1, unreadable, on
+        // every screen. It only ever looked right on a dark-themed phone.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
@@ -338,6 +347,11 @@ private fun AgentDeckTheme(content: @Composable () -> Unit) {
             onSurface = Text,
             surfaceVariant = SurfaceRaised,
             onSurfaceVariant = Muted,
+            // Selected chips read their fill from here. Left unset they fell
+            // back to Material's default lavender - the one hue on screen that
+            // belonged to no part of this palette.
+            secondaryContainer = Signal.copy(alpha = 0.16f),
+            onSecondaryContainer = Signal,
             outline = Line,
             error = Danger,
         ),
@@ -397,6 +411,7 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
             onControl = { action, value -> vm.control(openAgent, action, value) },
             onQuestionAnswer = { event, answer -> vm.answerQuestion(openAgent, event, answer) },
             sessionChanges = sessionChanges[openAgent.id].orEmpty(),
+            changesLoaded = sessionChanges.containsKey(openAgent.id),
             onLoadChanges = { vm.loadChanges(openAgent.id) },
             sessionHistory = sessionHistory[openAgent.id].orEmpty(),
             onLoadHistory = { vm.loadHistory(openAgent.id) },
@@ -587,7 +602,12 @@ private fun AnalyticsScreen(
     }
 
     if (data == null) {
-        Box(modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+        Box(
+            modifier.padding(24.dp),
+            // The skeleton stands in for content that starts at the top; centring
+            // it left the screen with a header-shaped hole above it.
+            contentAlignment = if (state is AnalyticsState.Failed) Alignment.Center else Alignment.TopCenter,
+        ) {
             if (state is AnalyticsState.Failed) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Icon(Icons.Rounded.QueryStats, null, tint = Danger, modifier = Modifier.size(32.dp))
@@ -612,7 +632,7 @@ private fun AnalyticsScreen(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Usage", style = MaterialTheme.typography.headlineLarge)
-                Text("Agent activity and spend across ${range.label.lowercase()}", color = Muted)
+                Text("Agent activity and spend over the past ${range.label.lowercase()}", color = Muted)
             }
         }
         item {
@@ -657,7 +677,11 @@ private fun UsageSummary(summary: AnalyticsSummary) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
                     Text("PRICED COST", color = Muted, fontSize = 11.sp, letterSpacing = 1.1.sp, fontWeight = FontWeight.Bold)
-                    Text(formatMoney(summary.costUsd), fontSize = 38.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold, color = Amber)
+                    // Plain, not amber: amber means something wants a person
+                    // everywhere else in the deck, and a bill is not a request.
+                    // Size already makes this the headline, and it leaves blue
+                    // as the single accent in the card.
+                    Text(formatMoney(summary.costUsd), fontSize = 38.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold, color = Text)
                     if (summary.costCoveragePercent < 99.9) Text("${summary.costCoveragePercent.toInt()}% token coverage · ${formatCompact(summary.unpricedTokens)} unpriced", color = Muted, fontSize = 11.sp)
                 }
                 Column(horizontalAlignment = Alignment.End) {
@@ -745,7 +769,7 @@ private fun ActivityHeatmap(days: List<ActivityDay>, range: AnalyticsRange) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Activity", style = MaterialTheme.typography.titleMedium)
-                Text("${days.sumOf { it.count }} events", color = Muted, fontSize = 12.sp)
+                Text(plural(days.sumOf { it.count }, "event"), color = Muted, fontSize = 12.sp)
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 weeks.forEach { week ->
@@ -812,7 +836,7 @@ private fun ProjectUsageRow(item: ProjectUsage, totalTokens: Long) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) {
                 Text(item.project, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${item.sessions} sessions · ${item.events} events", color = Muted, fontSize = 12.sp)
+                Text("${plural(item.sessions, "session")} · ${plural(item.events, "event")}", color = Muted, fontSize = 12.sp)
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(formatCompact(item.tokens), color = Blue, fontWeight = FontWeight.SemiBold)
@@ -824,6 +848,9 @@ private fun ProjectUsageRow(item: ProjectUsage, totalTokens: Long) {
             modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
             color = Signal,
             trackColor = Muted.copy(alpha = 0.12f),
+            // Material parks a dot at the end of the track by default. On a
+            // 4dp hairline it reads as a rendering artifact, not a marker.
+            drawStopIndicator = {},
         )
     }
 }
@@ -834,10 +861,14 @@ private fun RuntimeUsageCard(item: RuntimeUsage) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(item.runtime.replaceFirstChar { it.uppercase() }, color = Muted, fontSize = 12.sp)
             Text(formatCompact(item.tokens), fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Blue)
-            Text("${formatMoney(item.costUsd)} · ${item.events} events", color = Muted, fontSize = 11.sp)
+            Text("${formatMoney(item.costUsd)} · ${plural(item.events, "event")}", color = Muted, fontSize = 11.sp)
         }
     }
 }
+
+/** "1 session", not "1 sessions". */
+private fun plural(count: Int, singular: String, many: String = singular + "s") =
+    "$count ${if (count == 1) singular else many}"
 
 private fun formatCompact(value: Long): String = when {
     value >= 1_000_000_000 -> String.format("%.1fB", value / 1_000_000_000.0)
@@ -970,16 +1001,32 @@ private fun latestEvent(agent: Agent, predicate: (AgentEvent) -> Boolean = { tru
 
 private fun usefulTask(agent: Agent): String {
     if (agent.state == "waiting") {
-        agent.pendingApproval?.let { return "Approval · ${it.detail}" }
+        // No "Approval · " or "Question · " prefix: the status chip in the
+        // card's own corner already says which of the two this is, and the
+        // prefix cost a third of the line that had the detail in it.
+        agent.pendingApproval?.let { return it.detail }
         val latest = latestEvent(agent) { it.kind == "question" }
-        if (latest != null) return latest.detail?.let { "Question · $it" } ?: "Agent has a question"
+        if (latest != null) {
+            // The summary is the question; the detail is the note explaining
+            // it. Reading the detail put "Stripe retries are idempotent by key"
+            // on the card and hid "Which payment provider should the retry
+            // path use?" - the only part anyone can act on.
+            return latest.summary.takeIf { it.isNotBlank() && !it.equals("Question", true) }
+                ?: latest.detail
+                ?: "Agent has a question"
+        }
         return agent.task
     }
     if (agent.state == "running" || agent.state == "paused") {
         val receivedInstruction = latestEvent(agent) {
             it.kind == "thought" && it.summary == "Received instruction" && !it.detail.isNullOrBlank()
         }?.detail
-        val objective = agent.objective?.takeIf { it.isNotBlank() } ?: receivedInstruction
+        // Falling back to the last thing a person actually asked for. Without
+        // it the headline restated the activity row below it verbatim -
+        // "Edit finished · continuing" over "Edit finished" - and the card
+        // spent two lines saying one thing.
+        val lastInstruction = latestEvent(agent) { it.kind == "user" && !it.detail.isNullOrBlank() }?.detail
+        val objective = agent.objective?.takeIf { it.isNotBlank() } ?: receivedInstruction ?: lastInstruction
         if (!objective.isNullOrBlank()) return objective
     }
     if (agent.state == "offline") {
@@ -993,6 +1040,25 @@ private fun usefulTask(agent: Agent): String {
     if (agent.task.endsWith(" completed")) return "${agent.task.removeSuffix(" completed")} finished · continuing"
     if (agent.task.startsWith("Using ")) return "Running ${agent.task.removePrefix("Using ")}"
     return agent.task
+}
+
+/**
+ * Whether the activity row would only say the headline again.
+ *
+ * Both are derived from `agent.task` whenever there is no instruction to show,
+ * and they dress it differently - "Running Read" over "Using Read", "Grep
+ * finished · continuing" over "Grep finished". Comparing the strings misses
+ * that; comparing what they are about catches it.
+ */
+private fun restatesHeadline(headline: String, activity: String): Boolean {
+    fun core(value: String) = value.lowercase()
+        .substringBefore(" · ")
+        .removePrefix("running ")
+        .removePrefix("using ")
+        .removeSuffix(" finished")
+        .removeSuffix(" completed")
+        .trim()
+    return core(headline) == core(activity)
 }
 
 @Composable
@@ -1055,6 +1121,11 @@ private fun AgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, on
     val scale by animateFloatAsState(if (pressed) 0.96f else 1f, tween(120), label = "card-press")
     val progress by animateFloatAsState((agent.progress ?: 0.0).toFloat(), label = "agent-progress")
     val activity = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { agentCardActivity(agent) }
+    val headline = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { usefulTask(agent) }
+    // With no instruction to show, the headline falls back to describing the
+    // current step - which is what the activity row underneath already says.
+    // Show the row only when it adds something.
+    val showActivity = !restatesHeadline(headline, activity)
     val reasoningPreview = remember(agent.state, agent.events) { latestReasoningPreview(agent) }
     Surface(
         modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }
@@ -1077,7 +1148,7 @@ private fun AgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, on
             }
             Column(Modifier.heightIn(min = 40.dp)) {
                 Text(
-                    usefulTask(agent),
+                    headline,
                     color = if (homeState.attention) statusColor else Text.copy(alpha = 0.9f),
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
@@ -1092,7 +1163,9 @@ private fun AgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, on
                     }
                 }
             }
-            Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterStart) {
+            // Nothing reserved when there is nothing to draw: an empty row of
+            // reserved height reads as a missing element rather than a shorter card.
+            if (agent.progress != null || showActivity) Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterStart) {
                 if (agent.progress != null) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         LinearProgressIndicator(
@@ -1100,11 +1173,12 @@ private fun AgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, on
                             modifier = Modifier.weight(1f).height(4.dp).clip(CircleShape),
                             color = statusColor,
                             trackColor = Line,
+                            drawStopIndicator = {},
                         )
                         Spacer(Modifier.width(9.dp))
                         Text("${(progress * 100).roundToInt()}%", color = Muted, fontSize = 11.sp)
                     }
-                } else {
+                } else if (showActivity) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             when (homeState) {
@@ -1367,8 +1441,13 @@ private fun StatusLabel(state: String, color: Color) {
 private enum class AgentViewMode { Responses, Reasoning, Diff, Terminal }
 
 @Composable
-private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit) {
+private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit) {
     var mode by rememberSaveable(agent.id) { mutableStateOf(AgentViewMode.Responses) }
+    // Opening a session is a request to read it, not to write to it. Focusing
+    // the composer on arrival raised the keyboard over the lower half of the
+    // conversation before anyone had seen it. Switching *to* a typing surface
+    // is the deliberate act, so only that arms the focus.
+    var tabChosen by rememberSaveable(agent.id) { mutableStateOf(false) }
     var confirmingStop by rememberSaveable(agent.id) { mutableStateOf(false) }
     val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
     val pendingApproval = agent.pendingApproval?.takeIf { agent.state == "waiting" }
@@ -1385,8 +1464,6 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     val activity = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { agentCardActivity(agent) }
     val reasoningCount = remember(sessionAgent.events) { reasoningEvents(sessionAgent.events).size }
     // Prefer the bridge's full history; fall back to whatever the live window still holds while it loads.
-    var changesLoaded by remember(agent.id) { mutableStateOf(false) }
-    LaunchedEffect(sessionChanges) { if (sessionChanges.isNotEmpty()) changesLoaded = true }
     val fileChanges = remember(sessionChanges) { agentFileChanges(sessionChanges) }
     val terminalCount = remember(sessionAgent.events) { terminalEvents(sessionAgent.events).size }
     val hasAttention = pendingApproval != null || pendingQuestion != null
@@ -1439,8 +1516,14 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                                 Text(agent.project, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     StatusLabel(agent.state, stateColor)
-                                    Text(" · ", color = Muted.copy(alpha = 0.65f), fontSize = 11.sp)
-                                    Text(activity, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    // A waiting session's activity is already
+                                    // named by the banner, or by the card in
+                                    // the chat behind it. Repeating it here
+                                    // only had room to say "Review requi…".
+                                    if (!hasAttention) {
+                                        Text(" · ", color = Muted.copy(alpha = 0.65f), fontSize = 11.sp)
+                                        Text(activity, color = Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                             }
                         }
@@ -1465,7 +1548,10 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                         }
                     }
                 }
-                    if (hasAttention) {
+                    // Only worth a banner from a tab that cannot see the
+                    // thing. On Chat the approval card is already on screen,
+                    // and "Review in Chat" pointed at itself.
+                    if (hasAttention && mode != AgentViewMode.Responses) {
                         Surface(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).clip(RoundedCornerShape(12.dp)).clickable { mode = AgentViewMode.Responses },
                             color = Amber.copy(alpha = 0.10f),
@@ -1485,10 +1571,10 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                     PrimaryTabRow(selectedTabIndex = mode.ordinal, containerColor = Color.Transparent, divider = {}) {
                         // The same icons the views themselves already use for
                         // these ideas, so the tab and the thing it opens agree.
-                        Tab(selected = mode == AgentViewMode.Responses, onClick = { mode = AgentViewMode.Responses }, text = { SessionTabLabel(Icons.Rounded.Forum, "Chat", attention = hasAttention) })
-                        Tab(selected = mode == AgentViewMode.Reasoning, onClick = { mode = AgentViewMode.Reasoning }, text = { SessionTabLabel(Icons.Rounded.Psychology, "Reasoning", reasoningCount) })
-                        Tab(selected = mode == AgentViewMode.Diff, onClick = { mode = AgentViewMode.Diff }, text = { SessionTabLabel(Icons.Rounded.Difference, "Changes", fileChanges.size) })
-                        Tab(selected = mode == AgentViewMode.Terminal, onClick = { mode = AgentViewMode.Terminal }, text = { SessionTabLabel(Icons.Rounded.Terminal, "Terminal", terminalCount) })
+                        Tab(selected = mode == AgentViewMode.Responses, onClick = { mode = AgentViewMode.Responses; tabChosen = true }, text = { SessionTabLabel(Icons.Rounded.Forum, "Chat", attention = hasAttention) })
+                        Tab(selected = mode == AgentViewMode.Reasoning, onClick = { mode = AgentViewMode.Reasoning; tabChosen = true }, text = { SessionTabLabel(Icons.Rounded.Psychology, "Reasoning", reasoningCount) })
+                        Tab(selected = mode == AgentViewMode.Diff, onClick = { mode = AgentViewMode.Diff; tabChosen = true }, text = { SessionTabLabel(Icons.Rounded.Difference, "Changes", fileChanges.size) })
+                        Tab(selected = mode == AgentViewMode.Terminal, onClick = { mode = AgentViewMode.Terminal; tabChosen = true }, text = { SessionTabLabel(Icons.Rounded.Terminal, "Terminal", terminalCount) })
                     }
             }
             when (mode) {
@@ -1503,11 +1589,12 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                     slashCommands = slashCommands,
                     onControl = onControl,
                     onQuestionAnswer = onQuestionAnswer,
+                    autoFocus = tabChosen,
                     modifier = Modifier.weight(1f),
                 )
                 AgentViewMode.Reasoning -> ReasoningView(sessionAgent, Modifier.weight(1f).navigationBarsPadding())
                 AgentViewMode.Diff -> DiffView(fileChanges, changesLoaded, Modifier.weight(1f).navigationBarsPadding())
-                AgentViewMode.Terminal -> TerminalView(sessionAgent, busy, commandError, commandNotice, supports, onControl, Modifier.weight(1f))
+                AgentViewMode.Terminal -> TerminalView(sessionAgent, busy, commandError, commandNotice, supports, onControl, tabChosen, Modifier.weight(1f))
             }
         }
     }
@@ -1621,6 +1708,7 @@ private fun ResponsesView(
     slashCommands: List<SlashCommand>,
     onControl: (String, String?) -> Unit,
     onQuestionAnswer: (AgentEvent, String) -> Unit,
+    autoFocus: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val entries = remember(agent.events) { conversationEntries(agent.events) }
@@ -1677,7 +1765,10 @@ private fun ResponsesView(
                 state = listState,
                 modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (initialPositionApplied || initialLastItem < 0) 1f else 0f },
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                // Bottom-aligned, the way every messaging app draws one: a
+                // short conversation rests against the composer instead of
+                // hanging from the top with a screen of void underneath.
+                verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
             ) {
             if (entries.isEmpty() && pendingApproval == null && pendingQuestion == null) item {
                 EmptyConversation(supportsMessaging = listOf("prompt", "steer", "follow_up").any(supports))
@@ -1728,7 +1819,7 @@ private fun ResponsesView(
                 Text("New messages")
             }
         }
-        MessageComposer(agent, busy, commandError, commandNotice, supports, slashCommands, onControl)
+        MessageComposer(agent, busy, commandError, commandNotice, supports, slashCommands, onControl, autoFocus)
     }
 }
 
@@ -1804,13 +1895,15 @@ private fun SlashCommandPicker(matches: List<SlashCommand>, onPick: (SlashComman
 }
 
 @Composable
-private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit) {
+private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit, autoFocus: Boolean) {
     var message by rememberSaveable(agent.id) { mutableStateOf("") }
     val composerFocus = remember { FocusRequester() }
     // Switching to a view that can be typed into means wanting to type into it.
-    // Guarded because the node is not attached on the first frame, and a focus
-    // request against nothing throws rather than waiting.
-    LaunchedEffect(Unit) { runCatching { composerFocus.requestFocus() } }
+    // Arriving at the session does not - so this waits for a deliberate tab
+    // choice rather than firing on first composition. Guarded because the node
+    // is not attached on the first frame, and a focus request against nothing
+    // throws rather than waiting.
+    LaunchedEffect(Unit) { if (autoFocus) runCatching { composerFocus.requestFocus() } }
     val action = remoteMessageAction(agent.state, supports)
     if (action == null) {
         Text("This runtime does not accept remote messages.", color = Muted, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(16.dp))
@@ -1988,7 +2081,15 @@ private fun DiffView(files: List<AgentFileChange>, loaded: Boolean, modifier: Mo
         ) {
             Icon(Icons.Rounded.Difference, null, tint = Muted, modifier = Modifier.size(17.dp))
             Spacer(Modifier.width(8.dp))
-            Text("${files.size} ${if (files.size == 1) "file" else "files"} changed", color = Text.copy(alpha = 0.86f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            // Claiming "0 files changed" while the fetch is still in flight
+            // states a result the screen does not have yet. The body says it is
+            // loading; this bar just holds the count until there is one.
+            Text(
+                if (!loaded && files.isEmpty()) "Changes" else "${plural(files.size, "file")} changed",
+                color = Text.copy(alpha = 0.86f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
             Spacer(Modifier.weight(1f))
             if (additions > 0) Text("+$additions", color = Signal, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             if (additions > 0 && deletions > 0) Spacer(Modifier.width(10.dp))
@@ -2175,6 +2276,7 @@ private fun TerminalView(
     commandNotice: String?,
     supports: (String) -> Boolean,
     onControl: (String, String?) -> Unit,
+    autoFocus: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val events = remember(agent.events) { terminalEvents(agent.events) }
@@ -2292,7 +2394,7 @@ private fun TerminalView(
                 Text("New commands")
             }
         }
-        TerminalCommandComposer(agent, busy, commandError, commandNotice, supports, onControl)
+        TerminalCommandComposer(agent, busy, commandError, commandNotice, supports, onControl, autoFocus)
     }
 }
 
@@ -2304,14 +2406,14 @@ private fun TerminalCommandComposer(
     commandNotice: String?,
     supports: (String) -> Boolean,
     onControl: (String, String?) -> Unit,
+    autoFocus: Boolean,
 ) {
     val action = remoteMessageAction(agent.state, supports) ?: return
     var command by rememberSaveable(agent.id) { mutableStateOf("") }
     val composerFocus = remember { FocusRequester() }
-    // Switching to a view that can be typed into means wanting to type into it.
-    // Guarded because the node is not attached on the first frame, and a focus
-    // request against nothing throws rather than waiting.
-    LaunchedEffect(Unit) { runCatching { composerFocus.requestFocus() } }
+    // As in the chat composer: a deliberate switch to this tab arms the focus,
+    // merely opening the session does not.
+    LaunchedEffect(Unit) { if (autoFocus) runCatching { composerFocus.requestFocus() } }
 
     // The same floating composer as the chat, in the terminal's own voice: a
     // monospace field behind a green prompt rather than a slash button.
@@ -2378,7 +2480,14 @@ private fun QuestionCard(event: AgentEvent, answerable: Boolean, busy: Boolean, 
                 Spacer(Modifier.width(8.dp))
                 Text("Agent question", color = Amber, fontWeight = FontWeight.SemiBold)
             }
-            Text(event.detail ?: event.summary, lineHeight = 21.sp)
+            // The question first, then the note explaining it. Reading the
+            // detail alone showed "Stripe retries are idempotent by key" above
+            // three options and never asked what they were choosing between.
+            val question = event.summary.takeIf { it.isNotBlank() && !it.equals("Question", true) }
+            Text(question ?: event.detail.orEmpty(), lineHeight = 21.sp)
+            if (question != null) event.detail?.takeIf { it.isNotBlank() && it != question }?.let {
+                Text(it, color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+            }
             event.options.forEachIndexed { index, option ->
                 Surface(
                     onClick = { if (answerable && !busy) onAnswer(option) },
@@ -2570,10 +2679,31 @@ private fun EmptyBridge(state: BridgeState, onConfigure: () -> Unit, onRetry: ()
     Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Surface(shape = CircleShape, color = SurfaceRaised) { Icon(Icons.Rounded.Hub, null, tint = Muted, modifier = Modifier.padding(22.dp).size(34.dp)) }
-            Text(if (state is BridgeState.Loading) "Finding your agents…" else "Bridge out of range", style = MaterialTheme.typography.titleLarge)
-            Text(if (state is BridgeState.Failed) state.message else "Connecting securely over your tailnet", color = Muted)
+            // A refused credential and an unreachable machine are different
+            // problems with different fixes - one wants a fresh pairing code,
+            // the other wants the laptop awake. Calling a 401 "out of range"
+            // sent people to the wrong one.
+            val unauthorized = state is BridgeState.Failed &&
+                ("401" in state.message || "403" in state.message || state.message.contains("unauthor", true))
+            Text(
+                when {
+                    state is BridgeState.Loading -> "Finding your agents…"
+                    unauthorized -> "This device isn't paired"
+                    else -> "Bridge out of range"
+                },
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Text(
+                when {
+                    unauthorized -> "The bridge refused this device's token. Enter a fresh pairing code to reconnect."
+                    state is BridgeState.Failed -> state.message
+                    else -> "Connecting securely over your tailnet"
+                },
+                color = Muted,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onConfigure) { Text("Connection") }
+                OutlinedButton(onClick = onConfigure) { Text(if (unauthorized) "Pair device" else "Change bridge") }
                 Button(onClick = onRetry) { Text("Try again") }
             }
         }
