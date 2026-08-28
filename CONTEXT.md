@@ -36,5 +36,20 @@ Tokens currently occupying or produced around the active model context. Shown on
 ## Processed Usage
 Monotonic historical token usage. Used by Usage analytics and never inferred from current context pressure.
 
+## Subagent Name
+What a subagent run was asked to do, in the Task call's own wording ("Fix lint in apps/server"). Carried by the spawn event the daemon derives from the parent transcript's tool result — the one place the child's id and its errand meet. Surfaces title a run by name, falling back to the runtime's type ("general-purpose") for sessions observed by an older adapter.
+
+## Seen
+This person has viewed this Agent's latest activity. Only a human act (opening the session) marks seen; machine reads never do. Seen is shared through the bridge, not per-device: viewing a session marks it instantly in the surface's local store and publishes `viewedAt` on the Agent (POST /agents/:id/seen), so reading a conversation on the phone clears its badge on the watch — the way reading a Slack channel anywhere clears it everywhere. An Agent counts as seen when either the local store says so or its `viewedAt` is at or past its latest activity; newer activity re-badges it.
+
+## Done
+A derived, per-surface state: an Agent that went idle while unseen. "Finished while you weren't looking" outranks "running" in every surface's attention ordering, and decays to plain idle the moment the session is viewed.
+
+## Attention Priority
+One shared ranking every surface sorts by: error, then blocked (waiting), then done, then running, then idle-seen, then offline. The stuck one is always first, on every screen, by construction.
+
+## Blocked Refusal
+A prompt, steer, or follow-up aimed at an Agent that is waiting on an approval or question is refused by the bridge with `agent_blocked` rather than silently queued — answering the block is the real next action. A device may deliberately queue anyway by forcing the command.
+
 ## Product Experience Bar
 Agent Deck must feel award-worthy in daily use, not merely look polished in screenshots. Phone and watch interactions prioritize immediate feedback, stable spatial behavior, excellent typography, deliberate optical alignment, fluid interruptible motion, clear hierarchy, and calm information density. Visual novelty never outranks operational truth, capability safety, accessibility, performance, or native platform behavior. Every primary flow is evaluated in loading, live, waiting, error, stale, empty, keyboard, and recovery states on real Pixel hardware.

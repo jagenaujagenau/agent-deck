@@ -136,6 +136,7 @@ terminal seconds later.
 apps/
   server/       The bridge. Effect v4, Bun, SQLite.
   android/      shared/ · mobile/ (app + Glance widget) · wear/ (app + tile)
+  ios/          SwiftUI phone app: deck, session, approvals
   desktop/      Tauri menu bar app: service control, harness setup, updates
 integrations/
   runtime-hooks/  Claude Code and Codex, plus the per-session daemon
@@ -179,6 +180,20 @@ proof of running and reports whether the entry point a plist names still exists.
 bun run scripts/agent-deck-service.ts status        # both
 bun run scripts/agent-deck-service.ts restart herdr # one
 ```
+
+### Measuring it
+
+```bash
+bun run bench   # scratch bridge on :3177 — ingest, snapshot, SSE push, fan-out
+```
+
+The number that matters is SSE push: an event posted → the patch frame on the
+wire. The fan-out row delivers one update to twenty subscribed devices and
+clocks the slowest screen, because the deck is only as live as its worst one.
+The bench found two shipped bugs on its first run — a lost-update race between
+the revision bump and the state it announced, and Bun's 10-second default idle
+timeout sitting under the stream's 15-second pings — which is the argument for
+keeping it runnable in one command.
 
 ## Design notes
 
