@@ -46,7 +46,11 @@ import {
   fingerprintWorkspace,
   type WorkspaceFingerprint,
 } from "./workspace-changes";
-import { discoverCodexSlashCommands, discoverSlashCommands } from "./slash-commands";
+import {
+  discoverCodexSlashCommands,
+  discoverGeminiSlashCommands,
+  discoverSlashCommands,
+} from "./slash-commands";
 import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 
 type HookState = {
@@ -93,7 +97,8 @@ const QUESTION_TIMEOUT_MS = Math.max(
   0,
   Number(process.env.AGENT_DECK_QUESTION_TIMEOUT_MS ?? 30_000) || 0,
 );
-const runtime = process.argv[2] === "codex" ? "codex" : "claude";
+const runtime =
+  process.argv[2] === "codex" ? "codex" : process.argv[2] === "gemini" ? "gemini" : "claude";
 const expectedEvent = process.argv[3] ?? "";
 const inputText = await Bun.stdin.text();
 const input = parseHookPayload(inputText);
@@ -113,9 +118,10 @@ const commandQueue: CommandQueue = {
     await client.acknowledge(id, commandId);
   },
 };
-const model = runtime === "claude" ? "Claude Code" : "Codex";
+const runtimeTitle = runtime === "claude" ? "Claude" : runtime === "codex" ? "Codex" : "Gemini";
+const model = runtime === "claude" ? "Claude Code" : runtime === "codex" ? "Codex" : "Gemini CLI";
 const detectedProject = projectNameForCwd(cwd);
-const displayName = `${runtime === "claude" ? "Claude" : "Codex"} · ${detectedProject} · ${sessionKey.slice(0, 4)}`;
+const displayName = `${runtimeTitle} · ${detectedProject} · ${sessionKey.slice(0, 4)}`;
 const approvalModeSetting = process.env.AGENT_DECK_APPROVAL_MODE;
 const approvalMode: ApprovalMode =
   approvalModeSetting === "off" ||
@@ -148,7 +154,7 @@ try {
   /* First event for this session. */
 }
 state.project ??= detectedProject;
-state.name = `${runtime === "claude" ? "Claude" : "Codex"} · ${state.project} · ${sessionKey.slice(0, 4)}`;
+state.name = `${runtimeTitle} · ${state.project} · ${sessionKey.slice(0, 4)}`;
 state.ownerPid = runtimeOwnerPid();
 state.capabilities = ["approve", "reject", "steer", "prompt", "follow_up"];
 // The daemon tails this for reasoning between hook invocations, so it has to know where it is.
@@ -263,6 +269,9 @@ function parseCodexUsageLine(line: string): CodexUsageLine | undefined {
 
 function updateUsageFromTranscript() {
   if (input.transcriptPath === undefined) return;
+  // Gemini's conversation file is one JSON document, not a JSONL of usage
+  // entries; neither parser below can read a token count out of it.
+  if (runtime === "gemini") return;
   try {
     const lines = readFileSync(input.transcriptPath, "utf8").split("\n").filter(Boolean);
     if (runtime === "claude") {
@@ -631,7 +640,9 @@ switch (event) {
           commands:
             runtime === "codex"
               ? discoverCodexSlashCommands(join(homedir(), ".codex"))
-              : discoverSlashCommands({
+              : runtime === "gemini"
+                ? discoverGeminiSlashCommands(join(homedir(), ".gemini"))
+                : discoverSlashCommands({
                   userDir: join(homedir(), ".claude"),
                   projectDir: cwd,
                   pluginManifest: join(homedir(), ".claude", "plugins", "installed_plugins.json"),
@@ -828,10 +839,18 @@ switch (event) {
       { status: "completed", summary: state.task },
       { turnId: state.activeTurnId },
     ).catch(() => {});
+    // For Claude and Codex the response is not published here: the daemon
+    // republishes it from the transcript with an id derived from the
+    // transcript uuid, which is what lets a re-publish collapse at the bridge.
+    // Gemini has no transcript tail yet, but its AfterAgent hook hands the
+    // response over directly — published under a turn-derived id so a re-fire
+    // collapses the same way.
+    if (runtime === "gemini" && input.lastAssistantMessage?.trim()) {
+      await publish("output", "Response", input.lastAssistantMessage, {
+        id: `chat:${agentId}:${state.activeTurnId ?? "turn"}:response`,
+      }).catch(() => {});
+    }
     state.activeTurnId = undefined;
-    // The response is not published here. The daemon republishes it from the transcript with an id
-    // derived from the transcript uuid, which is what lets a re-publish collapse at the bridge; a
-    // copy sent from here would carry a fresh id every turn and show up as a second message.
     {
       // A hook cannot type into a running session, but blocking the Stop hook keeps the turn alive
       // and hands `reason` back to the model as its next instruction. That is the delivery point

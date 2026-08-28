@@ -55,6 +55,7 @@ extension Harness {
         case .claude, .managed: Palette.anthropic
         case .codex: Palette.text
         case .opencode: Palette.signal
+        case .gemini: Palette.blue
         case .pi: Palette.blue
         case .unknown: Palette.muted
         }
@@ -81,7 +82,7 @@ extension Harness {
         case .claude, .managed: HarnessArt.claude
         case .codex: HarnessArt.codex
         case .opencode: HarnessArt.openCode
-        case .pi, .unknown: nil
+        case .gemini, .pi, .unknown: nil
         }
     }
 }

@@ -43,3 +43,36 @@ describe("SubagentStop", () => {
     expect(input.agentType).toBeUndefined();
   });
 });
+
+describe("Gemini payloads", () => {
+  test("AfterAgent's prompt_response is the last assistant message by another name", () => {
+    const payload = parseHookPayload(
+      JSON.stringify({
+        hook_event_name: "AfterAgent",
+        session_id: "g-1",
+        prompt: "fix the test",
+        prompt_response: "Done - the test passes now.",
+      }),
+    );
+    expect(payload.lastAssistantMessage).toBe("Done - the test passes now.");
+  });
+
+  test("Claude's own field still wins where both exist", () => {
+    const payload = parseHookPayload(
+      JSON.stringify({ last_assistant_message: "claude words", prompt_response: "gemini words" }),
+    );
+    expect(payload.lastAssistantMessage).toBe("claude words");
+  });
+
+  test("Gemini tool payloads parse through the same fields", () => {
+    const payload = parseHookPayload(
+      JSON.stringify({
+        hook_event_name: "BeforeTool",
+        tool_name: "run_shell_command",
+        tool_input: { command: "bun test" },
+      }),
+    );
+    expect(payload.toolName).toBe("run_shell_command");
+    expect(payload.toolArguments.command).toBe("bun test");
+  });
+});

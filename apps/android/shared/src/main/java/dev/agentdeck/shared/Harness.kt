@@ -17,6 +17,7 @@ enum class Harness(val mark: String, val label: String, val icon: Int?) {
     Claude("CC", "Claude Code", R.drawable.harness_claude),
     Codex("CX", "Codex", R.drawable.harness_codex),
     OpenCode("OC", "OpenCode", R.drawable.harness_opencode),
+    Gemini("GM", "Gemini CLI", null),
     // Pi ships no mark that could be used here, so its own initial stands in.
     Pi("π", "Pi", null),
     // A bridge-hosted Claude session is still a Claude session.
@@ -34,10 +35,12 @@ object Harnesses {
         runtime == "claude" -> Harness.Claude
         runtime == "codex" -> Harness.Codex
         runtime == "opencode" -> Harness.OpenCode
+        runtime == "gemini" -> Harness.Gemini
         runtime == "pi" -> Harness.Pi
         agentId.startsWith("claude-") -> Harness.Claude
         agentId.startsWith("codex-") -> Harness.Codex
         agentId.startsWith("opencode-") -> Harness.OpenCode
+        agentId.startsWith("gemini-") -> Harness.Gemini
         // Pi names its sessions from the runtime's own id, which carries no
         // prefix, so the display name is the only thing left to read.
         name.startsWith("Pi ") || name.startsWith("Pi·") -> Harness.Pi

@@ -15,6 +15,12 @@ const lifecycleNames = new Map([
   ["stopfailure", "StopFailure"],
   ["stop", "Stop"],
   ["sessionend", "SessionEnd"],
+  // Gemini CLI speaks the same lifecycle under its own names; this is the
+  // inverse of the EVENT_MAPPING its own `hooks migrate` command ships.
+  ["beforeagent", "UserPromptSubmit"],
+  ["beforetool", "PreToolUse"],
+  ["aftertool", "PostToolUse"],
+  ["afteragent", "Stop"],
 ]);
 
 export function shouldUseAgentDeckApproval(permissionMode?: string): boolean {
@@ -23,7 +29,7 @@ export function shouldUseAgentDeckApproval(permissionMode?: string): boolean {
 }
 
 export function shouldRequestRemoteApproval(
-  runtime: "claude" | "codex",
+  runtime: "claude" | "codex" | "gemini",
   permissionMode: string | undefined,
   toolName: string,
   toolInput: Readonly<JsonObject>,

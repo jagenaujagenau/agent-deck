@@ -26,19 +26,38 @@ const HIGH_RISK_BASH_PATTERNS = [
 const SENSITIVE_PATH_PATTERN =
   /(?:^|\/)(?:\.env(?:\.[^/]+)?|credentials?|secrets?|auth\.json|.*\.pem|.*\.key)$/i;
 
+/**
+ * One risk class across every runtime's tool vocabulary: Claude says Bash,
+ * Write, Edit; Gemini says run_shell_command, write_file, replace. The policy
+ * cares what a call does, not what its runtime named it.
+ */
+type ToolClass = "shell" | "write" | "edit" | "other";
+
+function toolClass(toolName: string): ToolClass {
+  const normalized = toolName.toLowerCase();
+  if (normalized === "bash" || normalized === "shell" || normalized === "run_shell_command") {
+    return "shell";
+  }
+  if (normalized === "write" || normalized === "write_file") return "write";
+  if (normalized === "edit" || normalized === "replace" || normalized === "multiedit") {
+    return "edit";
+  }
+  return "other";
+}
+
 export function requiresApproval(
   toolName: string,
   input: Readonly<JsonObject>,
   mode: ApprovalMode,
 ): boolean {
   if (!usesRemoteApproval(mode)) return false;
-  const normalized = toolName.toLowerCase();
-  if (mode === "all") return ["bash", "write", "edit"].includes(normalized);
-  if (normalized === "bash") {
+  const kind = toolClass(toolName);
+  if (mode === "all") return kind !== "other";
+  if (kind === "shell") {
     const command = asString(input.command) ?? "";
     return HIGH_RISK_BASH_PATTERNS.some((pattern) => pattern.test(command));
   }
-  if (normalized === "write" || normalized === "edit") {
+  if (kind === "write" || kind === "edit") {
     const path = asString(input.path) ?? asString(input.file_path) ?? "";
     return SENSITIVE_PATH_PATTERN.test(path);
   }
@@ -46,10 +65,10 @@ export function requiresApproval(
 }
 
 export function describeToolCall(toolName: string, input: Readonly<JsonObject>): string {
-  const normalized = toolName.toLowerCase();
+  const kind = toolClass(toolName);
   const command = asString(input.command);
-  if (normalized === "bash" && command !== undefined) return command;
-  if (normalized === "write" || normalized === "edit") {
+  if (kind === "shell" && command !== undefined) return command;
+  if (kind === "write" || kind === "edit") {
     const path = asString(input.path) ?? asString(input.file_path);
     if (path) return `${toolName} ${path}`;
   }

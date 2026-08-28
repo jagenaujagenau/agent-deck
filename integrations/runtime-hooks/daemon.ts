@@ -57,7 +57,18 @@ const project = requiredArgument(4);
 const pidPath = `${statePath}.pid`;
 // The agentId prefix is the keying convention for which runtime owns this session,
 // and therefore which line grammar its transcript is read with.
-const runtime: TranscriptRuntime = agentId.startsWith("claude-") ? "claude" : "codex";
+const runtime = agentId.startsWith("claude-")
+  ? "claude"
+  : agentId.startsWith("gemini-")
+    ? "gemini"
+    : "codex";
+/**
+ * Gemini's conversation file is one JSON document rewritten in place, not an
+ * append-only JSONL; neither transcript grammar below can tail it, so its chat
+ * and reasoning arrive from the hooks instead of from here.
+ */
+const transcriptRuntime: TranscriptRuntime | undefined =
+  runtime === "gemini" ? undefined : runtime;
 const client = new AgentDeckClient();
 const HEARTBEAT_INTERVAL_MS = 10_000;
 /** How often a running session's transcript is tailed for new reasoning. */
@@ -130,8 +141,8 @@ function publishSpawn(spawn: SubagentSpawn) {
 /** One pass over the whole transcript, so the app shows turns that predate the bridge ever seeing this session. */
 async function syncConversationBacklog() {
   const state = loadState();
-  if (!state?.transcriptPath) return;
-  const backlog = readConversationBacklog(state.transcriptPath, agentId, runtime);
+  if (!state?.transcriptPath || transcriptRuntime === undefined) return;
+  const backlog = readConversationBacklog(state.transcriptPath, agentId, transcriptRuntime);
   for (const message of backlog.messages) {
     await publishMessage(message).catch(() => {});
   }
@@ -140,13 +151,13 @@ async function syncConversationBacklog() {
 
 async function streamReasoning() {
   const state = loadState();
-  if (!state?.transcriptPath) return;
+  if (!state?.transcriptPath || transcriptRuntime === undefined) return;
   const cursor = { offset: state.transcriptOffset };
   const { reasoning, messages, spawns } = readNewTranscript(
     state.transcriptPath,
     cursor,
     agentId,
-    runtime,
+    transcriptRuntime,
   );
   if (cursor.offset !== state.transcriptOffset) {
     // Re-read the state file first: a hook may have written it while this pass was reading.
@@ -219,7 +230,9 @@ async function heartbeat() {
       id: agentId,
       name: state.name,
       project,
-      model: state.model ?? (runtime === "claude" ? "Claude Code" : "Codex"),
+      model:
+        state.model ??
+        (runtime === "claude" ? "Claude Code" : runtime === "gemini" ? "Gemini CLI" : "Codex"),
       runtime,
       runtimeProtocol: "canonical-v1",
       state: state.state,

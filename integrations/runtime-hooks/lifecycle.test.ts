@@ -17,6 +17,11 @@ describe("canonicalLifecycleEvent", () => {
     ["SubagentStop", "SubagentStop"],
     ["subagent_stop", "SubagentStop"],
     ["subagentStop", "SubagentStop"],
+    // Gemini CLI's names for the same moments, per its own migrate mapping.
+    ["BeforeAgent", "UserPromptSubmit"],
+    ["BeforeTool", "PreToolUse"],
+    ["AfterTool", "PostToolUse"],
+    ["AfterAgent", "Stop"],
   ])("normalizes %s", (input, expected) => {
     expect(canonicalLifecycleEvent(input)).toBe(expected);
   });

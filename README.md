@@ -3,7 +3,8 @@
 One bridge for every coding agent, and any interface you like on top.
 
 The bridge is the product. It pulls live activity out of every harness a
-session runs in — Claude Code, Codex, OpenCode, Pi — and unifies it into one
+session runs in — Claude Code, Codex, Gemini CLI, OpenCode, Pi — and unifies it
+into one
 canonical stream: messages, reasoning, terminal activity, file changes,
 approvals, questions, usage. Anything can subscribe to that stream and any
 client can steer through it; the Android, Wear OS, and iOS apps here are
@@ -22,6 +23,7 @@ flowchart TB
         direction LR
         cc["Claude Code"]
         cx["Codex"]
+        gm["Gemini CLI"]
         pi["Pi"]
         oc["OpenCode"]
     end
@@ -51,6 +53,7 @@ flowchart TB
 
     cc --> hooks
     cx --> hooks
+    gm --> hooks
     pi --> piext
     oc --> ocplug
     hooks -.spawns.-> daemon
@@ -77,7 +80,7 @@ Four ways an agent gets onto the deck, chosen by what the runtime allows:
 
 | Runtime | How | Why |
 | --- | --- | --- |
-| Claude Code, Codex | A process per hook event | They offer stdin hooks and nothing else |
+| Claude Code, Codex, Gemini CLI | A process per hook event | They offer stdin hooks and nothing else |
 | Pi, OpenCode | An in-process extension | They load plugins, so there is no process to spawn |
 | Managed Claude | The bridge runs the loop | No terminal involved; the bridge owns the session |
 
@@ -146,7 +149,7 @@ apps/
   ios/          SwiftUI phone app: deck, session, approvals
   desktop/      Tauri menu bar app: service control, harness setup, updates
 integrations/
-  runtime-hooks/  Claude Code and Codex, plus the per-session daemon
+  runtime-hooks/  Claude Code, Codex, and Gemini CLI, plus the per-session daemon
   pi/             Pi extension
   opencode/       OpenCode plugin
   herdr/          Terminal state the hooks cannot see; message delivery
@@ -168,7 +171,7 @@ bun run scripts/agent-deck-service.ts status
 Then connect the runtimes you use:
 
 ```bash
-bun run integrations/runtime-hooks/install.ts claude   # or codex
+bun run integrations/runtime-hooks/install.ts claude   # or codex, gemini
 bun run integrations/opencode/install.ts
 bun run integrations/pi/install.ts
 ```

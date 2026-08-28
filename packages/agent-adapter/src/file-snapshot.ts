@@ -17,7 +17,7 @@ const SNAPSHOT_TTL_MS = 60 * 60_000;
 
 // Matched against the tool name with spaces, underscores and dashes stripped, so `apply_patch`,
 // `applyPatch` and `apply-patch` all land on the same rule.
-const FILE_TOOLS = /^(edit|write|create|update|multiedit|notebookedit|applypatch|strreplace)/i;
+const FILE_TOOLS = /^(edit|write|create|update|multiedit|notebookedit|applypatch|strreplace|replace)/i;
 
 /** Whether this tool call is expected to change a file on disk, and so is worth snapshotting. */
 export function mutatesFile(tool: string, target: string | undefined): target is string {

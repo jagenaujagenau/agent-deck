@@ -1131,6 +1131,7 @@ private enum class AgentHarness(val label: String, val color: Color, val icon: I
     Claude("Claude Code", Color(0xFFD97757), dev.agentdeck.shared.R.drawable.harness_claude),
     Codex("Codex", Text, dev.agentdeck.shared.R.drawable.harness_codex),
     OpenCode("OpenCode", Signal, dev.agentdeck.shared.R.drawable.harness_opencode),
+    Gemini("Gemini CLI", Color(0xFF78A7FF), null),
     Managed("Managed Claude", Color(0xFFD97757), dev.agentdeck.shared.R.drawable.harness_claude),
     Other("Agent", Muted, null),
 }
@@ -1149,6 +1150,7 @@ private fun harnessFor(agent: Agent) = when (Harnesses.of(agent)) {
     Harness.Claude -> AgentHarness.Claude
     Harness.Codex -> AgentHarness.Codex
     Harness.OpenCode -> AgentHarness.OpenCode
+    Harness.Gemini -> AgentHarness.Gemini
     Harness.Managed -> AgentHarness.Managed
     Harness.Unknown -> AgentHarness.Other
 }

@@ -115,7 +115,8 @@ export function parseHookPayload(text: string): HookPayload {
     toolUseId: asString(value.tool_use_id),
     toolArguments: toolArguments(value.tool_input),
     prompt: asString(value.prompt),
-    lastAssistantMessage: asString(value.last_assistant_message),
+    // Gemini's AfterAgent calls the same fact `prompt_response`.
+    lastAssistantMessage: asString(value.last_assistant_message) ?? asString(value.prompt_response),
     notificationType: asString(value.notification_type),
     message: asString(value.message),
     transcriptPath: asString(value.transcript_path),

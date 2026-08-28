@@ -8,7 +8,7 @@ import type { JsonObject } from "./json-value";
 const target = process.argv[2] ?? "all";
 const hook = resolve(import.meta.dir, "index.ts");
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
-const events = [
+const claudeEvents = [
   "SessionStart",
   "UserPromptSubmit",
   "PreToolUse",
@@ -20,6 +20,20 @@ const events = [
   "StopFailure",
   "SessionEnd",
 ];
+/**
+ * Gemini CLI's names for the same lifecycle — its own `hooks migrate` command
+ * documents the correspondence. The handler folds them back to the canonical
+ * names, so one hook serves all three runtimes.
+ */
+const geminiEvents = [
+  "SessionStart",
+  "BeforeAgent",
+  "BeforeTool",
+  "AfterTool",
+  "AfterAgent",
+  "Notification",
+  "SessionEnd",
+];
 
 /** One entry in a runtime's hook registry, in the shape the runtime reads back. */
 type HookRegistration = {
@@ -27,11 +41,12 @@ type HookRegistration = {
   hooks: Array<{ type: "command"; command: string; timeout: number }>;
 };
 
-function install(runtime: "claude" | "codex", path: string) {
+function install(runtime: "claude" | "codex" | "gemini", path: string) {
   mkdirSync(dirname(path), { recursive: true });
   const stored = existsSync(path) ? parseJson(readFileSync(path, "utf8")) : {};
   const settings: JsonObject = isJsonObject(stored) ? stored : {};
   const hooks: JsonObject = isJsonObject(settings.hooks) ? settings.hooks : {};
+  const events = runtime === "gemini" ? geminiEvents : claudeEvents;
   for (const event of events) {
     const existing = hooks[event];
     const command = `${quote(process.execPath)} ${quote(hook)} ${runtime} ${event}`;
@@ -41,7 +56,7 @@ function install(runtime: "claude" | "codex", path: string) {
     // Two literals rather than a conditional spread, so the matcher stays ahead
     // of the hooks in the file exactly as previous installs wrote it.
     const registration: HookRegistration =
-      event === "PreToolUse"
+      event === "PreToolUse" || event === "BeforeTool"
         ? { matcher: "*", hooks: [{ type: "command", command, timeout: 620 }] }
         : { hooks: [{ type: "command", command, timeout: 10 }] };
     cleaned.push(registration);
@@ -58,3 +73,5 @@ if (target === "all" || target === "claude")
   install("claude", join(homedir(), ".claude", "settings.json"));
 if (target === "all" || target === "codex")
   install("codex", join(homedir(), ".codex", "hooks.json"));
+if (target === "all" || target === "gemini")
+  install("gemini", join(homedir(), ".gemini", "settings.json"));

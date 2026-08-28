@@ -177,6 +177,17 @@ export function discoverCodexSlashCommands(codexDir: string): SlashCommand[] {
   ]);
 }
 
+/**
+ * The Gemini CLI layout: skills under `skills/` and `config/skills/`, both in
+ * the same SKILL.md frontmatter grammar (verified against a real ~/.gemini).
+ */
+export function discoverGeminiSlashCommands(geminiDir: string): SlashCommand[] {
+  return dedupe([
+    ...skillsIn(join(geminiDir, "skills"), "user"),
+    ...skillsIn(join(geminiDir, "config", "skills"), "user"),
+  ]);
+}
+
 function dedupe(discovered: SlashCommand[]): SlashCommand[] {
   // Earlier roots shadow later ones of the same name, exactly as the runtime resolves them.
   const byName = new Map<string, SlashCommand>();

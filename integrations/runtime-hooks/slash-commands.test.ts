@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverCodexSlashCommands, discoverSlashCommands } from "./slash-commands";
+import { discoverCodexSlashCommands, discoverGeminiSlashCommands, discoverSlashCommands } from "./slash-commands";
 
 function scratch() {
   const root = mkdtempSync(join(tmpdir(), "agent-deck-commands-"));
@@ -162,5 +162,30 @@ describe("discoverCodexSlashCommands", () => {
   test("a machine with no prompts directory yields an empty catalog, not an error", () => {
     const root = mkdtempSync(join(tmpdir(), "agent-deck-codex-empty-"));
     expect(discoverCodexSlashCommands(root)).toEqual([]);
+  });
+});
+
+describe("discoverGeminiSlashCommands", () => {
+  test("reads skills from both of Gemini's skill roots", () => {
+    const root = mkdtempSync(join(tmpdir(), "agent-deck-gemini-"));
+    mkdirSync(join(root, "skills", "impeccable"), { recursive: true });
+    writeFileSync(
+      join(root, "skills", "impeccable", "SKILL.md"),
+      "---\nname: impeccable\ndescription: Design pass\n---\n\n# impeccable",
+    );
+    mkdirSync(join(root, "config", "skills", "deploy"), { recursive: true });
+    writeFileSync(
+      join(root, "config", "skills", "deploy", "SKILL.md"),
+      "---\nname: deploy\ndescription: Ship it\n---\n\n# deploy",
+    );
+
+    expect(discoverGeminiSlashCommands(root)).toEqual([
+      { name: "deploy", description: "Ship it", source: "user" },
+      { name: "impeccable", description: "Design pass", source: "user" },
+    ]);
+  });
+
+  test("no skills anywhere is an empty catalog, not an error", () => {
+    expect(discoverGeminiSlashCommands(mkdtempSync(join(tmpdir(), "agent-deck-gem-empty-")))).toEqual([]);
   });
 });

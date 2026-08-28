@@ -1,7 +1,8 @@
 # The Bridge API
 
 The bridge is the product. It pulls live activity out of every harness a
-session might run in — Claude Code, Codex, OpenCode, Pi — and unifies it into
+session might run in — Claude Code, Codex, Gemini CLI, OpenCode, Pi — and
+unifies it into
 one canonical stream: messages, reasoning, terminal activity, file changes,
 approvals, questions, usage. Anything can be built on top of that stream; the
 Android, Wear OS, and iOS apps in this repository are reference clients, not
@@ -61,7 +62,7 @@ newest, newest first), `capabilities?`, `rateLimits`, `pendingApproval?`,
   offline after 45 s (10 min if it was idle — idle sessions legitimately go
   quiet).
 - `runtime` is the adapter's own word for its harness — `claude`, `codex`,
-  `opencode`, `pi`. Trust it over any name heuristic.
+  `gemini`, `opencode`, `pi`. Trust it over any name heuristic.
 - `viewedAt` is the last moment a person looked at this session on any
   surface. Seen is shared, not per-device: mark it with
   `POST /agents/:id/seen` (no body → `{viewedAt}`), and treat an agent as seen
@@ -174,8 +175,10 @@ An adapter is anything that can speak three routes:
   the queue of remote instructions; acknowledge before delivering, so a
   message is delivered at most once.
 
-The reference adapters live in `integrations/` (hook-driven for Claude Code
-and Codex, in-process for OpenCode and Pi, terminal-driven for herdr) and are
+The reference adapters live in `integrations/` (hook-driven for Claude Code,
+Codex, and Gemini CLI — one handler serves all three, folding Gemini's
+BeforeTool/AfterTool/BeforeAgent/AfterAgent names to the canonical lifecycle —
+in-process for OpenCode and Pi, terminal-driven for herdr) and are
 held to a parity matrix: `apps/server/scripts/parity.ts`.
 
 ## Diagnostics
