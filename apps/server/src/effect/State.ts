@@ -51,6 +51,8 @@ export interface AgentRecord {
   id: string;
   name: string;
   project: string;
+  /** The directory the session works in, on the bridge's machine. */
+  cwd?: string;
   model: string;
   runtime?: string;
   runtimeProtocol?: "canonical-v1";
@@ -221,6 +223,7 @@ export const toPendingQuestion = (
  */
 const toAgentRecord = (stored: Schema.Schema.Type<typeof StoredAgent>): AgentRecord => ({
   ...stored,
+  cwd: stored.cwd ?? undefined,
   runtime: stored.runtime ?? undefined,
   runtimeProtocol: stored.runtimeProtocol ?? undefined,
   objective: stored.objective ?? undefined,
@@ -393,6 +396,7 @@ export class BridgeState extends Context.Service<
       commandId: string,
     ) => Effect.Effect<Command | undefined>;
     readonly markViewed: (agentId: string) => Effect.Effect<string | undefined>;
+    readonly removeAgent: (agentId: string) => Effect.Effect<boolean>;
     readonly requestStatus: (
       agentId: string,
       requestId: string,
@@ -502,15 +506,16 @@ export class BridgeState extends Context.Service<
         );
 
       const persistSessionEvent = (agentId: string, event: AgentEvent) =>
-        sql`INSERT INTO bridge_session_events (id, agent_id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, created_at)
+        sql`INSERT INTO bridge_session_events (id, agent_id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, turn_id, created_at)
             VALUES (${event.id}, ${agentId}, ${event.kind}, ${event.summary}, ${event.detail ?? null},
                     ${event.tool ?? null}, ${event.command ?? null}, ${event.path ?? null},
                     ${event.options?.length ? JSON.stringify(event.options) : null},
-                    ${event.subagentId ?? null}, ${event.subagentType ?? null}, ${event.subagentName ?? null}, ${event.createdAt})
+                    ${event.subagentId ?? null}, ${event.subagentType ?? null}, ${event.subagentName ?? null},
+                    ${event.turnId ?? null}, ${event.createdAt})
             ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, summary = excluded.summary, detail = excluded.detail,
               tool = excluded.tool, command = excluded.command, path = excluded.path, options = excluded.options,
               subagent_id = excluded.subagent_id, subagent_type = excluded.subagent_type,
-              subagent_name = excluded.subagent_name`.pipe(Effect.orDie);
+              subagent_name = excluded.subagent_name, turn_id = excluded.turn_id`.pipe(Effect.orDie);
 
       const persistFileChange = (agentId: string, event: AgentEvent) =>
         event.diff === undefined
@@ -909,6 +914,9 @@ export class BridgeState extends Context.Service<
           id: input.id,
           name: input.name,
           project: input.project,
+          // A later heartbeat may omit it; where the session works does not
+          // change because a beat left the field out.
+          cwd: input.cwd ?? previous?.cwd,
           model: input.model,
           runtime: input.runtime ?? undefined,
           runtimeProtocol: input.runtimeProtocol ?? undefined,
@@ -1240,6 +1248,24 @@ export class BridgeState extends Context.Service<
         return command;
       });
 
+      const removeAgent = Effect.fn("BridgeState.removeAgent")(function* (agentId: string) {
+        const agents = yield* Ref.get(agentsRef);
+        if (!agents.has(agentId)) return false;
+        // The live map first, the row second: the next patch's `removed` list
+        // is computed from the map, and the row only decides what a restart
+        // resurrects. History, usage, and file changes are deliberately kept —
+        // dismissing a dead session is decluttering the deck, not erasing what
+        // the session did.
+        yield* Ref.update(agentsRef, (map) => {
+          const next = new Map(map);
+          next.delete(agentId);
+          return next;
+        });
+        yield* sql`DELETE FROM bridge_agents WHERE id = ${agentId}`.pipe(Effect.orDie);
+        yield* changed;
+        return true;
+      });
+
       const markViewed = Effect.fn("BridgeState.markViewed")(function* (agentId: string) {
         const agents = yield* Ref.get(agentsRef);
         const existing = agents.get(agentId);
@@ -1516,6 +1542,7 @@ export class BridgeState extends Context.Service<
         pendingBlock,
         pendingCommands,
         acknowledge,
+        removeAgent,
         markViewed,
         requestStatus,
         resolveRuntimeRequest,

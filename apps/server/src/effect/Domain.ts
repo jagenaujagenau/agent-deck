@@ -72,6 +72,12 @@ export const AgentEvent = Schema.Struct({
    * "general-purpose" runs are indistinguishable by type alone.
    */
   subagentName: optionalField(Schema.String),
+  /**
+   * Which exchange this belongs to. A turn is the deck's thread unit — one
+   * instruction and everything done in its service — and without the id a
+   * client can only guess the grouping from timestamps.
+   */
+  turnId: optionalField(Schema.String),
   createdAt: Schema.String,
 });
 export interface AgentEvent extends Schema.Schema.Type<typeof AgentEvent> {}
@@ -90,6 +96,7 @@ export const AgentEventInput = Schema.Struct({
   subagentId: optionalField(Schema.String),
   subagentType: optionalField(Schema.String),
   subagentName: optionalField(Schema.String),
+  turnId: optionalField(Schema.String),
 });
 export interface AgentEventInput extends Schema.Schema.Type<typeof AgentEventInput> {}
 
@@ -138,6 +145,8 @@ export const Heartbeat = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   project: Schema.String,
+  /** The directory the session works in, on the bridge's machine. */
+  cwd: optionalField(Schema.String),
   model: Schema.String,
   runtime: optionalField(Schema.String),
   runtimeProtocol: optionalField(Schema.Literals(["canonical-v1"])),
@@ -242,6 +251,7 @@ export const StoredAgent = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   project: Schema.String,
+  cwd: optionalField(Schema.String),
   model: Schema.String,
   runtime: optionalField(Schema.String),
   runtimeProtocol: optionalField(Schema.Literals(["canonical-v1"])),

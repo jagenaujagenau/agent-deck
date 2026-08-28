@@ -66,7 +66,7 @@ const onMalformed =
     Effect.catchTag(effect, "SchemaError", () => error(message, 400));
 
 const route = <E, R>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   handler: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ) => HttpRouter.route(method, `${BRIDGE_PREFIX}${path}`, handler);
@@ -98,10 +98,14 @@ export const BridgeRoutes = HttpRouter.addAll([
     Effect.gen(function* () {
       const store = yield* BridgeStore;
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const asked = Number(new URL(request.url, "http://bridge").searchParams.get("limit"));
+      const query = new URL(request.url, "http://bridge").searchParams;
+      const asked = Number(query.get("limit"));
       const limit = Number.isFinite(asked) && asked > 0 ? asked : undefined;
+      // `before` pages backwards: pass the oldest createdAt the client already
+      // holds to receive the window before it.
+      const before = query.get("before") ?? undefined;
       return yield* HttpServerResponse.json({
-        events: yield* store.history(yield* param("agentId"), limit),
+        events: yield* store.history(yield* param("agentId"), limit, before),
       });
     }),
   ),
@@ -261,6 +265,24 @@ export const BridgeRoutes = HttpRouter.addAll([
           ? yield* error("Agent not found", 404)
           : yield* HttpServerResponse.json(command, { status: 202 });
       }).pipe(onMalformed("Invalid action"));
+    }),
+  ),
+  /**
+   * Dismisses a session from the deck. Its history, usage, and file changes
+   * are kept — this declutters the live list, it does not erase what the
+   * session did. A session still heartbeating simply reappears on its next
+   * beat, which is the honest outcome: you cannot dismiss something that is
+   * still running.
+   */
+  route(
+    "DELETE",
+    "/agents/:id",
+    Effect.gen(function* () {
+      const state = yield* BridgeState;
+      const removed = yield* state.removeAgent(yield* param("id"));
+      return removed
+        ? yield* HttpServerResponse.json({ removed: true })
+        : yield* error("Agent not found", 404);
     }),
   ),
   /**

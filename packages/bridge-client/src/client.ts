@@ -64,8 +64,15 @@ export class BridgeClient {
     return this.request<BridgeSnapshot>("GET", "/snapshot");
   }
 
-  async history(agentId: string, limit?: number): Promise<AgentEvent[]> {
-    const suffix = limit === undefined ? "" : `?limit=${limit}`;
+  /**
+   * The retained event log, oldest first. `before` pages backwards: pass the
+   * oldest createdAt already held to receive the window before it.
+   */
+  async history(agentId: string, limit?: number, before?: string): Promise<AgentEvent[]> {
+    const query = new URLSearchParams();
+    if (limit !== undefined) query.set("limit", String(limit));
+    if (before !== undefined) query.set("before", before);
+    const suffix = query.size > 0 ? `?${query}` : "";
     const body = await this.request<{ events: AgentEvent[] }>(
       "GET",
       `/agents/${encodeURIComponent(agentId)}/history${suffix}`,
@@ -127,6 +134,15 @@ export class BridgeClient {
       `/agents/${encodeURIComponent(agentId)}/seen`,
     );
     return body.viewedAt;
+  }
+
+  /**
+   * Dismisses a session from the deck. History, usage, and file changes are
+   * kept — this declutters the live list, it does not erase what happened. A
+   * session still heartbeating reappears on its next beat.
+   */
+  async dismiss(agentId: string): Promise<void> {
+    await this.request("DELETE", `/agents/${encodeURIComponent(agentId)}`);
   }
 
   async answerQuestion(agentId: string, requestId: string, answer: string): Promise<void> {

@@ -33,6 +33,8 @@ export type AgentHeartbeat = {
   id: string;
   name: string;
   project: string;
+  /** The directory the session works in, on the bridge's machine. */
+  cwd?: string;
   model: string;
   runtime?: string;
   runtimeProtocol?: "canonical-v1";
@@ -79,6 +81,8 @@ export type AgentEventInput = {
   subagentType?: string;
   /** What the run was asked to do — the Task call's own wording. */
   subagentName?: string;
+  /** Which exchange this belongs to — the deck's thread unit. */
+  turnId?: string;
 };
 
 export type RemoteCommand = {

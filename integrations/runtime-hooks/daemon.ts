@@ -21,6 +21,7 @@ type DaemonState = {
   task: string;
   objective?: string;
   name: string;
+  cwd?: string;
   model?: string;
   tokens?: number;
   processedTokens?: number;
@@ -230,6 +231,7 @@ async function heartbeat() {
       id: agentId,
       name: state.name,
       project,
+      cwd: state.cwd,
       model:
         state.model ??
         (runtime === "claude" ? "Claude Code" : runtime === "gemini" ? "Gemini CLI" : "Codex"),

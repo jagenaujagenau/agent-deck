@@ -59,6 +59,8 @@ type HookState = {
   objective?: string;
   name?: string;
   project?: string;
+  /** Where the session works; the daemon repeats it on every heartbeat. */
+  cwd?: string;
   model?: string;
   tokens?: number;
   processedTokens?: number;
@@ -154,6 +156,7 @@ try {
   /* First event for this session. */
 }
 state.project ??= detectedProject;
+state.cwd = cwd;
 state.name = `${runtimeTitle} · ${state.project} · ${sessionKey.slice(0, 4)}`;
 state.ownerPid = runtimeOwnerPid();
 state.capabilities = ["approve", "reject", "steer", "prompt", "follow_up"];
@@ -322,6 +325,7 @@ const heartbeat = async () =>
     id: agentId,
     name: state.name ?? displayName,
     project: state.project ?? detectedProject,
+    cwd: state.cwd ?? cwd,
     model: state.model ?? model,
     runtime,
     runtimeProtocol: "canonical-v1",
@@ -378,6 +382,9 @@ const publish = (
     kind,
     summary: clip(summary, 120),
     detail: detail ? clipMultiline(detail) : undefined,
+    // Every event belongs to the exchange that caused it; the turn is the
+    // deck's thread unit, so the id rides along wherever one is open.
+    turnId: state.activeTurnId,
     ...extra,
   };
   // Claude Code tags every hook fired inside a subagent with that subagent's

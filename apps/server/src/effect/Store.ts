@@ -94,7 +94,11 @@ export class BridgeStore extends Context.Service<
      * exchanges for a caller that cannot use the whole thing - a watch reading
      * over wifi, where the full history is most of a megabyte.
      */
-    readonly history: (agentId: string, limit?: number) => Effect.Effect<ReadonlyArray<AgentEvent>>;
+    readonly history: (
+      agentId: string,
+      limit?: number,
+      before?: string,
+    ) => Effect.Effect<ReadonlyArray<AgentEvent>>;
     /** Every file change a session produced, oldest first. */
     readonly fileChanges: (agentId: string) => Effect.Effect<ReadonlyArray<AgentEvent>>;
     /** What a session can be asked to run by name. */
@@ -143,6 +147,7 @@ export class BridgeStore extends Context.Service<
           subagent_id: string | null;
           subagent_type: string | null;
           subagent_name: string | null;
+          turn_id: string | null;
           created_at: string;
         }>,
       ): ReadonlyArray<AgentEvent> =>
@@ -170,17 +175,25 @@ export class BridgeStore extends Context.Service<
           subagentId: row.subagent_id ?? undefined,
           subagentType: row.subagent_type ?? undefined,
           subagentName: row.subagent_name ?? undefined,
+          turnId: row.turn_id ?? undefined,
           createdAt: row.created_at,
         }));
 
-      const history = Effect.fn("BridgeStore.history")(function* (agentId: string, limit?: number) {
+      const history = Effect.fn("BridgeStore.history")(function* (
+        agentId: string,
+        limit?: number,
+        before?: string,
+      ) {
+        // Paging: `before` reopens the log earlier than the given instant, so
+        // a client can walk a long session back one window at a time.
+        const cutoff = before ?? "\uffff";
         // Conversation is fetched separately from recent activity: tool events
         // outnumber messages by an order of magnitude, so a flat "most recent
         // N" would keep the chatter and drop the conversation.
         const conversation = yield* sql<any>`
-          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, created_at
+          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, turn_id, created_at
           FROM bridge_session_events
-          WHERE agent_id = ${agentId}
+          WHERE agent_id = ${agentId} AND created_at < ${cutoff}
             AND (kind = 'user' OR summary LIKE 'Remote command:%'
                  OR (kind = 'thought' AND summary = 'Received instruction')
                  -- A subagent's parting message is conversation, not chatter.
@@ -190,9 +203,9 @@ export class BridgeStore extends Context.Service<
                  OR (kind = 'output' AND tool IS NULL AND command IS NULL))
           ORDER BY created_at DESC LIMIT 500`;
         const recent = yield* sql<any>`
-          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, created_at
+          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, turn_id, created_at
           FROM bridge_session_events
-          WHERE agent_id = ${agentId}
+          WHERE agent_id = ${agentId} AND created_at < ${cutoff}
           ORDER BY created_at DESC LIMIT 600`;
         const byId = new Map<string, AgentEvent>();
         const spoken = new Set<string>();

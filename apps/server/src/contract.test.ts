@@ -251,6 +251,49 @@ describe("the wire contract, executed", () => {
     expect(commands).toEqual([{ name: "deploy", description: "Ship it", source: "user" }]);
   });
 
+  test("the wire says where a session works, and a later beat cannot unsay it", async () => {
+    await heartbeat("codex-contract-cwd", { cwd: "/repos/deck" });
+    expect((await master.agent("codex-contract-cwd"))?.cwd).toBe("/repos/deck");
+    // A beat that omits the field must not erase the fact.
+    await heartbeat("codex-contract-cwd", { task: "still going" });
+    expect((await master.agent("codex-contract-cwd"))?.cwd).toBe("/repos/deck");
+  });
+
+  test("events carry the turn they belong to", async () => {
+    await publish("/agents/codex-contract-1/events", {
+      kind: "output",
+      summary: "Response",
+      detail: "threaded",
+      id: "contract-turn-1",
+      turnId: "turn-abc",
+    });
+    const history = await master.history("codex-contract-1", 100);
+    expect(history.find((event) => event.id === "contract-turn-1")?.turnId).toBe("turn-abc");
+  });
+
+  test("history pages backwards with `before`", async () => {
+    const whole = await master.history("codex-contract-1", 100);
+    const pivot = whole[Math.floor(whole.length / 2)]!;
+    const page = await master.history("codex-contract-1", 100, pivot.createdAt);
+    expect(page.length).toBeGreaterThan(0);
+    expect(page.every((event) => event.createdAt < pivot.createdAt)).toBe(true);
+  });
+
+  test("dismissing a session clears the deck but keeps its history", async () => {
+    await heartbeat("codex-contract-dismissed", {});
+    await publish("/agents/codex-contract-dismissed/events", {
+      kind: "output",
+      summary: "Response",
+      detail: "remembered",
+      id: "contract-dismiss-1",
+    });
+    await master.dismiss("codex-contract-dismissed");
+    expect(await master.agent("codex-contract-dismissed")).toBeUndefined();
+    const history = await master.history("codex-contract-dismissed", 10);
+    expect(history.some((event) => event.id === "contract-dismiss-1")).toBe(true);
+    await expect(master.dismiss("codex-contract-dismissed")).rejects.toBeInstanceOf(BridgeError);
+  });
+
   test("the stream opens with a snapshot and every change lands as a patch", async () => {
     const decks: BridgeSnapshot[] = [];
     const subscription = subscribeDeck(base, MASTER, {

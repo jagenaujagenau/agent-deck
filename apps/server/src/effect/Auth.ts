@@ -46,8 +46,13 @@ export const routePolicy = (method: string, path: string) => {
     requestPolling ||
     catalogPublish ||
     /\/agents\/heartbeat$|\/agents\/[^/]+\/(events|runtime-events|commands)(\/|$)/.test(path);
+  // Dismissing a session changes what every surface shows, so it takes the
+  // same scope as steering one.
+  const dismissal = method === "DELETE" && /^\/agents\/[^/]+$/.test(path);
   const requiredScope: Scope =
-    path.endsWith("/control") || managedResolution || requestResolution ? "control" : "read";
+    path.endsWith("/control") || managedResolution || requestResolution || dismissal
+      ? "control"
+      : "read";
   return { runtimeOnly, requiredScope };
 };
 

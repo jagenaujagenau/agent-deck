@@ -44,6 +44,8 @@ export interface AgentEvent {
   subagentType?: string;
   /** What the run was asked to do — the delegating call's own wording. */
   subagentName?: string;
+  /** Which exchange this belongs to — the deck's thread unit. */
+  turnId?: string;
 }
 
 export interface PendingApproval {
@@ -75,6 +77,8 @@ export interface Agent {
   id: string;
   name: string;
   project: string;
+  /** The directory the session works in, on the bridge's machine. */
+  cwd?: string;
   model: string;
   state: AgentState;
   task: string;

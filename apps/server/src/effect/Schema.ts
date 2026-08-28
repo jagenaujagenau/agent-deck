@@ -30,7 +30,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS bridge_activity (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, project TEXT NOT NULL, runtime TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_file_changes (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, path TEXT, tool TEXT, diff TEXT NOT NULL, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_slash_commands (agent_id TEXT PRIMARY KEY, commands TEXT NOT NULL, updated_at TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS bridge_session_events (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT, tool TEXT, command TEXT, path TEXT, options TEXT, subagent_id TEXT, subagent_type TEXT, subagent_name TEXT, created_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS bridge_session_events (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT, tool TEXT, command TEXT, path TEXT, options TEXT, subagent_id TEXT, subagent_type TEXT, subagent_name TEXT, turn_id TEXT, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS bridge_session_events_agent_idx ON bridge_session_events(agent_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS bridge_file_changes_agent_idx ON bridge_file_changes(agent_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS bridge_activity_created_idx ON bridge_activity(created_at)`,
@@ -83,6 +83,10 @@ export const BridgeSchema = Layer.effectDiscard(
     // The run's own name arrived after subagent attribution shipped.
     if (!eventColumns.some((column) => column.name === "subagent_name")) {
       yield* sql.unsafe("ALTER TABLE bridge_session_events ADD COLUMN subagent_name TEXT");
+    }
+    // The turn an event belongs to arrived when turns became the thread unit.
+    if (!eventColumns.some((column) => column.name === "turn_id")) {
+      yield* sql.unsafe("ALTER TABLE bridge_session_events ADD COLUMN turn_id TEXT");
     }
 
     // Tool hooks may run from nested directories, so a fact can arrive tagged

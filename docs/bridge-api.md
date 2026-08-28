@@ -51,7 +51,7 @@ in ~2 ms at the median; a 20-subscriber fan-out lands on the slowest screen in
 
 ## An agent, on the wire
 
-A snapshot agent: `id`, `name`, `project`, `model`, `state`, `task`,
+A snapshot agent: `id`, `name`, `project`, `cwd?`, `model`, `state`, `task`,
 `objective?`, `progress?`, `tokens`, `processedTokens?`, `costUsd`,
 `lastSeenAt`, `viewedAt?`, `runtime?`, `events` (a rolling window of the ~24
 newest, newest first), `capabilities?`, `rateLimits`, `pendingApproval?`,
@@ -68,6 +68,9 @@ newest, newest first), `capabilities?`, `rateLimits`, `pendingApproval?`,
   `POST /agents/:id/seen` (no body → `{viewedAt}`), and treat an agent as seen
   when a local mark **or** `viewedAt` covers its latest activity. Machine
   reads must never mark seen.
+- `cwd` is the directory the session works in, on the bridge's machine —
+  what lets a client offer "start another one here" or open the code the
+  session is touching. A heartbeat that omits it does not erase it.
 - Snapshot events are trimmed for cards: `detail` is clipped and `command` and
   `diff` are dropped. The full versions live in history — merge history under
   live events by id, and prefer the history copy's `command`/`diff`/long
@@ -77,7 +80,7 @@ newest, newest first), `capabilities?`, `rateLimits`, `pendingApproval?`,
 
 An `AgentEvent`: `id`, `kind`, `summary`, `detail?`, `createdAt`, `tool?`,
 `path?`, `command?`, `diff?`, `options?`, `subagentId?`, `subagentType?`,
-`subagentName?`.
+`subagentName?`, `turnId?`.
 
 `kind` is one of:
 
@@ -95,6 +98,10 @@ Subagent fields thread a child's work through its parent's stream:
 `subagentName` is the errand in the delegating call's own words ("Fix lint in
 apps/server") — title a subagent by name, falling back to its type.
 
+`turnId` names the exchange an event belongs to — one instruction and
+everything done in its service. It is the deck's thread unit: group by it
+where present rather than guessing boundaries from timestamps.
+
 Publishing an event with an `id` the session already has **revises** that
 event in place (a tool's diff arrives with its completion); order by
 `createdAt`, not arrival.
@@ -103,10 +110,12 @@ event in place (a tool's diff arrives with its completion); order by
 
 - `GET /snapshot` — the same shape as the SSE snapshot frame, for one-shot
   reads.
-- `GET /agents/:id/history?limit=N` — the retained event log, oldest first.
-  Conversation and activity are fetched and trimmed as separate budgets (the
-  conversation keeps priority, activity keeps at least a third), so neither a
-  chatty session nor a tool-heavy one starves the other's tab.
+- `GET /agents/:id/history?limit=N&before=<createdAt>` — the retained event
+  log, oldest first. Conversation and activity are fetched and trimmed as
+  separate budgets (the conversation keeps priority, activity keeps at least
+  a third), so neither a chatty session nor a tool-heavy one starves the
+  other's tab. `before` pages backwards: pass the oldest `createdAt` already
+  held to receive the window before it.
 - `GET /agents/:id/changes` — every file change the session produced, with
   diffs.
 - `GET /agents/:id/slash-commands` — what the session can be asked to run by
@@ -135,6 +144,11 @@ this way; they are how a blocked session gets unblocked.
 
 Delivery is observable: `GET /commands/:id/receipt` reports
 `{commandId, status, error?, resultSequence?, updatedAt}`.
+
+`DELETE /agents/:id` (control scope) dismisses a session from the deck. Its
+history, usage, and file changes are kept — this declutters the live list,
+it does not erase what the session did. A session still heartbeating simply
+reappears on its next beat.
 
 Questions and approvals are durable requests:
 `GET /agents/:id/requests/:requestId` polls status;
