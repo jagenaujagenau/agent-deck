@@ -144,6 +144,11 @@ button:disabled {
   font-size: 11.5px;
   margin-top: 8px;
 }
+.info {
+  color: var(--muted);
+  font-size: 11.5px;
+  margin-top: 8px;
+}
 
 /* Services stack rather than sit in one card: each has its own controls, and a
    shared border would imply a shared state they do not have. */

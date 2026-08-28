@@ -84,6 +84,7 @@ let harnesses: Harness[] = [];
 let services: ServiceStatus[] = [];
 let appVersion = "";
 let notice = "";
+let info = "";
 
 /** One service, with the controls that make sense for the state it is in. */
 function serviceCard(status: ServiceStatus): string {
@@ -142,6 +143,7 @@ function render() {
         .join("")}
     </div>
     ${notice ? `<div class="error">${escape(notice)}</div>` : ""}
+    ${info ? `<div class="info">${escape(info)}</div>` : ""}
 
     <h2>About</h2>
     <div class="card">
@@ -161,6 +163,7 @@ function render() {
 
 async function act(action: () => Promise<void>) {
   notice = "";
+  info = "";
   try {
     await action();
   } catch (error) {
@@ -180,7 +183,7 @@ function wire() {
   document.querySelector("#update")?.addEventListener("click", () => {
     void act(async () => {
       const update = await check();
-      notice = update ? `Update ${update.version} available` : "Already up to date.";
+      info = update ? `Update ${update.version} available` : "Already up to date.";
     });
   });
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-install]")) {

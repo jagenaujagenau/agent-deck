@@ -1,5 +1,12 @@
 #!/usr/bin/env bun
-import { AgentDeckClient } from "../packages/agent-adapter/src/client";
+import {
+  AgentDeckClient,
+  type AgentEventInput,
+  type AgentHeartbeat,
+  type AgentState,
+  type ControlAction,
+  type EventKind,
+} from "../packages/agent-adapter/src/client";
 
 /**
  * A believable deck, invented from nothing.
@@ -25,11 +32,11 @@ interface Character {
   readonly project: string;
   readonly model: string;
   readonly runtime: string;
-  state: string;
+  state: AgentState;
   task: string;
   readonly tokens: number;
   readonly costUsd: number;
-  readonly capabilities: ReadonlyArray<string>;
+  readonly capabilities: ReadonlyArray<ControlAction>;
 }
 
 /**
@@ -113,158 +120,202 @@ const cast: Character[] = [
 
 const at = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
 
+interface ScriptLine {
+  kind: EventKind;
+  summary: string;
+  detail?: string;
+  ago: number;
+  options?: string[];
+  tool?: string;
+  /** Work a session farmed out, so the demo shows a named subagent lens. */
+  subagentId?: string;
+  subagentType?: string;
+  subagentName?: string;
+}
+
 /** The conversation each session is partway through. */
-const script: Record<
-  string,
-  ReadonlyArray<{ kind: string; summary: string; detail?: string; ago: number; options?: string[] }>
-> = {
-  "claude-demo-orbital": [
-    {
-      kind: "user",
-      summary: "Message",
-      detail: "The build cache is stale again — can you clear it and rerun?",
-      ago: 240,
-    },
-    {
-      kind: "thought",
-      summary: "Reasoning",
-      detail:
-        "The cache directory is generated, so removing it is safe. It sits inside the repo, though, so I should ask before deleting recursively rather than assume.",
-      ago: 200,
-    },
-    {
-      kind: "output",
-      summary: "Response",
-      detail:
-        "I can clear it. That's a recursive delete inside the repo, so I'd rather you approve it.",
-      ago: 180,
-    },
-  ],
-  "claude-demo-checkout": [
-    { kind: "user", summary: "Message", detail: "Add a retry path for failed payments.", ago: 420 },
-    {
-      kind: "thought",
-      summary: "Reasoning",
-      detail:
-        "There are two providers wired up here and the retry semantics differ: one is idempotent by key, the other charges again on replay. Guessing wrong means double charges.",
-      ago: 380,
-    },
-    {
-      kind: "question",
-      summary: "Which payment provider should the retry path use?",
-      detail: "Stripe retries are idempotent by key; the legacy provider is not.",
-      ago: 360,
-      options: ["Stripe only", "Both, with a guard", "Ask me per payment"],
-    },
-  ],
-  "claude-demo-atlas": [
-    {
-      kind: "user",
-      summary: "Message",
-      detail: "Rewrite the getting-started page for someone who has never used it.",
-      ago: 150,
-    },
-    {
-      kind: "thought",
-      summary: "Reasoning",
-      detail:
-        "The current page opens with configuration, which assumes the reader already decided to use this. Better to open with what it does in one sentence, then the smallest thing that works.",
-      ago: 90,
-    },
-    { kind: "tool", summary: "Using Edit", detail: "docs/getting-started.md", ago: 20 },
-  ],
-  "opencode-demo-hex": [
-    {
-      kind: "user",
-      summary: "Message",
-      detail: "Why is the tile renderer dropping frames on wide maps?",
-      ago: 300,
-    },
-    {
-      kind: "thought",
-      summary: "Reasoning",
-      detail:
-        "Every tile allocates its own paint object per frame. At 4,000 tiles that is 4,000 allocations sixty times a second, which is the garbage collector, not the renderer.",
-      ago: 120,
-    },
-    {
-      kind: "output",
-      summary: "Response",
-      detail:
-        "It's allocation, not draw calls — each tile builds a new paint every frame. Hoisting it out is a one-line change.",
-      ago: 60,
-    },
-  ],
-  "codex-demo-vine": [
-    { kind: "user", summary: "Message", detail: "Ship the changelog for 2.4.", ago: 900 },
-    {
-      kind: "output",
-      summary: "Response",
-      detail: "Written and tagged. 2.4 covers the parser rewrite and two fixes to `vine watch`.",
-      ago: 840,
-    },
-  ],
-  "demo-pi-lantern": [
-    { kind: "user", summary: "Message", detail: "Any tests failing on main?", ago: 1200 },
-    {
-      kind: "output",
-      summary: "Response",
-      detail: "None. 214 pass, and the flaky socket test has held for twenty runs.",
-      ago: 1160,
-    },
-  ],
-};
+const script = new Map<string, ReadonlyArray<ScriptLine>>();
+script.set("claude-demo-orbital", [
+  {
+    kind: "user",
+    summary: "Message",
+    detail: "The build cache is stale again — can you clear it and rerun?",
+    ago: 240,
+  },
+  {
+    kind: "thought",
+    summary: "Reasoning",
+    detail:
+      "The cache directory is generated, so removing it is safe. It sits inside the repo, though, so I should ask before deleting recursively rather than assume.",
+    ago: 200,
+  },
+  {
+    kind: "output",
+    summary: "Response",
+    detail:
+      "I can clear it. That's a recursive delete inside the repo, so I'd rather you approve it.",
+    ago: 180,
+  },
+]);
+script.set("claude-demo-checkout", [
+  { kind: "user", summary: "Message", detail: "Add a retry path for failed payments.", ago: 420 },
+  {
+    kind: "thought",
+    summary: "Reasoning",
+    detail:
+      "There are two providers wired up here and the retry semantics differ: one is idempotent by key, the other charges again on replay. Guessing wrong means double charges.",
+    ago: 380,
+  },
+  {
+    kind: "question",
+    summary: "Which payment provider should the retry path use?",
+    detail: "Stripe retries are idempotent by key; the legacy provider is not.",
+    ago: 360,
+    options: ["Stripe only", "Both, with a guard", "Ask me per payment"],
+  },
+]);
+script.set("claude-demo-atlas", [
+  {
+    kind: "user",
+    summary: "Message",
+    detail: "Rewrite the getting-started page for someone who has never used it.",
+    ago: 150,
+  },
+  {
+    kind: "thought",
+    summary: "Reasoning",
+    detail:
+      "The current page opens with configuration, which assumes the reader already decided to use this. Better to open with what it does in one sentence, then the smallest thing that works.",
+    ago: 90,
+  },
+  { kind: "tool", summary: "Using Edit", detail: "docs/getting-started.md", ago: 20 },
+  // Work atlas farmed out, so the demo shows a lens titled by its errand
+  // rather than by "general-purpose".
+  {
+    kind: "tool",
+    tool: "Task",
+    summary: "Check every code sample still runs",
+    ago: 80,
+    subagentId: "demo-sub-samples",
+    subagentName: "Check every code sample still runs",
+  },
+  {
+    kind: "tool",
+    summary: "Using Bash",
+    detail: "bun run docs/samples/hello.ts",
+    ago: 60,
+    subagentId: "demo-sub-samples",
+    subagentType: "general-purpose",
+  },
+  {
+    kind: "output",
+    tool: "Task",
+    summary: "general-purpose subagent finished",
+    detail: "All nine samples run. Two needed the new import path; fixed in place.",
+    ago: 35,
+    subagentId: "demo-sub-samples",
+    subagentType: "general-purpose",
+  },
+]);
+script.set("opencode-demo-hex", [
+  {
+    kind: "user",
+    summary: "Message",
+    detail: "Why is the tile renderer dropping frames on wide maps?",
+    ago: 300,
+  },
+  {
+    kind: "thought",
+    summary: "Reasoning",
+    detail:
+      "Every tile allocates its own paint object per frame. At 4,000 tiles that is 4,000 allocations sixty times a second, which is the garbage collector, not the renderer.",
+    ago: 120,
+  },
+  {
+    kind: "output",
+    summary: "Response",
+    detail:
+      "It's allocation, not draw calls — each tile builds a new paint every frame. Hoisting it out is a one-line change.",
+    ago: 60,
+  },
+]);
+script.set("codex-demo-vine", [
+  { kind: "user", summary: "Message", detail: "Ship the changelog for 2.4.", ago: 900 },
+  {
+    kind: "output",
+    summary: "Response",
+    detail: "Written and tagged. 2.4 covers the parser rewrite and two fixes to `vine watch`.",
+    ago: 840,
+  },
+]);
+script.set("demo-pi-lantern", [
+  { kind: "user", summary: "Message", detail: "Any tests failing on main?", ago: 1200 },
+  {
+    kind: "output",
+    summary: "Response",
+    detail: "None. 214 pass, and the flaky socket test has held for twenty runs.",
+    ago: 1160,
+  },
+]);
 
 async function heartbeat(character: Character) {
-  await client
-    .heartbeat({
-      id: character.id,
-      name: character.name,
-      project: character.project,
-      model: character.model,
-      runtime: character.runtime,
-      state: character.state as never,
-      task: character.task,
-      tokens: character.tokens,
-      processedTokens: character.tokens * 42,
-      costUsd: character.costUsd,
-      capabilities: character.capabilities as never,
-      ...(character.id === "claude-demo-orbital"
-        ? {
-            pendingApproval: {
-              id: "demo-approval-1",
-              tool: "Bash",
-              detail: "rm -rf .cache/build",
-              createdAt: at(180),
-              // Far enough out that it is still pending whenever this is shown.
-              expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
-            },
-          }
-        : {}),
-    })
-    .catch(() => {});
+  const pulse: AgentHeartbeat = {
+    id: character.id,
+    name: character.name,
+    project: character.project,
+    model: character.model,
+    runtime: character.runtime,
+    state: character.state,
+    task: character.task,
+    tokens: character.tokens,
+    processedTokens: character.tokens * 42,
+    costUsd: character.costUsd,
+    capabilities: [...character.capabilities],
+  };
+  if (character.id === "claude-demo-orbital") {
+    pulse.pendingApproval = {
+      id: "demo-approval-1",
+      tool: "Bash",
+      detail: "rm -rf .cache/build",
+      createdAt: at(180),
+      // Far enough out that it is still pending whenever this is shown.
+      expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    };
+  }
+  await client.heartbeat(pulse).catch(() => {});
 }
 
 async function seed() {
   for (const character of cast) {
     await heartbeat(character);
-    for (const [index, line] of (script[character.id] ?? []).entries()) {
-      await client
-        .event(character.id, {
-          id: `${character.id}:${index}`,
-          kind: line.kind as never,
-          summary: line.summary,
-          detail: line.detail,
-          ...(line.options ? { options: line.options } : {}),
-        })
-        .catch(() => {});
+    for (const [index, line] of (script.get(character.id) ?? []).entries()) {
+      const event: AgentEventInput = {
+        id: `${character.id}:${index}`,
+        kind: line.kind,
+        summary: line.summary,
+        detail: line.detail,
+      };
+      if (line.options) event.options = line.options;
+      if (line.tool) event.tool = line.tool;
+      if (line.subagentId) event.subagentId = line.subagentId;
+      if (line.subagentType) event.subagentType = line.subagentType;
+      if (line.subagentName) event.subagentName = line.subagentName;
+      await client.event(character.id, event).catch(() => {});
     }
   }
   console.log(`Seeded ${cast.length} sessions on ${client.baseUrl}`);
 }
 
+interface Beat {
+  id: string;
+  task: string;
+  kind: EventKind;
+  summary: string;
+  detail: string;
+}
+
 /** Small movements, so a recording shows a deck that is alive rather than a screenshot. */
-const beats = [
+const beats: Beat[] = [
   {
     id: "claude-demo-atlas",
     task: "Using Edit",
@@ -315,7 +366,7 @@ async function main() {
       await client
         .event(character.id, {
           id: `${character.id}:beat:${beat}`,
-          kind: step.kind as never,
+          kind: step.kind,
           summary: step.summary,
           detail: step.detail,
         })

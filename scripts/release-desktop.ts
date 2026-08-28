@@ -14,6 +14,8 @@ import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const desktop = join(root, "apps", "desktop");
+// SAFETY: tauri.conf.json is this repository's own config file, and the two
+// fields read here are the ones the desktop build cannot exist without.
 const conf = JSON.parse(readFileSync(join(desktop, "src-tauri", "tauri.conf.json"), "utf8")) as {
   version: string;
   productName: string;
