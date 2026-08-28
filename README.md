@@ -1,11 +1,18 @@
 # Agent Deck
 
-Watch and steer coding agents from a phone, a watch, or the menu bar.
+One bridge for every coding agent, and any interface you like on top.
 
-A bridge on your machine collects what every agent session is doing — what it is
-thinking, what it is waiting on, what it changed — and the surfaces read from it.
-Approvals and questions can be answered from a wrist. Nothing is exposed
-publicly; the bridge listens on localhost and is reached over a tailnet.
+The bridge is the product. It pulls live activity out of every harness a
+session runs in — Claude Code, Codex, OpenCode, Pi — and unifies it into one
+canonical stream: messages, reasoning, terminal activity, file changes,
+approvals, questions, usage. Anything can subscribe to that stream and any
+client can steer through it; the Android, Wear OS, and iOS apps here are
+reference clients — a messaging app with your agents, a remote control on a
+wrist — not the boundary of what can be built. The wire contract is one
+document: [`docs/bridge-api.md`](docs/bridge-api.md).
+
+Nothing is exposed publicly; the bridge listens on localhost and is reached
+over a tailnet.
 
 ## The shape of it
 
@@ -220,6 +227,10 @@ have already reported a healthy bridge that had never once started.
 
 ## Documentation
 
+- [`docs/bridge-api.md`](docs/bridge-api.md) — the wire contract: auth and
+  pairing, the snapshot/patch stream, the event vocabulary, control verbs and
+  the blocked refusal, and what an adapter must publish. Build a client from
+  this document alone.
 - [`CONTEXT.md`](CONTEXT.md) — the domain vocabulary: Agent, Project, Runtime
   Event, Runtime Projection, and what each one is allowed to mean.
 - [`docs/`](docs) — protocol and adapter notes.
