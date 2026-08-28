@@ -21,9 +21,7 @@ const FILE_TOOLS = /^(edit|write|create|update|multiedit|notebookedit|applypatch
 
 /** Whether this tool call is expected to change a file on disk, and so is worth snapshotting. */
 export function mutatesFile(tool: string, target: string | undefined): target is string {
-  return (
-    typeof target === "string" && target.length > 0 && FILE_TOOLS.test(tool.replace(/[\s_-]/g, ""))
-  );
+  return target !== undefined && target.length > 0 && FILE_TOOLS.test(tool.replace(/[\s_-]/g, ""));
 }
 
 function snapshotFile(directory: string, key: string) {

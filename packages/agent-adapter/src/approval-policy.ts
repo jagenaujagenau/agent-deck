@@ -1,9 +1,10 @@
+import { asString } from "./json-value";
+import type { JsonObject } from "./json-value";
+
 export type ApprovalMode = "off" | "destructive" | "all";
 
 export function normalizeApprovalMode(value: string | undefined): ApprovalMode {
-  return value && ["off", "destructive", "all"].includes(value)
-    ? (value as ApprovalMode)
-    : "destructive";
+  return value === "off" || value === "destructive" || value === "all" ? value : "destructive";
 }
 
 export function usesRemoteApproval(mode: ApprovalMode): boolean {
@@ -27,38 +28,29 @@ const SENSITIVE_PATH_PATTERN =
 
 export function requiresApproval(
   toolName: string,
-  input: Record<string, unknown>,
+  input: Readonly<JsonObject>,
   mode: ApprovalMode,
 ): boolean {
   if (!usesRemoteApproval(mode)) return false;
   const normalized = toolName.toLowerCase();
   if (mode === "all") return ["bash", "write", "edit"].includes(normalized);
   if (normalized === "bash") {
-    const command = typeof input.command === "string" ? input.command : "";
+    const command = asString(input.command) ?? "";
     return HIGH_RISK_BASH_PATTERNS.some((pattern) => pattern.test(command));
   }
   if (normalized === "write" || normalized === "edit") {
-    const path =
-      typeof input.path === "string"
-        ? input.path
-        : typeof input.file_path === "string"
-          ? input.file_path
-          : "";
+    const path = asString(input.path) ?? asString(input.file_path) ?? "";
     return SENSITIVE_PATH_PATTERN.test(path);
   }
   return false;
 }
 
-export function describeToolCall(toolName: string, input: Record<string, unknown>): string {
+export function describeToolCall(toolName: string, input: Readonly<JsonObject>): string {
   const normalized = toolName.toLowerCase();
-  if (normalized === "bash" && typeof input.command === "string") return input.command;
+  const command = asString(input.command);
+  if (normalized === "bash" && command !== undefined) return command;
   if (normalized === "write" || normalized === "edit") {
-    const path =
-      typeof input.path === "string"
-        ? input.path
-        : typeof input.file_path === "string"
-          ? input.file_path
-          : undefined;
+    const path = asString(input.path) ?? asString(input.file_path);
     if (path) return `${toolName} ${path}`;
   }
   try {

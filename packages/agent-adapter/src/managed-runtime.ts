@@ -30,11 +30,15 @@ export interface ManagedRuntimeAdapter {
   }): Promise<ManagedSession>;
   send(session: ManagedSession, prompt: string): Promise<void>;
   interrupt(session: ManagedSession): Promise<void>;
-  resolveRequest(
+  /**
+   * The resolution value is carried through untouched: only the runtime that
+   * opened the request knows its shape, so the adapter never inspects it.
+   */
+  resolveRequest<Value>(
     session: ManagedSession,
     requestId: string,
     status: RuntimeRequestStatus,
-    value?: unknown,
+    value?: Value,
   ): Promise<void>;
   stop(session: ManagedSession): Promise<void>;
   events(session: ManagedSession): AsyncIterable<CanonicalRuntimeEvent>;

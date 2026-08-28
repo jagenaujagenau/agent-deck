@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { CanUseTool, Query } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, Options, Query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import {
   ClaudeSdkManagedRuntimeAdapter,
   type DurableManagedRequest,
@@ -7,20 +7,22 @@ import {
 } from "./claude-sdk-runtime";
 import type { RuntimeRequestStatus } from "./runtime-events";
 
+type Resolution = { status: RuntimeRequestStatus; value?: unknown };
+
 class RequestStore implements ManagedRequestStore {
   opened?: DurableManagedRequest;
-  result?: { status: RuntimeRequestStatus; value?: unknown };
-  waiter?: (value: { status: RuntimeRequestStatus; value?: unknown }) => void;
+  result?: Resolution;
+  waiter?: (value: Resolution) => void;
   async open(request: DurableManagedRequest) {
     this.opened = request;
   }
-  async resolve(_requestId: string, status: RuntimeRequestStatus, value?: unknown) {
+  async resolve<Value>(_requestId: string, status: RuntimeRequestStatus, value?: Value) {
     this.result = { status, value };
     this.waiter?.(this.result);
   }
   async waitForResolution(_requestId: string, signal: AbortSignal) {
     if (this.result) return this.result;
-    return new Promise<{ status: RuntimeRequestStatus; value?: unknown }>((resolve, reject) => {
+    return new Promise<Resolution>((resolve, reject) => {
       this.waiter = resolve;
       signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
     });
@@ -28,23 +30,27 @@ class RequestStore implements ManagedRequestStore {
 }
 
 function dormantQuery(): Query {
-  let resolveNext: ((value: IteratorResult<never>) => void) | undefined;
+  let resolveNext: ((value: IteratorResult<SDKMessage, void>) => void) | undefined;
   const iterator = {
-    next: () =>
-      new Promise<IteratorResult<never>>((resolve) => {
+    next: (): Promise<IteratorResult<SDKMessage, void>> =>
+      new Promise((resolve) => {
         resolveNext = resolve;
       }),
-    return: async () => ({ done: true, value: undefined }),
-    throw: async (error: unknown) => {
-      throw error;
+    return: async (
+      _value?: void | PromiseLike<void>,
+    ): Promise<IteratorResult<SDKMessage, void>> => ({ done: true, value: undefined }),
+    throw: async (cause: unknown): Promise<IteratorResult<SDKMessage, void>> => {
+      throw cause;
     },
-    [Symbol.asyncIterator]() {
+    [Symbol.asyncIterator](): AsyncIterator<SDKMessage, void> {
       return this;
     },
-    interrupt: async () => undefined,
-    close: () => resolveNext?.({ done: true, value: undefined as never }),
+    interrupt: async (): Promise<void> => undefined,
+    close: () => resolveNext?.({ done: true, value: undefined }),
   };
-  return iterator as unknown as Query;
+  // SAFETY: the adapter only iterates the query and calls interrupt/close;
+  // the rest of the Query surface is never touched by these tests.
+  return iterator as Query;
 }
 
 describe("ClaudeSdkManagedRuntimeAdapter", () => {
@@ -52,7 +58,7 @@ describe("ClaudeSdkManagedRuntimeAdapter", () => {
     const store = new RequestStore();
     let canUseTool: CanUseTool | undefined;
     const adapter = new ClaudeSdkManagedRuntimeAdapter(store, ({ options }) => {
-      canUseTool = options.canUseTool as CanUseTool;
+      canUseTool = options.canUseTool;
       return dormantQuery();
     });
     const session = await adapter.start({ agentId: "managed-1", project: "deck", cwd: "/tmp" });
@@ -80,7 +86,7 @@ describe("ClaudeSdkManagedRuntimeAdapter", () => {
 
   test("leaves auto-mode permission decisions with Claude", async () => {
     const store = new RequestStore();
-    let options: Record<string, unknown> = {};
+    let options: Options = {};
     const adapter = new ClaudeSdkManagedRuntimeAdapter(store, (input) => {
       options = input.options;
       return dormantQuery();
@@ -101,7 +107,7 @@ describe("ClaudeSdkManagedRuntimeAdapter", () => {
     const store = new RequestStore();
     let canUseTool: CanUseTool | undefined;
     const adapter = new ClaudeSdkManagedRuntimeAdapter(store, ({ options }) => {
-      canUseTool = options.canUseTool as CanUseTool;
+      canUseTool = options.canUseTool;
       return dormantQuery();
     });
     const session = await adapter.start({ agentId: "managed-2", project: "deck", cwd: "/tmp" });

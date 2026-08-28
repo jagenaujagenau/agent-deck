@@ -19,7 +19,8 @@ describe("clipMultiline", () => {
 
 describe("AgentDeckClient", () => {
   test("authenticates and publishes normalized heartbeats", async () => {
-    const captured: { authorization: string | null; body?: unknown } = { authorization: null };
+    type Captured = { authorization: string | null; body?: unknown };
+    const captured: Captured = { authorization: null };
     server = Bun.serve({
       port: 0,
       async fetch(request) {

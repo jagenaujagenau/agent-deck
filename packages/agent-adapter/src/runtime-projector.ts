@@ -1,4 +1,20 @@
+import { isJsonNumber, isJsonObject, isJsonString } from "./json-value";
+import type { JsonValue } from "./json-value";
 import type { CanonicalRuntimeEvent, RuntimeRequestStatus } from "./runtime-events";
+
+/**
+ * One usage window as a runtime reports it: how much of a rate-limited
+ * allowance is spent, named well enough for a card to label it. This is the
+ * same shape the heartbeat's `rateLimits` carries, so a snapshot can prefer
+ * whichever source spoke.
+ */
+export type ProjectedRateLimit = {
+  id: string;
+  label: string;
+  usedPercent: number;
+  resetsAt?: string;
+  account?: string;
+};
 
 export type RuntimeProjection = {
   agentId: string;
@@ -18,7 +34,7 @@ export type RuntimeProjection = {
     runtime?: string;
     capabilities?: ReadonlyArray<string>;
   };
-  state: "idle" | "running" | "waiting" | "error" | "offline";
+  state: "idle" | "running" | "waiting" | "paused" | "error" | "offline";
   task: string;
   activeTurnId?: string;
   activeItemId?: string;
@@ -26,11 +42,13 @@ export type RuntimeProjection = {
     id: string;
     kind: "approval" | "user-input";
     status: RuntimeRequestStatus;
-    payload: Record<string, unknown>;
+    payload: CanonicalRuntimeEvent["payload"];
   };
   contextTokens: number;
   processedTokens: number;
   usageKnown: boolean;
+  /** Absent until a `rate-limits.updated` event arrives; then the latest report. */
+  rateLimits?: ReadonlyArray<ProjectedRateLimit>;
   updatedAt: string;
 };
 
@@ -63,6 +81,9 @@ export function projectRuntimeEvent(
           project: text(event.payload.project) ?? current.identity?.project ?? "",
           model: text(event.payload.model) ?? current.identity?.model ?? "",
           runtime: text(event.payload.runtime) ?? current.identity?.runtime,
+          // SAFETY: registration events are written by this repo's adapters,
+          // which declare capabilities as an array of action names; a foreign
+          // value could only mislabel controls, never break the projection.
           capabilities: Array.isArray(event.payload.capabilities)
             ? (event.payload.capabilities as ReadonlyArray<string>)
             : current.identity?.capabilities,
@@ -157,21 +178,55 @@ export function projectRuntimeEvent(
       };
     case "runtime.error":
       return { ...next, state: "error", task: text(event.payload.message) ?? "Runtime error" };
-    case "rate-limits.updated":
-      return next;
+    case "rate-limits.updated": {
+      // The latest report replaces the previous one wholesale: windows are a
+      // reading, not history, and a window that stopped being reported has
+      // closed. A payload with no readable window list changes nothing.
+      const windows = rateLimitWindows(event.payload.windows);
+      return windows === undefined ? next : { ...next, rateLimits: windows };
+    }
   }
 }
 
-function text(value: unknown) {
-  return typeof value === "string" && value.trim() ? value : undefined;
+/**
+ * Reads a `rate-limits.updated` payload's window list, keeping the entries
+ * that name a window and dropping the rest — the same tolerance every other
+ * payload field gets at this boundary. A value that is not a list at all
+ * yields undefined, which the fold treats as "nothing was said".
+ */
+function rateLimitWindows(
+  value: JsonValue | undefined,
+): ReadonlyArray<ProjectedRateLimit> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const windows: ProjectedRateLimit[] = [];
+  for (const entry of value) {
+    if (!isJsonObject(entry)) continue;
+    const id = text(entry.id);
+    const label = text(entry.label);
+    const usedPercent = entry.usedPercent;
+    if (!id || !label || !isJsonNumber(usedPercent) || !Number.isFinite(usedPercent)) continue;
+    const window: ProjectedRateLimit = { id, label, usedPercent };
+    const resetsAt = text(entry.resetsAt);
+    if (resetsAt) window.resetsAt = resetsAt;
+    const account = text(entry.account);
+    if (account) window.account = account;
+    windows.push(window);
+  }
+  return windows;
 }
-function count(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? Math.trunc(value)
-    : fallback;
+
+function text(value: JsonValue | undefined) {
+  return isJsonString(value) && value.trim() ? value : undefined;
 }
-function state(value: unknown): RuntimeProjection["state"] {
-  return value === "running" || value === "waiting" || value === "error" || value === "offline"
+function count(value: JsonValue | undefined, fallback: number) {
+  return isJsonNumber(value) && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : fallback;
+}
+function state(value: JsonValue | undefined): RuntimeProjection["state"] {
+  return value === "running" ||
+    value === "waiting" ||
+    value === "paused" ||
+    value === "error" ||
+    value === "offline"
     ? value
     : "idle";
 }

@@ -1,11 +1,13 @@
 import {
   query,
   type CanUseTool,
+  type Options,
   type PermissionResult,
   type Query,
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { JsonObject, JsonValue } from "./json-value";
 import type { CanonicalRuntimeEvent, RuntimeRequestStatus } from "./runtime-events";
 import type { ManagedRuntimeAdapter, ManagedSession } from "./managed-runtime";
 
@@ -13,24 +15,22 @@ export type DurableManagedRequest = {
   requestId: string;
   agentId: string;
   kind: "approval" | "user-input";
-  payload: Record<string, unknown>;
+  payload: JsonObject;
   createdAt: string;
   expiresAt: string;
 };
 
 export interface ManagedRequestStore {
   open(request: DurableManagedRequest): Promise<void>;
-  resolve(requestId: string, status: RuntimeRequestStatus, value?: unknown): Promise<void>;
+  /** The value is stored opaquely; the runtime that asked knows its shape. */
+  resolve<Value>(requestId: string, status: RuntimeRequestStatus, value?: Value): Promise<void>;
   waitForResolution(
     requestId: string,
     signal: AbortSignal,
   ): Promise<{ status: RuntimeRequestStatus; value?: unknown }>;
 }
 
-type QueryFactory = (input: {
-  prompt: AsyncIterable<SDKUserMessage>;
-  options: Record<string, unknown>;
-}) => Query;
+type QueryFactory = (input: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query;
 
 type SessionRuntime = {
   session: ManagedSession;
@@ -71,6 +71,11 @@ class AsyncPushQueue<T> implements AsyncIterable<T> {
 const stamp = () => new Date().toISOString();
 const eventId = () => crypto.randomUUID();
 
+// SAFETY: every structured value this adapter forwards — SDK message fields
+// decoded from the Claude subprocess's JSON stream, resolution values the
+// request store persisted as JSON — is JSON data by construction.
+const asJsonValue = <Value>(value: Value): JsonValue => value as JsonValue;
+
 /**
  * Host-owned Claude runtime Implementation.
  *
@@ -110,18 +115,11 @@ export class ClaudeSdkManagedRuntimeAdapter implements ManagedRuntimeAdapter {
     const runtimeOwnsPermission = ["auto", "bypassPermissions", "dontAsk"].includes(permissionMode);
     const canUseTool: CanUseTool = (toolName, toolInput, options) =>
       this.#permission(session, events, toolName, toolInput, options);
-    const claudeQuery = this.queryFactory({
-      prompt: prompts,
-      options: {
-        cwd: input.cwd,
-        ...(input.model ? { model: input.model } : {}),
-        permissionMode,
-        ...(permissionMode === "bypassPermissions"
-          ? { allowDangerouslySkipPermissions: true }
-          : {}),
-        ...(!runtimeOwnsPermission ? { canUseTool } : {}),
-      },
-    });
+    const options: Options = { cwd: input.cwd, permissionMode };
+    if (input.model) options.model = input.model;
+    if (permissionMode === "bypassPermissions") options.allowDangerouslySkipPermissions = true;
+    if (!runtimeOwnsPermission) options.canUseTool = canUseTool;
+    const claudeQuery = this.queryFactory({ prompt: prompts, options });
     const runtime = { session, prompts, events, query: claudeQuery };
     this.#sessions.set(input.agentId, runtime);
     void this.#pump(runtime);
@@ -148,11 +146,11 @@ export class ClaudeSdkManagedRuntimeAdapter implements ManagedRuntimeAdapter {
     await this.#runtime(session).query.interrupt();
   }
 
-  async resolveRequest(
+  async resolveRequest<Value>(
     session: ManagedSession,
     requestId: string,
     status: RuntimeRequestStatus,
-    value?: unknown,
+    value?: Value,
   ) {
     this.#runtime(session);
     await this.requestStore.resolve(requestId, status, value);
@@ -177,14 +175,17 @@ export class ClaudeSdkManagedRuntimeAdapter implements ManagedRuntimeAdapter {
     session: ManagedSession,
     events: AsyncPushQueue<CanonicalRuntimeEvent>,
     toolName: string,
-    toolInput: Record<string, unknown>,
+    rawInput: Parameters<CanUseTool>[1],
     options: Parameters<CanUseTool>[2],
   ): Promise<PermissionResult> {
+    // SAFETY: tool inputs are decoded from the CLI's JSON stream before the
+    // SDK hands them to this callback.
+    const toolInput = rawInput as JsonObject;
     const kind = toolName === "AskUserQuestion" ? "user-input" : "approval";
     const requestId = options.requestId || options.toolUseID || crypto.randomUUID();
     const createdAt = stamp();
     const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-    const payload =
+    const payload: JsonObject =
       kind === "approval"
         ? {
             kind,
@@ -217,17 +218,16 @@ export class ClaudeSdkManagedRuntimeAdapter implements ManagedRuntimeAdapter {
         task: kind === "approval" ? `Approval needed for ${toolName}` : "Claude needs your input",
       }),
     );
-    let resolution: { status: RuntimeRequestStatus; value?: unknown };
-    try {
-      resolution = await this.requestStore.waitForResolution(requestId, options.signal);
-    } catch {
-      resolution = { status: "unavailable" };
-    }
+    const resolution = await this.requestStore
+      .waitForResolution(requestId, options.signal)
+      .catch(() => ({ status: "unavailable" as const, value: undefined }));
+    const resolvedPayload: JsonObject = { status: resolution.status };
+    if (resolution.value !== undefined) resolvedPayload.value = asJsonValue(resolution.value);
     events.push(
       this.#event(
         session,
         kind === "approval" ? "request.resolved" : "user-input.resolved",
-        { status: resolution.status, value: resolution.value },
+        resolvedPayload,
         requestId,
       ),
     );
@@ -270,72 +270,68 @@ export class ClaudeSdkManagedRuntimeAdapter implements ManagedRuntimeAdapter {
   }
 
   #translate(runtime: SessionRuntime, message: SDKMessage) {
-    const raw = message as unknown as Record<string, unknown>;
-    if (raw.type === "system" && raw.subtype === "init" && typeof raw.session_id === "string")
-      runtime.session.providerSessionId = raw.session_id;
-    if (raw.type === "assistant") {
-      const body = raw.message as Record<string, unknown> | undefined;
-      const content = Array.isArray(body?.content)
-        ? (body.content as Array<Record<string, unknown>>)
-        : [];
-      for (const block of content) {
-        if (block.type === "tool_use" && typeof block.id === "string") {
+    if (message.type === "system" && message.subtype === "init")
+      runtime.session.providerSessionId = message.session_id;
+    if (message.type === "assistant") {
+      for (const block of message.message.content) {
+        if (block.type === "tool_use") {
           runtime.events.push(
             this.#event(
               runtime.session,
               "item.started",
-              { kind: "tool", tool: block.name, input: block.input },
+              { kind: "tool", tool: block.name, input: asJsonValue(block.input) },
               undefined,
               block.id,
             ),
           );
-        } else if (
-          block.type === "thinking" &&
-          typeof block.thinking === "string" &&
-          block.thinking.trim()
-        ) {
+        } else if (block.type === "thinking" && block.thinking.trim()) {
           runtime.events.push(
             this.#event(
               runtime.session,
               "item.completed",
               { kind: "reasoning", text: block.thinking },
               undefined,
-              typeof raw.uuid === "string" ? `reasoning:${raw.uuid}` : undefined,
+              `reasoning:${message.uuid}`,
             ),
           );
-        } else if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+        } else if (block.type === "text" && block.text.trim()) {
           runtime.events.push(
             this.#event(
               runtime.session,
               "item.completed",
               { kind: "output", text: block.text },
               undefined,
-              typeof raw.uuid === "string" ? raw.uuid : undefined,
+              message.uuid,
             ),
           );
         }
       }
-      const usage = body?.usage as Record<string, unknown> | undefined;
+      const usage = message.message.usage;
       if (usage)
-        runtime.events.push(this.#event(runtime.session, "token-usage.updated", { usage }));
+        runtime.events.push(
+          this.#event(runtime.session, "token-usage.updated", { usage: asJsonValue(usage) }),
+        );
     }
-    if (raw.type === "result") {
-      const interrupted = JSON.stringify(raw.errors ?? "")
+    if (message.type === "result") {
+      // Only the error-subtype result carries an errors list; a success never
+      // reports an interrupt through it.
+      const interrupted = JSON.stringify(
+        message.subtype === "success" ? "" : (message.errors ?? ""),
+      )
         .toLowerCase()
         .includes("interrupt");
-      runtime.events.push(
-        this.#event(runtime.session, "turn.completed", {
-          outcome: interrupted ? "interrupted" : raw.subtype,
-          result: raw.result,
-          costUsd: raw.total_cost_usd,
-        }),
-      );
+      const completed: JsonObject = {
+        outcome: interrupted ? "interrupted" : message.subtype,
+        costUsd: message.total_cost_usd,
+      };
+      if (message.subtype === "success") completed.result = message.result;
+      runtime.events.push(this.#event(runtime.session, "turn.completed", completed));
       runtime.events.push(
         this.#event(runtime.session, "session.state.changed", {
-          state: interrupted ? "paused" : raw.subtype === "success" ? "idle" : "error",
+          state: interrupted ? "paused" : message.subtype === "success" ? "idle" : "error",
           task: interrupted
             ? "Interrupted"
-            : raw.subtype === "success"
+            : message.subtype === "success"
               ? "Done"
               : "Claude turn failed",
         }),
@@ -346,19 +342,20 @@ export class ClaudeSdkManagedRuntimeAdapter implements ManagedRuntimeAdapter {
   #event(
     session: ManagedSession,
     type: CanonicalRuntimeEvent["type"],
-    payload: Record<string, unknown>,
+    payload: JsonObject,
     requestId?: string,
     itemId?: string,
   ): CanonicalRuntimeEvent {
-    return {
+    const event: CanonicalRuntimeEvent = {
       id: eventId(),
       agentId: session.agentId,
       type,
       createdAt: stamp(),
       payload,
-      ...(requestId ? { requestId } : {}),
-      ...(itemId ? { itemId } : {}),
     };
+    if (requestId) event.requestId = requestId;
+    if (itemId) event.itemId = itemId;
+    return event;
   }
 
   #runtime(session: ManagedSession) {

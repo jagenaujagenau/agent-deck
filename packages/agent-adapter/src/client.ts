@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isJsonObject, isJsonString } from "./json-value";
+import type { JsonValue } from "./json-value";
 import type { CanonicalRuntimeEvent } from "./runtime-events";
 
 /**
@@ -75,6 +77,8 @@ export type AgentEventInput = {
   /** Which subagent produced this, where a subagent did. */
   subagentId?: string;
   subagentType?: string;
+  /** What the run was asked to do — the Task call's own wording. */
+  subagentName?: string;
 };
 
 export type RemoteCommand = {
@@ -105,12 +109,10 @@ export function runtimeToken(): string {
  * Devices resolve a question with `{ "<question>": "<answer>" }` — the shape the hosted Claude
  * adapter consumes. A runtime that just needs the choice wants the answer alone.
  */
-export function answerText(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const entries = Object.values(value as Record<string, unknown>).filter(
-      (entry): entry is string => typeof entry === "string",
-    );
+export function answerText(value: JsonValue | undefined): string | undefined {
+  if (isJsonString(value)) return value;
+  if (isJsonObject(value)) {
+    const entries = Object.values(value).filter(isJsonString);
     if (entries.length === 1) return entries[0];
   }
   return value === undefined || value === null ? undefined : JSON.stringify(value);
@@ -134,7 +136,7 @@ export class AgentDeckClient {
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Content-Type", "application/json");
-    const token = typeof this.token === "function" ? this.token() : this.token;
+    const token = this.token instanceof Function ? this.token() : this.token;
     if (token) headers.set("Authorization", `Bearer ${token}`);
     const response = await fetch(`${this.baseUrl}/bridge/v1${path}`, {
       ...init,
@@ -142,6 +144,8 @@ export class AgentDeckClient {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`Bridge ${response.status}: ${await response.text()}`);
+    // SAFETY: the bridge answers JSON on every endpoint; each caller names the
+    // response shape of the endpoint it is reading.
     return response.json() as Promise<T>;
   }
 
@@ -173,15 +177,15 @@ export class AgentDeckClient {
     return result.commands;
   }
 
-  acknowledge(agentId: string, commandId: string) {
-    return this.request(
+  async acknowledge(agentId: string, commandId: string): Promise<void> {
+    await this.request(
       `/agents/${encodeURIComponent(agentId)}/commands/${encodeURIComponent(commandId)}/ack`,
       { method: "POST" },
     );
   }
 
   requestStatus(agentId: string, requestId: string) {
-    return this.request<{ status: string; value?: unknown }>(
+    return this.request<{ status: string; value?: JsonValue }>(
       `/agents/${encodeURIComponent(agentId)}/requests/${encodeURIComponent(requestId)}`,
     );
   }
@@ -234,7 +238,7 @@ export class AgentDeckClient {
   }
 }
 
-export function clip(value: unknown, limit = 240): string {
+export function clip(value: JsonValue | undefined, limit = 240): string {
   const compact = String(value ?? "")
     .replace(/\s+/g, " ")
     .trim();
@@ -242,7 +246,7 @@ export function clip(value: unknown, limit = 240): string {
 }
 
 /** Bounds rich response/code text without destroying Markdown-significant line breaks. */
-export function clipMultiline(value: unknown, limit = 64_000): string {
+export function clipMultiline(value: JsonValue | undefined, limit = 64_000): string {
   const text = String(value ?? "").trim();
   return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
 }

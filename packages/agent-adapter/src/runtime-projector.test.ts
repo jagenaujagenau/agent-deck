@@ -47,6 +47,18 @@ describe("projectRuntimeEvent", () => {
     ).toBe(running);
   });
 
+  test("a runtime that reports paused stays paused", () => {
+    // Pi reports paused; downgrading it to idle made the deck offer a resume
+    // on a session it claimed was doing nothing.
+    const paused = projectRuntimeEvent(
+      emptyRuntimeProjection("agent-1"),
+      event("session.state.changed", { payload: { state: "paused", task: "Paused" } }),
+      1,
+    );
+    expect(paused.state).toBe("paused");
+    expect(paused.task).toBe("Paused");
+  });
+
   test("separates context pressure from monotonic processed usage", () => {
     const first = projectRuntimeEvent(
       emptyRuntimeProjection("agent-1"),
@@ -64,7 +76,11 @@ describe("projectRuntimeEvent", () => {
 });
 
 describe("session.registered", () => {
-  const at = (type: string, payload: Record<string, unknown>, seq: number) => ({
+  const at = (
+    type: CanonicalRuntimeEvent["type"],
+    payload: CanonicalRuntimeEvent["payload"],
+    seq: number,
+  ): CanonicalRuntimeEvent => ({
     id: `e${seq}`,
     agentId: "a",
     type,
@@ -72,9 +88,9 @@ describe("session.registered", () => {
     payload,
   });
 
-  const fold = (events: ReadonlyArray<ReturnType<typeof at>>) =>
+  const fold = (events: ReadonlyArray<CanonicalRuntimeEvent>) =>
     events.reduce(
-      (projection, event, index) => projectRuntimeEvent(projection, event as never, index + 1),
+      (projection, entry, index) => projectRuntimeEvent(projection, entry, index + 1),
       emptyRuntimeProjection("a"),
     );
 
@@ -129,7 +145,11 @@ describe("session.registered", () => {
 });
 
 describe("late item completions", () => {
-  const at = (type: string, payload: Record<string, unknown>, seq: number) => ({
+  const at = (
+    type: CanonicalRuntimeEvent["type"],
+    payload: CanonicalRuntimeEvent["payload"],
+    seq: number,
+  ): CanonicalRuntimeEvent => ({
     id: `e${seq}`,
     agentId: "a",
     type,
@@ -137,9 +157,9 @@ describe("late item completions", () => {
     payload,
   });
 
-  const fold = (events: ReadonlyArray<ReturnType<typeof at>>) =>
+  const fold = (events: ReadonlyArray<CanonicalRuntimeEvent>) =>
     events.reduce(
-      (projection, event, index) => projectRuntimeEvent(projection, event as never, index + 1),
+      (projection, entry, index) => projectRuntimeEvent(projection, entry, index + 1),
       emptyRuntimeProjection("a"),
     );
 
@@ -182,17 +202,99 @@ describe("late item completions", () => {
   });
 });
 
+describe("rate-limits.updated", () => {
+  const at = (
+    payload: CanonicalRuntimeEvent["payload"],
+    seq: number,
+  ): CanonicalRuntimeEvent => ({
+    id: `e${seq}`,
+    agentId: "a",
+    type: "rate-limits.updated",
+    createdAt: new Date(seq * 1000).toISOString(),
+    payload,
+  });
+  const fold = (events: ReadonlyArray<CanonicalRuntimeEvent>) =>
+    events.reduce(
+      (projection, entry, index) => projectRuntimeEvent(projection, entry, index + 1),
+      emptyRuntimeProjection("a"),
+    );
+
+  test("folds reported windows into the projection", () => {
+    const projection = fold([
+      at(
+        {
+          windows: [
+            { id: "5h", label: "5-hour", usedPercent: 42, resetsAt: "2026-08-27T05:00:00.000Z" },
+            { id: "weekly", label: "Weekly", usedPercent: 11, account: "personal" },
+          ],
+        },
+        1,
+      ),
+    ]);
+    expect(projection.rateLimits).toEqual([
+      { id: "5h", label: "5-hour", usedPercent: 42, resetsAt: "2026-08-27T05:00:00.000Z" },
+      { id: "weekly", label: "Weekly", usedPercent: 11, account: "personal" },
+    ]);
+  });
+
+  test("the latest report replaces the previous one wholesale", () => {
+    // Windows are a reading, not history: one that stopped being reported
+    // has closed, and keeping it would show a limit that no longer exists.
+    const projection = fold([
+      at({ windows: [{ id: "5h", label: "5-hour", usedPercent: 42 }] }, 1),
+      at({ windows: [{ id: "weekly", label: "Weekly", usedPercent: 90 }] }, 2),
+    ]);
+    expect(projection.rateLimits).toEqual([{ id: "weekly", label: "Weekly", usedPercent: 90 }]);
+  });
+
+  test("keeps the windows that parse and drops the ones that do not", () => {
+    const projection = fold([
+      at(
+        {
+          windows: [
+            { id: "5h", label: "5-hour", usedPercent: 42 },
+            { id: "no-percent", label: "Broken" },
+            { label: "no id", usedPercent: 3 },
+            "not a window",
+            { id: "nan", label: "NaN", usedPercent: Number.NaN },
+          ],
+        },
+        1,
+      ),
+    ]);
+    expect(projection.rateLimits).toEqual([{ id: "5h", label: "5-hour", usedPercent: 42 }]);
+  });
+
+  test("a payload with no readable window list changes nothing", () => {
+    const projection = fold([
+      at({ windows: [{ id: "5h", label: "5-hour", usedPercent: 42 }] }, 1),
+      at({ windows: "everything is fine" }, 2),
+      at({}, 3),
+    ]);
+    expect(projection.rateLimits).toEqual([{ id: "5h", label: "5-hour", usedPercent: 42 }]);
+    expect(projection.sequence).toBe(3);
+  });
+
+  test("a session that never hears one has no rate limits", () => {
+    expect(fold([]).rateLimits).toBeUndefined();
+  });
+});
+
 describe("settled requests", () => {
-  const at = (type: string, payload: Record<string, unknown>, seq: number) => ({
+  const at = (
+    type: CanonicalRuntimeEvent["type"],
+    payload: CanonicalRuntimeEvent["payload"],
+    seq: number,
+  ): CanonicalRuntimeEvent => ({
     id: `e${seq}`,
     agentId: "a",
     type,
     createdAt: new Date(seq * 1000).toISOString(),
     payload,
   });
-  const fold = (events: ReadonlyArray<ReturnType<typeof at>>) =>
+  const fold = (events: ReadonlyArray<CanonicalRuntimeEvent>) =>
     events.reduce(
-      (projection, event, index) => projectRuntimeEvent(projection, event as never, index + 1),
+      (projection, entry, index) => projectRuntimeEvent(projection, entry, index + 1),
       emptyRuntimeProjection("a"),
     );
 
