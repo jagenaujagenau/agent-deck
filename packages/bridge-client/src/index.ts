@@ -10,7 +10,8 @@ export {
   mergeSessionEvents,
   reasoningEvents,
   terminalEvents,
+  turnThreads,
 } from "./events";
-export type { ConversationEntry, ConversationRole } from "./events";
+export type { ConversationEntry, ConversationRole, TurnThread } from "./events";
 export { attentionPriority, latestActivityAt, seenCovers, sessionSeen } from "./attention";
 export type * from "./types";

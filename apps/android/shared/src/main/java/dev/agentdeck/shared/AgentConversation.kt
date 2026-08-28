@@ -82,6 +82,19 @@ private fun isClippedForm(live: String?, full: String?): Boolean {
     return full.length > live.length && full.startsWith(live.dropLast(1).trimEnd())
 }
 
+/**
+ * Whether this entry opens a new exchange - the boundary a chat draws a thread
+ * break on. A user message always does: an instruction begins an exchange even
+ * when nothing was tagged. Between instructions, a change of turnId does too,
+ * which is what splits work replayed without its user line. Mirrored from the
+ * SDK's turnThreads; keep the two in step.
+ */
+fun startsNewTurn(previous: AgentEvent?, current: AgentEvent): Boolean {
+    if (previous == null) return true
+    if (current.kind == "user") return true
+    return current.turnId != null && previous.turnId != null && current.turnId != previous.turnId
+}
+
 fun reasoningEvents(events: List<AgentEvent>): List<AgentEvent> =
     events.sortedBy { it.createdAt }.filter {
         it.kind == "thought" && it.summary != "Received instruction" && !it.detail.isNullOrBlank()

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { conversationEntries, mergeSessionEvents, reasoningEvents, terminalEvents } from "./events";
+import { conversationEntries, mergeSessionEvents, reasoningEvents, terminalEvents, turnThreads } from "./events";
 import type { AgentEvent } from "./types";
 
 const at = (second: number) => `2026-08-28T10:00:${String(second).padStart(2, "0")}.000Z`;
@@ -101,5 +101,46 @@ describe("tabs", () => {
       event({ id: "x", kind: "tool", summary: "Edit" }),
     ];
     expect(terminalEvents(events).map((item) => item.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("turnThreads", () => {
+  test("a user event opens a thread; its work follows it", () => {
+    const threads = turnThreads([
+      event({ id: "u1", kind: "user", summary: "Message", detail: "fix it", createdAt: at(1), turnId: "t1" }),
+      event({ id: "w1", kind: "tool", summary: "Bash", command: "bun test", createdAt: at(2), turnId: "t1" }),
+      event({ id: "u2", kind: "user", summary: "Message", detail: "now ship it", createdAt: at(3), turnId: "t2" }),
+      event({ id: "w2", summary: "Response", detail: "shipped", createdAt: at(4), turnId: "t2" }),
+    ]);
+    expect(threads.map((thread) => thread.events.length)).toEqual([2, 2]);
+    expect(threads.map((thread) => thread.turnId)).toEqual(["t1", "t2"]);
+  });
+
+  test("a turnId change splits threads even without a user line", () => {
+    const threads = turnThreads([
+      event({ id: "a", summary: "Response", detail: "one", createdAt: at(1), turnId: "t1" }),
+      event({ id: "b", summary: "Response", detail: "two", createdAt: at(2), turnId: "t2" }),
+    ]);
+    expect(threads).toHaveLength(2);
+  });
+
+  test("untagged events stay with the thread they follow", () => {
+    const threads = turnThreads([
+      event({ id: "u", kind: "user", summary: "Message", detail: "go", createdAt: at(1), turnId: "t1" }),
+      event({ id: "r", kind: "thought", summary: "Reasoning", detail: "hm", createdAt: at(2) }),
+      event({ id: "o", summary: "Response", detail: "done", createdAt: at(3), turnId: "t1" }),
+    ]);
+    expect(threads).toHaveLength(1);
+    expect(threads[0]?.events).toHaveLength(3);
+  });
+
+  test("a runtime that never tags reads as user-delimited threads", () => {
+    const threads = turnThreads([
+      event({ id: "u1", kind: "user", summary: "Message", detail: "one", createdAt: at(1) }),
+      event({ id: "o1", summary: "Response", detail: "a", createdAt: at(2) }),
+      event({ id: "u2", kind: "user", summary: "Message", detail: "two", createdAt: at(3) }),
+      event({ id: "o2", summary: "Response", detail: "b", createdAt: at(4) }),
+    ]);
+    expect(threads).toHaveLength(2);
   });
 });

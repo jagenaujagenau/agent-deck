@@ -103,6 +103,8 @@ data class AgentEvent(
     val subagentType: String? = null,
     /** What the run was asked to do - the Task call's own wording. */
     val subagentName: String? = null,
+    /** Which exchange this belongs to - the deck's thread unit. */
+    val turnId: String? = null,
 )
 
 @Serializable

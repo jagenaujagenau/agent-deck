@@ -177,6 +177,7 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
           id: agentId(),
           name: pi.getSessionName() ?? `Pi · ${basename(ctx.cwd)}`,
           project: basename(ctx.cwd),
+          cwd: ctx.cwd,
           model: modelName(),
           runtime: "pi",
           runtimeProtocol: "canonical-v1",
@@ -257,6 +258,9 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
         kind,
         summary: clip(summary, 120),
         detail: detail ? clipMultiline(detail) : undefined,
+        // The turn is the deck's thread unit; every event rides under the
+        // exchange that caused it unless the caller says otherwise.
+        turnId: activeTurnId,
         ...extra,
       }),
     }).catch(() => {});

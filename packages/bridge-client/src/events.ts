@@ -148,3 +148,39 @@ function closeInTime(first: string, second: string): boolean {
   if (Number.isNaN(a) || Number.isNaN(b)) return false;
   return Math.abs(a - b) < DUPLICATE_WINDOW_MS;
 }
+
+export interface TurnThread {
+  /** The exchange's id, where any event in it carried one. */
+  turnId?: string;
+  events: AgentEvent[];
+}
+
+/**
+ * The session as threads: one instruction and everything done in its service.
+ *
+ * A `user` event always opens a thread — an instruction begins an exchange
+ * even when nothing was tagged. Between instructions, a change of `turnId`
+ * also opens one, which is what splits work the transcript replayed without
+ * its user line. Untagged events stay with the thread they follow, because a
+ * runtime that never tags anything should still read as one conversation.
+ */
+export function turnThreads(events: ReadonlyArray<AgentEvent>): TurnThread[] {
+  const ordered = [...events].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const threads: TurnThread[] = [];
+  for (const event of ordered) {
+    const current = threads[threads.length - 1];
+    const opens =
+      current === undefined ||
+      event.kind === "user" ||
+      (event.turnId !== undefined &&
+        current.turnId !== undefined &&
+        event.turnId !== current.turnId);
+    if (opens) {
+      threads.push({ turnId: event.turnId, events: [event] });
+      continue;
+    }
+    current.events.push(event);
+    current.turnId ??= event.turnId;
+  }
+  return threads;
+}

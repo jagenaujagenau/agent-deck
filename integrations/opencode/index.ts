@@ -136,6 +136,7 @@ export const AgentDeckPlugin = async (input: {
         id,
         name: `OpenCode · ${projectName} · ${sessionId!.slice(-4)}`,
         project: projectName,
+        cwd: workingDirectory,
         model,
         runtime: "opencode",
         runtimeProtocol: "canonical-v1",
@@ -197,6 +198,9 @@ export const AgentDeckPlugin = async (input: {
         kind,
         summary: clip(summary, 120),
         detail: detail ? clipMultiline(detail) : undefined,
+        // The turn is the deck's thread unit; every event rides under the
+        // exchange that caused it unless the caller says otherwise.
+        turnId: activeTurnId,
         ...extra,
       })
       .catch(() => {});

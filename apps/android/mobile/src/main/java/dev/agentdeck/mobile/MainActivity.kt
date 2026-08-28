@@ -1974,6 +1974,13 @@ private fun SubagentRow(
 
 /** The day a run of messages belongs to, floating over the conversation. */
 @Composable
+private fun TurnSeparator() {
+    Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth(0.42f).height(1.dp).background(Line))
+    }
+}
+
+@Composable
 private fun DaySeparator(label: String) {
     Box(Modifier.fillMaxWidth().padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
         Surface(shape = CircleShape, color = SurfaceRaised, border = BorderStroke(1.dp, Line)) {
@@ -2173,6 +2180,9 @@ private fun ResponsesView(
                 ConversationDays
                     .separatorBefore(entries.getOrNull(index - 1)?.event?.createdAt, entry.event.createdAt)
                     ?.let { DaySeparator(it) }
+                // A hairline where a new exchange begins, so a long session
+                // reads as threads rather than one unbroken run.
+                if (index > 0 && startsNewTurn(entries[index - 1].event, entry.event)) TurnSeparator()
                 ConversationBubble(entry, providerFor(agent))
             }
             pendingQuestion?.let { question ->
