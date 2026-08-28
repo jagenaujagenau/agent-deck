@@ -16,6 +16,7 @@
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
+    "@agent-control-dashboard/bridge-client": "workspace:*",
     "@agent-control-dashboard/config": "workspace:*",
     "@types/bun": "catalog:",
     "typescript": "catalog:"

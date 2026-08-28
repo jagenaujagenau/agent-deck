@@ -37,6 +37,7 @@
         "effect": "4.0.0-rc.112",
       },
       "devDependencies": {
+        "@agent-control-dashboard/bridge-client": "workspace:*",
         "@agent-control-dashboard/config": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
@@ -53,6 +54,14 @@
         "typescript": "catalog:",
       },
     },
+    "packages/bridge-client": {
+      "name": "@agent-control-dashboard/bridge-client",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/config": {
       "name": "@agent-control-dashboard/config",
       "version": "0.0.0",
@@ -64,6 +73,8 @@
   },
   "packages": {
     "@agent-control-dashboard/agent-adapter": ["@agent-control-dashboard/agent-adapter@workspace:packages/agent-adapter"],
+
+    "@agent-control-dashboard/bridge-client": ["@agent-control-dashboard/bridge-client@workspace:packages/bridge-client"],
 
     "@agent-control-dashboard/config": ["@agent-control-dashboard/config@workspace:packages/config"],
 
