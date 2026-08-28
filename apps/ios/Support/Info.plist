@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<!--
+	  The bridge listens on localhost and is reached over a tailnet, so its
+	  address is an IP or a MagicDNS name with no certificate and no public DNS
+	  record. ATS cannot be satisfied by that and is not protecting anything
+	  here: the traffic never leaves the tailnet.
+	-->
+	<!--
+	  The app implements no encryption of its own: it uses the system's TLS
+	  through URLSession and the system Keychain, which is the exemption this
+	  declares. Without the key every upload sits at "Missing Compliance" and
+	  cannot be given to a tester until somebody answers the question by hand.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>nerdev.com.AgentDeck</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>agentdeck</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Agent Deck connects to the bridge running on your Mac.</string>
+</dict>
+</plist>

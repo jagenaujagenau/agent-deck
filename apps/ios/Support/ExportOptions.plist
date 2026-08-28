@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>teamID</key>
+	<string>T7AG6F3KVC</string>
+	<!--
+	  Cloud-managed signing: Xcode asks App Store Connect for the distribution
+	  certificate and profile at export time and neither is kept here. The
+	  alternative is a certificate living in one machine's keychain, which
+	  expires a year later without warning and takes the release with it, on
+	  whichever day nobody remembers setting it up.
+
+	  This needs an API key with the **Admin** role. An App Manager key is
+	  refused with "You haven't been given access to cloud-managed distribution
+	  certificates", and the export then fails with the misleading "No profiles
+	  for 'nerdev.com.AgentDeck' were found".
+	-->
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<!-- TestFlight symbolicates crashes; without this every report is hex. -->
+	<key>uploadSymbols</key>
+	<true/>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>
