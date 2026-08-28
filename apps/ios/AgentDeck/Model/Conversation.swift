@@ -37,6 +37,19 @@ func conversationEntries(_ events: [AgentEvent]) -> [ConversationEntry] {
     }
 }
 
+/// Whether `current` opens a new exchange: the person spoke, or both events
+/// carry turnIds and they differ. An untagged event stays with the thread it
+/// follows — the bridge tags where it can, and a gap is not a boundary.
+///
+/// Mirrors the SDK's `turnThreads` (`packages/bridge-client/src/events.ts`) and
+/// Android's `startsNewTurn` (`apps/android/shared/.../AgentConversation.kt`);
+/// keep the three in step.
+func startsNewTurn(previous: AgentEvent?, current: AgentEvent) -> Bool {
+    guard let previous else { return true }
+    if current.kind == "user" { return true }
+    return current.turnId != nil && previous.turnId != nil && current.turnId != previous.turnId
+}
+
 func reasoningEvents(_ events: [AgentEvent]) -> [AgentEvent] {
     events
         .sorted { $0.createdAt < $1.createdAt }

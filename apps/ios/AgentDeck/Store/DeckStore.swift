@@ -136,6 +136,28 @@ final class DeckStore {
         ArchivePolicy.save(archived)
     }
 
+    /// Dismisses a session from the bridge's deck. Optimistic: the card leaves
+    /// now and the SSE patch confirms; a refusal puts it quietly back, because
+    /// the bridge still lists it and the next snapshot would anyway.
+    func dismiss(agentId: String) {
+        guard let index = snapshot?.agents.firstIndex(where: { $0.id == agentId }) else { return }
+        let removed = snapshot?.agents.remove(at: index)
+        // A dismissed session is not asking for anything any more.
+        ApprovalNotifier.shared.withdraw(agentId: agentId)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.client.dismiss(agentId: agentId)
+            } catch {
+                // 404 means the bridge already forgot it, which is the outcome
+                // that was asked for.
+                if case BridgeError.http(404, _) = error { return }
+                guard let removed, self.snapshot?.agents.contains(where: { $0.id == agentId }) == false else { return }
+                self.snapshot?.agents.append(removed)
+            }
+        }
+    }
+
     /// How many sessions want a person right now, for the header count.
     func attentionCount(now: Date = Date()) -> Int {
         agents.filter { homeAgentState($0, now: now).attention }.count

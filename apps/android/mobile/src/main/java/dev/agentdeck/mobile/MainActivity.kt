@@ -357,6 +357,33 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { runCatching { client.markSeen(agent.id) } }
     }
 
+    private val _dismissedAgents = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Sessions removed optimistically, hidden until the bridge's own removal lands. */
+    val dismissedAgents = _dismissedAgents.asStateFlow()
+
+    private val _dismissError = MutableStateFlow<String?>(null)
+    val dismissError = _dismissError.asStateFlow()
+
+    /**
+     * Removes an ended session from the deck, on every surface. The card
+     * disappears now; the bridge confirms through the stream's `removed`. A
+     * bridge that refuses puts the card back with its reason, and the local
+     * hide is dropped once the bridge has answered either way - if the session
+     * ever heartbeats again, the deck honestly shows it.
+     */
+    fun dismiss(agent: Agent) {
+        _dismissedAgents.update { it + agent.id }
+        _dismissError.value = null
+        viewModelScope.launch {
+            runCatching { client.dismiss(agent.id) }
+                .onSuccess { repository.refresh() }
+                .onFailure { _dismissError.value = it.message ?: "Could not dismiss the session" }
+            _dismissedAgents.update { it - agent.id }
+        }
+        getApplication<Application>().getSystemService(NotificationManager::class.java).cancel(agent.id.hashCode())
+    }
+
     private val _sessionChanges = MutableStateFlow<Map<String, List<AgentEvent>>>(emptyMap())
     val sessionChanges = _sessionChanges.asStateFlow()
 
@@ -496,6 +523,8 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
     val commandBlocked by vm.commandBlocked.collectAsStateWithLifecycle()
     val analyticsState by vm.analyticsState.collectAsStateWithLifecycle()
     val archivedAgents by vm.archivedAgents.collectAsStateWithLifecycle()
+    val dismissedAgents by vm.dismissedAgents.collectAsStateWithLifecycle()
+    val dismissError by vm.dismissError.collectAsStateWithLifecycle()
     val seenMarks by vm.seenMarks.collectAsStateWithLifecycle()
     var destination by rememberSaveable { mutableStateOf(DeckDestination.Agents) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -586,10 +615,12 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
             if (data == null) {
                 EmptyBridge(state = state, onConfigure = { settingsOpen = true }, onRetry = vm::refresh)
             } else {
-                val boardAgents = unarchivedAgents(data.agents, archivedAgents)
+                // Dismissed sessions vanish now; the stream's `removed` makes it real.
+                val deckAgents = data.agents.filterNot { it.id in dismissedAgents }
+                val boardAgents = unarchivedAgents(deckAgents, archivedAgents)
                 val homeNow = Instant.now()
                 val filtered = homeAgentOrder(
-                    data.agents.filter { agent -> filter.includes(homeAgentState(agent, agentArchiveKey(agent) in archivedAgents, homeNow, agentSeen(agent, seenMarks))) },
+                    deckAgents.filter { agent -> filter.includes(homeAgentState(agent, agentArchiveKey(agent) in archivedAgents, homeNow, agentSeen(agent, seenMarks))) },
                     archivedAgents,
                     homeNow,
                     seenMarks,
@@ -625,6 +656,10 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                     if (state is BridgeState.Failed) {
                         item { OfflineBanner((state as BridgeState.Failed).message) }
                     }
+                    // A refused dismissal already put the card back; this says why.
+                    dismissError?.let { message ->
+                        item { Text("Dismiss failed · $message", color = Danger, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                    }
                     HomeAgentState.entries.forEach { homeState ->
                         val stateAgents = filtered.filter { homeAgentState(it, agentArchiveKey(it) in archivedAgents, homeNow, agentSeen(it, seenMarks)) == homeState }
                         if (stateAgents.isNotEmpty()) {
@@ -638,6 +673,7 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                                         busy = busyAgent == agent.id,
                                         archiveEnabled = filter != HomeFilter.History,
                                         onArchive = { vm.archive(agent) },
+                                        onDismissSession = { vm.dismiss(agent) },
                                         onClick = { selectedAgent = agent },
                                     )
                                 }
@@ -666,6 +702,7 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
     if (startOpen) {
         StartSessionSheet(
             projects = snapshot?.agents?.map { it.project }?.filter { it.isNotBlank() }?.distinct() ?: emptyList(),
+            workingDirectories = knownWorkingDirectories(snapshot?.agents ?: emptyList()),
             starting = vm.startingSession.collectAsStateWithLifecycle().value,
             error = vm.startError.collectAsStateWithLifecycle().value,
             onDismiss = { startOpen = false },
@@ -1258,29 +1295,49 @@ private fun ProjectGroupHeader(project: String, agents: List<Agent>, showAttenti
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ArchivableAgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, archiveEnabled: Boolean, onArchive: () -> Unit, onClick: () -> Unit) {
+private fun ArchivableAgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, archiveEnabled: Boolean, onArchive: () -> Unit, onDismissSession: () -> Unit, onClick: () -> Unit) {
     val content: @Composable () -> Unit = {
         if (homeState.compact) CompactAgentCard(agent, homeState, busy, onClick)
         else AgentCard(agent, homeState, busy, onClick)
     }
-    if (!archiveEnabled) {
+    // Only an ended session can be dismissed from the bridge: a live one would
+    // reappear on its next heartbeat, which reads as the gesture failing.
+    val dismissible = agent.state == "offline"
+    if (!archiveEnabled && !dismissible) {
         content()
         return
     }
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) { onArchive(); true } else false
+            when {
+                value == SwipeToDismissBoxValue.EndToStart && archiveEnabled -> { onArchive(); true }
+                value == SwipeToDismissBoxValue.StartToEnd && dismissible -> { onDismissSession(); true }
+                else -> false
+            }
         },
     )
     SwipeToDismissBox(
         state = dismissState,
-        enableDismissFromStartToEnd = false,
+        enableDismissFromStartToEnd = dismissible,
+        enableDismissFromEndToStart = archiveEnabled,
         backgroundContent = {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp)).background(Blue.copy(alpha = 0.14f)).padding(end = 22.dp), contentAlignment = Alignment.CenterEnd) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Archive", color = Blue, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.width(8.dp))
-                    Icon(Icons.Rounded.Archive, "Archive", tint = Blue)
+            // Archive hides locally, dismiss removes from every surface - the
+            // reveal says which one this swipe is before the hand commits.
+            if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
+                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp)).background(Danger.copy(alpha = 0.14f)).padding(start = 22.dp), contentAlignment = Alignment.CenterStart) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.DeleteOutline, "Dismiss", tint = Danger)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Dismiss", color = Danger, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            } else {
+                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp)).background(Blue.copy(alpha = 0.14f)).padding(end = 22.dp), contentAlignment = Alignment.CenterEnd) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Archive", color = Blue, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(8.dp))
+                        Icon(Icons.Rounded.Archive, "Archive", tint = Blue)
+                    }
                 }
             }
         },
@@ -3193,6 +3250,7 @@ private fun ConnectionDialog(
 @Composable
 private fun StartSessionSheet(
     projects: List<String>,
+    workingDirectories: List<String>,
     starting: Boolean,
     error: String?,
     onDismiss: () -> Unit,
@@ -3244,6 +3302,22 @@ private fun StartSessionSheet(
                     shape = RoundedCornerShape(14.dp),
                     supportingText = { Text("An absolute path on the bridge's machine.") },
                 )
+                // The directories the bridge has already run sessions in, most
+                // recent first - tapping one fills the field, typing still works.
+                if (workingDirectories.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        workingDirectories.take(8).forEach { path ->
+                            AssistChip(
+                                onClick = { if (!starting) cwd = path; fieldError = null },
+                                label = { Text(workingDirectoryLabel(path), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                shape = CircleShape,
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = objective,
                     onValueChange = { objective = it },

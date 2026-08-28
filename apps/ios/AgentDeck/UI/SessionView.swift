@@ -278,7 +278,13 @@ struct SessionView: View {
                     } else if entries(for: agent).isEmpty {
                         EmptyConversation(agent: agent, lensed: lens != nil)
                     }
-                    ForEach(entries(for: agent)) { entry in
+                    let conversation = entries(for: agent)
+                    ForEach(Array(conversation.enumerated()), id: \.element.id) { index, entry in
+                        // A hairline where an exchange opens — never before the
+                        // first entry, which opens nothing.
+                        if index > 0, startsNewTurn(previous: conversation[index - 1].event, current: entry.event) {
+                            TurnHairline()
+                        }
                         ConversationBubble(entry: entry, harness: agent.harness, model: agent.model)
                             .id(entry.id)
                     }
@@ -787,6 +793,18 @@ private struct SubagentRow: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The seam between exchanges: a short centered hairline, quiet enough to
+/// structure the transcript without shouting over it.
+private struct TurnHairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(Palette.line)
+            .frame(height: 1)
+            .containerRelativeFrame(.horizontal) { length, _ in length * 0.4 }
+            .frame(maxWidth: .infinity)
     }
 }
 

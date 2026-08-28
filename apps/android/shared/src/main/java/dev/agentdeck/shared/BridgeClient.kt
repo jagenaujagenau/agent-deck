@@ -203,6 +203,19 @@ class BridgeClient(
         }
     }
 
+    /**
+     * Dismisses a session from the deck. The bridge keeps its history and
+     * usage - this declutters the live list, it does not erase what the
+     * session did - and a session still heartbeating reappears on its next
+     * beat.
+     */
+    suspend fun dismiss(agentId: String) = withContext(Dispatchers.IO) {
+        val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId").delete().build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("Dismiss returned ${response.code}")
+        }
+    }
+
     suspend fun analytics(range: String, project: String? = null): AnalyticsSnapshot = withContext(Dispatchers.IO) {
         val url = "$baseUrl/bridge/v1/analytics".toHttpUrl().newBuilder()
             .addQueryParameter("range", range)

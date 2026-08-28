@@ -60,6 +60,8 @@ data class Agent(
     val id: String,
     val name: String,
     val project: String,
+    /** The directory the session works in, on the bridge's machine. */
+    val cwd: String? = null,
     val model: String,
     val state: String,
     val task: String,

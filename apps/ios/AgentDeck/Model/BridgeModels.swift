@@ -89,6 +89,9 @@ struct Agent: Decodable, Equatable, Identifiable {
     var model: String
     var state: String
     var task: String
+    /// The directory the session works in, on the bridge's machine — what lets
+    /// this app offer "start another one here". Older bridges omit it.
+    var cwd: String?
     var objective: String?
     var progress: Double?
     var tokens: Int64
@@ -111,7 +114,7 @@ struct Agent: Decodable, Equatable, Identifiable {
     var pendingQuestion: PendingQuestion?
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, project, model, state, task, objective, progress
+        case id, name, project, model, state, task, cwd, objective, progress
         case tokens, processedTokens, costUsd, lastSeenAt, viewedAt, runtime, events
         case capabilities, rateLimits, pendingApproval, pendingQuestion
     }
@@ -124,6 +127,7 @@ struct Agent: Decodable, Equatable, Identifiable {
         model = container.value(.model, or: "")
         state = container.value(.state, or: "idle")
         task = container.value(.task, or: "")
+        cwd = container.optional(.cwd)
         objective = container.optional(.objective)
         progress = container.optional(.progress)
         tokens = container.value(.tokens, or: 0)
@@ -161,10 +165,13 @@ struct AgentEvent: Decodable, Equatable, Identifiable {
     var subagentType: String?
     /// What the run was asked to do — the Task call's own wording.
     var subagentName: String?
+    /// The exchange this event belongs to — one instruction and everything
+    /// done in its service. The deck's thread unit; older bridges omit it.
+    var turnId: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, summary, detail, createdAt, tool, path, command, diff, options
-        case subagentId, subagentType, subagentName
+        case subagentId, subagentType, subagentName, turnId
     }
 
     init(from decoder: Decoder) throws {
@@ -182,6 +189,7 @@ struct AgentEvent: Decodable, Equatable, Identifiable {
         subagentId = container.optional(.subagentId)
         subagentType = container.optional(.subagentType)
         subagentName = container.optional(.subagentName)
+        turnId = container.optional(.turnId)
     }
 }
 

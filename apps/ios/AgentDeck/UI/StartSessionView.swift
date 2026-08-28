@@ -7,12 +7,17 @@ import SwiftUI
 /// `cwd` is a path on the bridge's machine, not this one, so it is typed rather
 /// than browsed: a person knows their own project roots, and the bridge is the
 /// one that has to find the directory. The project names already on the deck
-/// are offered as quick fills, because they are the work this bridge runs.
+/// are offered as quick fills, because they are the work this bridge runs —
+/// and the directories its sessions already work in the same way, because a
+/// path a session runs in is a path the bridge is known to reach.
 struct StartSessionView: View {
     @Environment(DeckStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     var projects: [String]
+    /// Working directories from the current snapshot, most recently active
+    /// first. Tapping one fills the field; typing stays open.
+    var cwds: [String] = []
 
     @State private var project = ""
     @State private var cwd = ""
@@ -110,6 +115,31 @@ struct StartSessionView: View {
                     .focused($focus, equals: .cwd)
                     .submitLabel(.next)
                     .onSubmit { focus = .objective }
+            }
+            // The directories this bridge's sessions already work in, as quick
+            // fills — the same idiom as the project names above.
+            if !cwds.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(cwds.prefix(8), id: \.self) { path in
+                            Button {
+                                cwd = path
+                                failure = nil
+                            } label: {
+                                Text(path)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .lineLimit(1)
+                                    .foregroundStyle(Palette.muted)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 30)
+                                    .background(Capsule().fill(Palette.surface))
+                                    .overlay(Capsule().stroke(Palette.line, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(working)
+                        }
+                    }
+                }
             }
             LabelledField(label: "Objective", hint: "What this session is for. Optional.") {
                 TextField("", text: $objective, prompt: Text("optional").foregroundStyle(Palette.muted))

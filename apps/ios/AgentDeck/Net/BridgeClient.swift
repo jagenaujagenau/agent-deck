@@ -136,6 +136,14 @@ actor BridgeClient {
         _ = try await checked(try build("/bridge/v1/agents/\(escape(agentId))/seen", method: "POST"))
     }
 
+    /// Dismisses a session from the deck. Its history, usage and file changes
+    /// are kept on the bridge — this declutters the live list, it does not
+    /// erase what the session did. One still heartbeating simply reappears on
+    /// its next beat.
+    func dismiss(agentId: String) async throws {
+        _ = try await checked(try build("/bridge/v1/agents/\(escape(agentId))", method: "DELETE"))
+    }
+
     // MARK: - Managed sessions
 
     /// Which runtimes the bridge can host and run itself.

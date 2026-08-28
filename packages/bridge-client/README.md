@@ -59,12 +59,16 @@ What's here, and why it is here rather than in your app:
   `diff`, and full `detail` the snapshot deliberately strips.
 - **`conversationEntries` / `reasoningEvents` / `terminalEvents`** — one
   definition of the tabs; a conversation assembled twice is two conversations.
+- **`turnThreads`** — the session as threads: one instruction and everything
+  done in its service, split by `turnId` where tagged and by user messages
+  where not.
 - **`attentionPriority` / `sessionSeen`** — the shared attention model:
   error > blocked > done-unseen > running > idle-seen, and seen merged from
   the local mark and the bridge's `viewedAt`. Only an explicit human view may
   mark seen.
-- **`BridgeClient`** — the verbs, with `agent_blocked` surfaced as a typed
-  refusal instead of a status code to grep for.
+- **`BridgeClient`** — the verbs, from prompting through `dismiss` and
+  history paging, with `agent_blocked` surfaced as a typed refusal instead of
+  a status code to grep for.
 
 The Android, Wear OS, and iOS apps in this repository keep their own ports of
 these policies (Kotlin and Swift); this package is the reference expression,

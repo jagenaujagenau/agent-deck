@@ -46,7 +46,16 @@ struct DeckView: View {
         .tint(Palette.signal)
         .sheet(isPresented: $showConnect) { ConnectView() }
         .sheet(isPresented: $showStart) {
-            StartSessionView(projects: store.allAgents.map(\.project).filter { !$0.isEmpty }.deduplicated)
+            StartSessionView(
+                projects: store.allAgents.map(\.project).filter { !$0.isEmpty }.deduplicated,
+                // Most recently active first: the directory someone wants
+                // another session in is almost always the one they just left.
+                cwds: store.allAgents
+                    .sorted { $0.lastSeenAt > $1.lastSeenAt }
+                    .compactMap(\.cwd)
+                    .filter { !$0.isEmpty }
+                    .deduplicated
+            )
         }
         .onReceive(tick) { now = $0 }
         // The notification a phone posts for an approval has to land on the
@@ -129,11 +138,20 @@ struct DeckView: View {
                         ForEach(section.groups) { group in
                             ProjectHeader(project: group.project, count: group.agents.count)
                             ForEach(group.agents) { agent in
-                                // History is already the shelf things end up
-                                // on; archiving from it has nowhere to put them.
-                                ArchiveSwipe(enabled: store.filter != .history) {
-                                    withAnimation(.easeOut(duration: 0.2)) { store.archive(agent) }
-                                } content: {
+                                CardSwipe(
+                                    // History is already the shelf things end up
+                                    // on; archiving from it has nowhere to put them.
+                                    onArchive: store.filter == .history ? nil : {
+                                        withAnimation(.easeOut(duration: 0.2)) { store.archive(agent) }
+                                    },
+                                    // Dismiss asks the bridge itself to drop the
+                                    // card. Offline sessions only: the bridge
+                                    // resurrects a live one on its next beat,
+                                    // which would read as a broken gesture.
+                                    onDismiss: agent.state == "offline" ? {
+                                        withAnimation(.easeOut(duration: 0.2)) { store.dismiss(agentId: agent.id) }
+                                    } : nil
+                                ) {
                                     Button { selected = agent.id } label: {
                                         AgentCard(agent: agent, state: group.state)
                                     }
@@ -218,21 +236,26 @@ private struct DeckBottomBar: View {
     }
 }
 
-/// Swipe a card left to put it away.
+/// Swipe a card left to act on it: archive at the first stop, and — on a card
+/// that offers it — dismiss at a deliberately deeper one.
 ///
 /// A gesture rather than a `List` row action: the deck is a lazy stack of cards
 /// grouped under their own headers, and a `List` would bring its own separators
-/// and insets to a layout that is not a list of rows. The archive itself is a
-/// device decision — the runtime keeps running and the bridge is never told.
-struct ArchiveSwipe<Content: View>: View {
-    var enabled: Bool
-    var onArchive: () -> Void
+/// and insets to a layout that is not a list of rows. Archive is a device
+/// decision — the runtime keeps running and the bridge is never told. Dismiss
+/// is the destructive one: it asks the bridge itself to drop the session from
+/// the deck, so it sits further out than a flick can reach by accident.
+struct CardSwipe<Content: View>: View {
+    var onArchive: (() -> Void)?
+    var onDismiss: (() -> Void)?
     @ViewBuilder var content: Content
 
     @State private var offset: CGFloat = 0
 
     /// Far enough that it cannot be a mis-swipe on a horizontal filter row.
     private let threshold: CGFloat = 96
+    /// The second stop, when both actions are on offer.
+    private let farThreshold: CGFloat = 200
 
     var body: some View {
         content
@@ -240,23 +263,37 @@ struct ArchiveSwipe<Content: View>: View {
             .background(alignment: .trailing) {
                 if offset < -8 {
                     HStack(spacing: 6) {
-                        Image(systemName: "archivebox.fill")
-                        Text("Archive").font(.system(size: 13, weight: .semibold))
+                        Image(systemName: showsDismiss ? "trash.fill" : "archivebox.fill")
+                        Text(showsDismiss ? "Dismiss" : "Archive").font(.system(size: 13, weight: .semibold))
                     }
-                    // Muted, not amber: putting something away is not the deck
-                    // asking for anything.
-                    .foregroundStyle(offset < -threshold ? Palette.text : Palette.muted)
+                    // Archive is muted, not amber: putting something away is
+                    // not the deck asking for anything. Dismiss is danger,
+                    // because the deck itself forgets the card.
+                    .foregroundStyle(labelColor)
                     .padding(.trailing, 22)
                 }
             }
             // High priority, or the card's own button claims the touch and a
             // swipe reads as a tap. A minimum distance means a real tap never
             // satisfies this gesture, so the button still gets those.
-            .highPriorityGesture(enabled ? drag : nil)
+            .highPriorityGesture(onArchive != nil || onDismiss != nil ? drag : nil)
             // The row that swiped away comes back under History, and it must
             // come back in one piece: without this it returns still carrying
             // the offset that took it off screen, and reads as an empty slot.
             .onAppear { offset = 0 }
+    }
+
+    /// Dismiss owns the label when it is the only action, or once the drag has
+    /// passed the far stop where a release would take it.
+    private var showsDismiss: Bool {
+        guard onDismiss != nil else { return false }
+        return onArchive == nil || -offset > farThreshold
+    }
+
+    private var labelColor: Color {
+        let armed = -offset > (showsDismiss && onArchive != nil ? farThreshold : threshold)
+        if showsDismiss { return armed ? Palette.danger : Palette.muted }
+        return armed ? Palette.text : Palette.muted
     }
 
     private var drag: some Gesture {
@@ -267,7 +304,11 @@ struct ArchiveSwipe<Content: View>: View {
                 offset = min(0, value.translation.width)
             }
             .onEnded { value in
-                if value.translation.width < -threshold {
+                let travel = -value.translation.width
+                if let onDismiss, travel > (onArchive == nil ? threshold : farThreshold) {
+                    withAnimation(.easeOut(duration: 0.18)) { offset = -600 }
+                    onDismiss()
+                } else if let onArchive, travel > threshold {
                     withAnimation(.easeOut(duration: 0.18)) { offset = -600 }
                     onArchive()
                 } else {
