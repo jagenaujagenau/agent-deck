@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import agentDeckExtension from "./index";
 
-type Handler = (event: unknown, ctx: unknown) => unknown;
+/** The slice of a Pi event these tests ever fire; reload cases carry nothing. */
+type FiredEvent = {
+  toolName?: string;
+  isError?: boolean;
+};
+
+type FakeContext = ReturnType<typeof fakeContext>;
+type Handler = (event: FiredEvent, ctx: FakeContext) => Promise<void> | void;
 
 /** Captures the handlers an extension instance registers, standing in for the Pi runtime. */
 function fakePi() {
@@ -12,8 +19,16 @@ function fakePi() {
       registerCommand: () => {},
       getSessionName: () => "Pi · test",
     },
-    fire: (name: string, event: unknown, ctx: unknown) => handlers.get(name)?.(event, ctx),
+    fire: (name: string, event: FiredEvent, ctx: FakeContext) => handlers.get(name)?.(event, ctx),
   };
+}
+
+/** Registers the extension against a fake runtime. */
+function install(pi: ReturnType<typeof fakePi>) {
+  // SAFETY: the fake carries the three ExtensionAPI members the extension
+  // touches; `never` satisfies the imported parameter type without pulling the
+  // real runtime into the test.
+  agentDeckExtension(pi.api as never);
 }
 
 function fakeContext(sessionId: string) {
@@ -27,12 +42,21 @@ function fakeContext(sessionId: string) {
 }
 
 const RELOAD_HANDOFF = Symbol.for("agent-deck.pi.reload-handoff");
-let posts: Array<{ path: string; body: Record<string, unknown> }>;
+
+/** The slice of each posted body these tests read back. */
+type PostedBody = {
+  id?: string;
+  state?: string;
+};
+
+let posts: Array<{ path: string; body: PostedBody }>;
 let originalFetch: typeof fetch;
 
 beforeEach(() => {
   posts = [];
   originalFetch = globalThis.fetch;
+  // SAFETY: the extension only ever calls the mock as a plain request function;
+  // the statics Bun hangs off `fetch` (preconnect) go unused here.
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     posts.push({ path: String(url), body: init?.body ? JSON.parse(String(init.body)) : {} });
     return new Response(JSON.stringify({ commands: [] }), {
@@ -44,7 +68,10 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  (globalThis as Record<symbol, unknown>)[RELOAD_HANDOFF] = undefined;
+  // SAFETY: clears the reload-handoff slot the extension declares on
+  // globalThis; the test only ever writes undefined, so undefined is the whole
+  // value contract it needs.
+  (globalThis as Record<symbol, undefined>)[RELOAD_HANDOFF] = undefined;
 });
 
 const heartbeats = () => posts.filter((post) => post.path.endsWith("/agents/heartbeat"));
@@ -52,14 +79,14 @@ const heartbeats = () => posts.filter((post) => post.path.endsWith("/agents/hear
 describe("/reload handoff", () => {
   test("a reloaded instance keeps heartbeating without waiting for session_start", async () => {
     const first = fakePi();
-    agentDeckExtension(first.api as never);
+    install(first);
     await first.fire("session_start", {}, fakeContext("session-1"));
     expect(heartbeats().length).toBeGreaterThan(0);
 
     // `/reload` builds a new instance; session_start does not fire again for it.
     posts = [];
     const second = fakePi();
-    agentDeckExtension(second.api as never);
+    install(second);
     await Bun.sleep(10);
 
     expect(heartbeats().length).toBeGreaterThan(0);
@@ -69,11 +96,11 @@ describe("/reload handoff", () => {
 
   test("the outgoing instance does not mark the session offline after being replaced", async () => {
     const first = fakePi();
-    agentDeckExtension(first.api as never);
+    install(first);
     await first.fire("session_start", {}, fakeContext("session-1"));
 
     const second = fakePi();
-    agentDeckExtension(second.api as never);
+    install(second);
 
     posts = [];
     await first.fire("session_shutdown", {}, fakeContext("session-1"));
@@ -83,7 +110,7 @@ describe("/reload handoff", () => {
 
   test("a genuine shutdown still reports the session offline", async () => {
     const only = fakePi();
-    agentDeckExtension(only.api as never);
+    install(only);
     await only.fire("session_start", {}, fakeContext("session-1"));
 
     posts = [];
@@ -94,7 +121,7 @@ describe("/reload handoff", () => {
 
   test("an event on a reloaded instance revives the loops even with nothing inherited", async () => {
     const reloaded = fakePi();
-    agentDeckExtension(reloaded.api as never);
+    install(reloaded);
 
     posts = [];
     await reloaded.fire("agent_start", {}, fakeContext("session-2"));

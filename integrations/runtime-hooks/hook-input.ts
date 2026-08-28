@@ -12,8 +12,16 @@
  * wrong for a process on that path.
  */
 
-const asString = (value: unknown): string | undefined =>
-  typeof value === "string" ? value : undefined;
+import { asString, isJsonObject, parseJson } from "./json-value";
+import type { JsonObject, JsonValue } from "./json-value";
+
+/** One AskUserQuestion entry, narrowed to what the hooks put in front of a person. */
+export interface ToolQuestion {
+  /** What to ask, from `question` falling back to `header`. */
+  prompt?: string;
+  /** The choices' labels, already flattened from the tool's option objects. */
+  options: string[];
+}
 
 /** A tool's arguments. Every tool has its own, so only shared keys are named. */
 export interface ToolArguments {
@@ -24,9 +32,9 @@ export interface ToolArguments {
   new_string?: string;
   content?: string;
   /** AskUserQuestion's questions, the one tool payload the hooks interpret. */
-  questions?: ReadonlyArray<Readonly<Record<string, unknown>>>;
-  /** Kept so a caller can read a key this does not name yet. */
-  readonly raw: Readonly<Record<string, unknown>>;
+  questions?: ToolQuestion[];
+  /** Kept so a caller can hand the whole payload to something that describes it. */
+  readonly raw: Readonly<JsonObject>;
 }
 
 export interface HookPayload {
@@ -53,49 +61,66 @@ export interface HookPayload {
 
 const EMPTY_ARGUMENTS: ToolArguments = { raw: Object.freeze({}) };
 
-function toolArguments(value: unknown): ToolArguments {
-  if (!value || typeof value !== "object") return EMPTY_ARGUMENTS;
-  const raw = value as Record<string, unknown>;
+function toolQuestion(entry: JsonObject): ToolQuestion {
+  const question: ToolQuestion = { options: [] };
+  const prompt = entry.question ?? entry.header;
+  if (prompt !== undefined) question.prompt = String(prompt);
+  if (Array.isArray(entry.options)) {
+    question.options = entry.options
+      .map((option) =>
+        isJsonObject(option)
+          ? String(option.label ?? "")
+          : Array.isArray(option)
+            ? ""
+            : String(option),
+      )
+      .filter(Boolean);
+  }
+  return question;
+}
+
+function toolQuestions(value: JsonValue | undefined): ToolQuestion[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter(isJsonObject).map(toolQuestion);
+}
+
+function toolArguments(value: JsonValue | undefined): ToolArguments {
+  if (!isJsonObject(value)) return EMPTY_ARGUMENTS;
   return {
-    file_path: asString(raw.file_path),
-    path: asString(raw.path),
-    command: asString(raw.command),
-    old_string: asString(raw.old_string),
-    new_string: asString(raw.new_string),
-    content: asString(raw.content),
-    questions: Array.isArray(raw.questions)
-      ? raw.questions.filter(
-          (entry): entry is Record<string, unknown> => !!entry && typeof entry === "object",
-        )
-      : undefined,
-    raw,
+    file_path: asString(value.file_path),
+    path: asString(value.path),
+    command: asString(value.command),
+    old_string: asString(value.old_string),
+    new_string: asString(value.new_string),
+    content: asString(value.content),
+    questions: toolQuestions(value.questions),
+    raw: value,
   };
 }
 
 /** Parses a hook payload. Anything unreadable yields an empty one, never a throw. */
 export function parseHookPayload(text: string): HookPayload {
-  let value: unknown;
+  let value: JsonValue;
   try {
-    value = text.trim() ? JSON.parse(text) : {};
+    value = text.trim() ? parseJson(text) : {};
   } catch {
     value = {};
   }
-  if (!value || typeof value !== "object") return { toolArguments: EMPTY_ARGUMENTS };
-  const raw = value as Record<string, unknown>;
+  if (!isJsonObject(value)) return { toolArguments: EMPTY_ARGUMENTS };
   return {
-    sessionId: asString(raw.session_id),
-    cwd: asString(raw.cwd),
-    eventName: asString(raw.hook_event_name),
-    toolName: asString(raw.tool_name),
-    toolUseId: asString(raw.tool_use_id),
-    toolArguments: toolArguments(raw.tool_input),
-    prompt: asString(raw.prompt),
-    lastAssistantMessage: asString(raw.last_assistant_message),
-    notificationType: asString(raw.notification_type),
-    message: asString(raw.message),
-    transcriptPath: asString(raw.transcript_path),
-    permissionMode: asString(raw.permission_mode),
-    agentId: asString(raw.agent_id),
-    agentType: asString(raw.agent_type),
+    sessionId: asString(value.session_id),
+    cwd: asString(value.cwd),
+    eventName: asString(value.hook_event_name),
+    toolName: asString(value.tool_name),
+    toolUseId: asString(value.tool_use_id),
+    toolArguments: toolArguments(value.tool_input),
+    prompt: asString(value.prompt),
+    lastAssistantMessage: asString(value.last_assistant_message),
+    notificationType: asString(value.notification_type),
+    message: asString(value.message),
+    transcriptPath: asString(value.transcript_path),
+    permissionMode: asString(value.permission_mode),
+    agentId: asString(value.agent_id),
+    agentType: asString(value.agent_type),
   };
 }

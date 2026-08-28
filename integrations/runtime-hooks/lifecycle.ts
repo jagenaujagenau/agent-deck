@@ -2,6 +2,7 @@ import {
   requiresApproval,
   type ApprovalMode,
 } from "../../packages/agent-adapter/src/approval-policy";
+import type { JsonObject } from "./json-value";
 
 const lifecycleNames = new Map([
   ["sessionstart", "SessionStart"],
@@ -25,7 +26,7 @@ export function shouldRequestRemoteApproval(
   runtime: "claude" | "codex",
   permissionMode: string | undefined,
   toolName: string,
-  toolInput: Record<string, unknown>,
+  toolInput: Readonly<JsonObject>,
   approvalMode: ApprovalMode,
 ): boolean {
   return (

@@ -7,10 +7,14 @@ import {
   AgentDeckClient,
   clip,
   clipMultiline,
+  type AgentEventInput,
   type AgentState,
+  type CanonicalRuntimeEvent,
   type ControlAction,
   type RuntimeEventType,
 } from "../../packages/agent-adapter/src/index";
+import { asString, isJsonNumber, isJsonObject, parseJson } from "./json-value";
+import type { JsonValue } from "./json-value";
 import {
   describeToolCall,
   type ApprovalMode,
@@ -29,7 +33,12 @@ import {
   readFileForDiff,
 } from "../../packages/agent-adapter/src/file-snapshot";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
-import { drainRemoteMessages, promptContext, stopHookDecision } from "./remote-messages";
+import {
+  drainRemoteMessages,
+  promptContext,
+  stopHookDecision,
+  type CommandQueue,
+} from "./remote-messages";
 import { parseHookPayload, type ToolArguments } from "./hook-input";
 import {
   changedPaths,
@@ -37,7 +46,8 @@ import {
   fingerprintWorkspace,
   type WorkspaceFingerprint,
 } from "./workspace-changes";
-import { discoverSlashCommands } from "./slash-commands";
+import { discoverCodexSlashCommands, discoverSlashCommands } from "./slash-commands";
+import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 
 type HookState = {
   state: AgentState;
@@ -53,6 +63,8 @@ type HookState = {
   transcriptOffset?: number;
   /** What the working tree looked like after the last shell command. */
   workspace?: WorkspaceFingerprint;
+  /** The report counter shared with the daemon; every runtime event advances it. */
+  reportSeq?: number;
   ownerPid?: number;
   capabilities?: ControlAction[];
   rateLimits?: Array<{
@@ -94,14 +106,23 @@ const stateDirectory = join(homedir(), ".cache", "agent-deck", "runtime-hooks");
 const snapshotDirectory = join(stateDirectory, "snapshots");
 const statePath = join(stateDirectory, `${agentId}.json`);
 const client = new AgentDeckClient();
+/** The client as the message queue sees it: an acknowledgement's body says nothing worth reading. */
+const commandQueue: CommandQueue = {
+  commands: (id) => client.commands(id),
+  acknowledge: async (id, commandId) => {
+    await client.acknowledge(id, commandId);
+  },
+};
 const model = runtime === "claude" ? "Claude Code" : "Codex";
 const detectedProject = projectNameForCwd(cwd);
 const displayName = `${runtime === "claude" ? "Claude" : "Codex"} · ${detectedProject} · ${sessionKey.slice(0, 4)}`;
-const approvalMode = (
-  ["off", "destructive", "all"].includes(process.env.AGENT_DECK_APPROVAL_MODE ?? "")
-    ? process.env.AGENT_DECK_APPROVAL_MODE
-    : "destructive"
-) as ApprovalMode;
+const approvalModeSetting = process.env.AGENT_DECK_APPROVAL_MODE;
+const approvalMode: ApprovalMode =
+  approvalModeSetting === "off" ||
+  approvalModeSetting === "destructive" ||
+  approvalModeSetting === "all"
+    ? approvalModeSetting
+    : "destructive";
 
 mkdirSync(stateDirectory, { recursive: true });
 function runtimeOwnerPid() {
@@ -119,6 +140,9 @@ function runtimeOwnerPid() {
 
 let state: HookState = { state: "idle", task: "Ready for an instruction" };
 try {
+  // SAFETY: the state file is this adapter's own — every writer is this hook or
+  // its daemon, and both serialise exactly this shape. A corrupt file fails the
+  // parse and falls through to the fresh state below.
   state = JSON.parse(readFileSync(statePath, "utf8")) as HookState;
 } catch {
   /* First event for this session. */
@@ -159,6 +183,84 @@ function ensureDaemon() {
   writeFileSync(pidPath, String(child.pid));
 }
 
+/** One assistant turn's usage, as a Claude Code transcript line reports it. */
+type ClaudeUsageLine = {
+  /** Deduplication key: message id and request id, or a hash of the raw line when both are absent. */
+  key: string;
+  model?: string;
+  contextTokens: number;
+};
+
+/** Throws on a malformed line, exactly as the raw JSON.parse it replaces did. */
+function parseClaudeUsageLine(line: string): ClaudeUsageLine | undefined {
+  const entry = parseJson(line);
+  if (!isJsonObject(entry) || entry.type !== "assistant") return undefined;
+  const message = isJsonObject(entry.message) ? entry.message : undefined;
+  const usage = message !== undefined && isJsonObject(message.usage) ? message.usage : undefined;
+  if (message === undefined || usage === undefined) return undefined;
+  const id = asString(message.id);
+  const requestId = asString(entry.requestId);
+  const count = (field: string) => {
+    const value = usage[field];
+    return isJsonNumber(value) ? value : 0;
+  };
+  return {
+    key:
+      id || requestId
+        ? `${id ?? ""}:${requestId ?? ""}`
+        : createHash("sha1").update(line).digest("hex"),
+    model: asString(message.model),
+    contextTokens:
+      count("input_tokens") +
+      count("cache_creation_input_tokens") +
+      count("cache_read_input_tokens") +
+      count("output_tokens"),
+  };
+}
+
+/** One of Codex's rate-limit windows, as a token_count event reports it. */
+type CodexRateWindow = { usedPercent: number; windowMinutes?: number; resetsAt?: number };
+
+/** A Codex token_count event: cumulative and last-turn usage plus whatever windows it carried. */
+type CodexUsageLine = {
+  contextTokens?: number;
+  processedTokens?: number;
+  /** Present windows in primary-then-secondary order, which is what names them downstream. */
+  windows: CodexRateWindow[];
+  planType?: string;
+};
+
+/** Throws on a malformed line, exactly as the raw JSON.parse it replaces did. */
+function parseCodexUsageLine(line: string): CodexUsageLine | undefined {
+  const entry = parseJson(line);
+  if (!isJsonObject(entry) || entry.type !== "event_msg") return undefined;
+  const payload = isJsonObject(entry.payload) ? entry.payload : undefined;
+  if (payload === undefined || payload.type !== "token_count") return undefined;
+  const info = isJsonObject(payload.info) ? payload.info : undefined;
+  const totalTokens = (value: JsonValue | undefined) => {
+    const total = isJsonObject(value) ? value.total_tokens : undefined;
+    return isJsonNumber(total) ? total : undefined;
+  };
+  const limits = isJsonObject(payload.rate_limits) ? payload.rate_limits : undefined;
+  const window = (value: JsonValue | undefined): CodexRateWindow | undefined => {
+    if (!isJsonObject(value)) return undefined;
+    const parsed: CodexRateWindow = {
+      usedPercent: isJsonNumber(value.used_percent) ? value.used_percent : 0,
+    };
+    if (isJsonNumber(value.window_minutes)) parsed.windowMinutes = value.window_minutes;
+    if (isJsonNumber(value.resets_at)) parsed.resetsAt = value.resets_at;
+    return parsed;
+  };
+  return {
+    contextTokens: totalTokens(info?.last_token_usage),
+    processedTokens: totalTokens(info?.total_token_usage),
+    windows: [window(limits?.primary), window(limits?.secondary)].filter(
+      (parsed): parsed is CodexRateWindow => parsed !== undefined,
+    ),
+    planType: asString(limits?.plan_type),
+  };
+}
+
 function updateUsageFromTranscript() {
   if (input.transcriptPath === undefined) return;
   try {
@@ -168,25 +270,11 @@ function updateUsageFromTranscript() {
       let processedTokens = 0;
       let contextTokens = 0;
       for (const line of lines) {
-        const entry = JSON.parse(line) as {
-          type?: string;
-          requestId?: string;
-          message?: { id?: string; model?: string; usage?: Record<string, number> };
-        };
-        if (entry.type !== "assistant" || !entry.message?.usage) continue;
-        const key =
-          entry.message.id || entry.requestId
-            ? `${entry.message.id ?? ""}:${entry.requestId ?? ""}`
-            : createHash("sha1").update(line).digest("hex");
-        if (seen.has(key)) continue;
-        seen.add(key);
-        state.model = entry.message.model ?? state.model;
-        const usage = entry.message.usage;
-        contextTokens =
-          (usage.input_tokens ?? 0) +
-          (usage.cache_creation_input_tokens ?? 0) +
-          (usage.cache_read_input_tokens ?? 0) +
-          (usage.output_tokens ?? 0);
+        const entry = parseClaudeUsageLine(line);
+        if (!entry || seen.has(entry.key)) continue;
+        seen.add(entry.key);
+        state.model = entry.model ?? state.model;
+        contextTokens = entry.contextTokens;
         processedTokens += contextTokens;
       }
       state.tokens = contextTokens;
@@ -194,28 +282,10 @@ function updateUsageFromTranscript() {
       return;
     }
     for (const line of lines.reverse()) {
-      const entry = JSON.parse(line) as {
-        type?: string;
-        payload?: {
-          type?: string;
-          info?: {
-            total_token_usage?: { total_tokens?: number };
-            last_token_usage?: { total_tokens?: number };
-          };
-          rate_limits?: Record<string, unknown>;
-        };
-      };
-      if (entry.type !== "event_msg" || entry.payload?.type !== "token_count") continue;
-      state.tokens = entry.payload.info?.last_token_usage?.total_tokens ?? state.tokens;
-      state.processedTokens =
-        entry.payload.info?.total_token_usage?.total_tokens ?? state.processedTokens;
-      const limits = entry.payload.rate_limits as
-        | {
-            primary?: { used_percent?: number; window_minutes?: number; resets_at?: number };
-            secondary?: { used_percent?: number; window_minutes?: number; resets_at?: number };
-            plan_type?: string;
-          }
-        | undefined;
+      const entry = parseCodexUsageLine(line);
+      if (!entry) continue;
+      state.tokens = entry.contextTokens ?? state.tokens;
+      state.processedTokens = entry.processedTokens ?? state.processedTokens;
       const label = (minutes?: number) =>
         !minutes
           ? "Usage"
@@ -224,16 +294,12 @@ function updateUsageFromTranscript() {
             : minutes % 60 === 0
               ? `${minutes / 60}h`
               : `${minutes}m`;
-      state.rateLimits = (
-        [limits?.primary, limits?.secondary].filter(Boolean) as Array<
-          NonNullable<typeof limits>["primary"]
-        >
-      ).map((window, index) => ({
+      state.rateLimits = entry.windows.map((window, index) => ({
         id: index === 0 ? "primary" : "secondary",
-        label: label(window?.window_minutes),
-        usedPercent: window?.used_percent ?? 0,
-        resetsAt: window?.resets_at ? new Date(window.resets_at * 1_000).toISOString() : undefined,
-        account: limits?.plan_type,
+        label: label(window.windowMinutes),
+        usedPercent: window.usedPercent,
+        resetsAt: window.resetsAt ? new Date(window.resetsAt * 1_000).toISOString() : undefined,
+        account: entry.planType,
       }));
       break;
     }
@@ -260,23 +326,34 @@ const heartbeat = async () =>
     pendingApproval: state.pendingApproval,
   });
 const save = () => writeFileSync(statePath, JSON.stringify(state));
+/** Everything a runtime event of this adapter's ever says about itself. */
+type RuntimePayload = Record<string, string | number | boolean | string[] | undefined>;
 const publishRuntime = (
   type: RuntimeEventType,
-  payload: Record<string, unknown>,
+  payload: RuntimePayload,
   refs: { id?: string; turnId?: string; itemId?: string; requestId?: string } = {},
-) =>
-  client.runtimeEvent({
+) => {
+  // The daemon publishes state reports for this session too, so every report
+  // carries the shared counter — one total order per session, whichever
+  // process spoke. Persisted before the wire: a report that went out must
+  // never be re-numbered by the next one.
+  const seq = nextReportSeq(statePath, state);
+  save();
+  const runtimeEvent: CanonicalRuntimeEvent = {
     id: refs.id ?? crypto.randomUUID(),
     agentId,
     type,
     createdAt: new Date().toISOString(),
+    origin: { source: REPORT_SOURCE, seq },
     payload,
-    ...(refs.turnId ? { turnId: refs.turnId } : {}),
-    ...(refs.itemId ? { itemId: refs.itemId } : {}),
-    ...(refs.requestId ? { requestId: refs.requestId } : {}),
-  });
+  };
+  if (refs.turnId) runtimeEvent.turnId = refs.turnId;
+  if (refs.itemId) runtimeEvent.itemId = refs.itemId;
+  if (refs.requestId) runtimeEvent.requestId = refs.requestId;
+  return client.runtimeEvent(runtimeEvent);
+};
 const publish = (
-  kind: "thought" | "tool" | "output" | "warning" | "error" | "question",
+  kind: "thought" | "tool" | "output" | "warning" | "error" | "question" | "user",
   summary: string,
   detail?: string,
   extra: {
@@ -287,20 +364,22 @@ const publish = (
     diff?: string;
     options?: string[];
   } = {},
-) =>
-  client.event(agentId, {
+) => {
+  const agentEvent: AgentEventInput = {
     kind,
     summary: clip(summary, 120),
     detail: detail ? clipMultiline(detail) : undefined,
-    // Claude Code tags every hook fired inside a subagent with that subagent's
-    // own id and type, and this dropped both - so three subagents working at
-    // once arrived as one undifferentiated stream in the parent, which is what
-    // made a busy session unreadable. Absent on the parent's own calls, which
-    // is exactly the distinction wanted.
-    ...(input.agentId ? { subagentId: input.agentId } : {}),
-    ...(input.agentType ? { subagentType: input.agentType } : {}),
     ...extra,
-  });
+  };
+  // Claude Code tags every hook fired inside a subagent with that subagent's
+  // own id and type, and this dropped both - so three subagents working at
+  // once arrived as one undifferentiated stream in the parent, which is what
+  // made a busy session unreadable. Absent on the parent's own calls, which
+  // is exactly the distinction wanted.
+  if (input.agentId) agentEvent.subagentId = input.agentId;
+  if (input.agentType) agentEvent.subagentType = input.agentType;
+  return client.event(agentId, agentEvent);
+};
 
 function toolTarget(toolInput: ToolArguments): string | undefined {
   const target =
@@ -342,7 +421,7 @@ function fileDiff(tool: string, toolInput: ToolArguments): string | undefined {
       16_000,
     );
   }
-  if (/write|create/i.test(tool) && typeof toolInput.content === "string") {
+  if (/write|create/i.test(tool) && toolInput.content !== undefined) {
     return clipMultiline(`+ ${toolInput.content.replace(/\n/g, "\n+ ")}`, 16_000);
   }
   return undefined;
@@ -354,20 +433,9 @@ async function preToolUse() {
   state.state = "running";
   state.task = `Using ${toolName}`;
   if (/ask.?user.?question/i.test(toolName)) {
-    const questions = Array.isArray(toolInput.questions)
-      ? (toolInput.questions as Array<Record<string, unknown>>)
-      : [];
-    const first = questions[0] ?? toolInput;
-    const question = String(first.question ?? first.header ?? "Agent needs your answer");
-    const options = Array.isArray(first.options)
-      ? first.options
-          .map((option) =>
-            typeof option === "object" && option
-              ? String((option as Record<string, unknown>).label ?? "")
-              : String(option),
-          )
-          .filter(Boolean)
-      : [];
+    const first = toolInput.questions?.[0];
+    const question = first?.prompt ?? "Agent needs your answer";
+    const options = first?.options ?? [];
     state.state = "waiting";
     state.task = clip(question, 180);
     const questionId = crypto.randomUUID();
@@ -560,11 +628,14 @@ switch (event) {
       .request(`/agents/${encodeURIComponent(agentId)}/slash-commands`, {
         method: "POST",
         body: JSON.stringify({
-          commands: discoverSlashCommands({
-            userDir: join(homedir(), ".claude"),
-            projectDir: cwd,
-            pluginManifest: join(homedir(), ".claude", "plugins", "installed_plugins.json"),
-          }),
+          commands:
+            runtime === "codex"
+              ? discoverCodexSlashCommands(join(homedir(), ".codex"))
+              : discoverSlashCommands({
+                  userDir: join(homedir(), ".claude"),
+                  projectDir: cwd,
+                  pluginManifest: join(homedir(), ".claude", "plugins", "installed_plugins.json"),
+                }),
         }),
       })
       .catch(() => {});
@@ -579,20 +650,26 @@ switch (event) {
       { objective: state.objective },
       { turnId: state.activeTurnId },
     ).catch(() => {});
-    await publish("thought", "Received instruction", state.task).catch(() => {});
+    // The prompt is the person speaking, so it goes on the wire as what it is.
+    // The transcript tail republishes the same turn under its transcript id a
+    // moment later; the surfaces' close-in-time fold collapses the pair, the
+    // same way it already collapsed the string-typed thought this replaces.
+    await publish("user", "Message", (input.prompt ?? state.task).trim(), {
+      id: `user:${agentId}:${state.activeTurnId}`,
+    }).catch(() => {});
     {
       // Anything queued from the app while this session sat idle has had no
       // delivery point - Stop fires at the end of a turn and an idle session
       // runs none. The user typing is the first moment one can be delivered,
       // so it joins this turn instead of waiting for the turn after it.
-      const queued = await drainRemoteMessages(client, agentId).catch(() => [] as string[]);
+      const queued = await drainRemoteMessages(commandQueue, agentId).catch((): string[] => []);
       if (queued.length > 0) console.log(promptContext(queued));
     }
     break;
   case "PreToolUse": {
     // The file still holds its old contents here; snapshot it so PostToolUse can produce a real
     // diff instead of reporting the whole new file as additions.
-    const target = toolTarget(input.toolArguments ?? {});
+    const target = toolTarget(input.toolArguments);
     if (mutatesFile(input.toolName ?? "", target)) {
       pruneSnapshots(snapshotDirectory);
       captureSnapshot(snapshotDirectory, snapshotKey(target), target);
@@ -605,14 +682,9 @@ switch (event) {
   case "PostToolUse": {
     const tool = input.toolName ?? "Tool";
     const toolInput = input.toolArguments;
-    const path =
-      typeof toolInput.file_path === "string"
-        ? toolInput.file_path
-        : typeof toolInput.path === "string"
-          ? toolInput.path
-          : undefined;
+    const path = toolInput.file_path ?? toolInput.path;
     const command =
-      typeof toolInput.command === "string" ? clipMultiline(toolInput.command, 8_000) : undefined;
+      toolInput.command !== undefined ? clipMultiline(toolInput.command, 8_000) : undefined;
     const diff = fileDiff(tool, toolInput);
     state.state = "running";
     state.task = `${tool} completed`;
@@ -764,7 +836,7 @@ switch (event) {
       // A hook cannot type into a running session, but blocking the Stop hook keeps the turn alive
       // and hands `reason` back to the model as its next instruction. That is the delivery point
       // for anything the phone queued while this turn was running.
-      const messages = await drainRemoteMessages(client, agentId).catch(() => [] as string[]);
+      const messages = await drainRemoteMessages(commandQueue, agentId).catch((): string[] => []);
       if (messages.length > 0) {
         state.state = "running";
         state.objective = clip(messages.join("\n\n"), 500);

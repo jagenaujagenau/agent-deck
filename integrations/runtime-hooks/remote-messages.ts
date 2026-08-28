@@ -6,13 +6,13 @@ const MESSAGE_ACTIONS = new Set(["prompt", "steer", "follow_up"]);
 /** The subset of AgentDeckClient this module needs, so tests can drive it without a bridge. */
 export type CommandQueue = {
   commands(agentId: string): Promise<RemoteCommand[]>;
-  acknowledge(agentId: string, commandId: string): Promise<unknown>;
+  acknowledge(agentId: string, commandId: string): Promise<void>;
 };
 
 export function isRemoteMessage(command: RemoteCommand): boolean {
   return (
     MESSAGE_ACTIONS.has(command.action) &&
-    typeof command.value === "string" &&
+    command.value !== undefined &&
     command.value.trim().length > 0
   );
 }

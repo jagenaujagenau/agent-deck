@@ -10,7 +10,10 @@ const MAX_DESCRIPTION = 200;
 /** A device has to render and filter these, and they ride in one response — keep the list bounded. */
 const MAX_COMMANDS = 400;
 
-function frontmatter(file: string): Record<string, string> {
+/** The two frontmatter fields the deck reads; the rest of the block is skipped, not kept. */
+type Frontmatter = { name?: string; description?: string };
+
+function frontmatter(file: string): Frontmatter {
   let head: string;
   try {
     head = readFileSync(file, "utf8").slice(0, FRONTMATTER_BYTES);
@@ -24,7 +27,7 @@ function frontmatter(file: string): Record<string, string> {
   // description of every plugin skill with sizeable frontmatter, and that
   // description is on the third line.
   const end = head.indexOf("\n---", 3);
-  const fields: Record<string, string> = {};
+  const fields: Frontmatter = {};
   const lines = head.slice(3, end === -1 ? undefined : end).split("\n");
   for (let index = 0; index < lines.length; index += 1) {
     const match = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(lines[index].trim());
@@ -43,12 +46,16 @@ function frontmatter(file: string): Record<string, string> {
       }
       value = block.join(" ").trim();
     }
-    fields[key] = value.replace(/^["']|["']$/g, "");
+    // Every key participates in the scan — a block scalar under any key has to be
+    // consumed to keep line positions honest — but only the two named fields are kept.
+    const cleaned = value.replace(/^["']|["']$/g, "");
+    if (key === "name") fields.name = cleaned;
+    if (key === "description") fields.description = cleaned;
   }
   return fields;
 }
 
-function describe(file: string, fields: Record<string, string>): string | undefined {
+function describe(file: string, fields: Frontmatter): string | undefined {
   const description = fields.description?.trim();
   if (description)
     return description.length > MAX_DESCRIPTION
@@ -147,14 +154,31 @@ export function discoverSlashCommands(roots: {
   projectDir: string;
   pluginManifest: string;
 }): SlashCommand[] {
-  const discovered = [
+  return dedupe([
     ...commandsIn(join(roots.projectDir, ".claude", "commands"), "project"),
     ...skillsIn(join(roots.projectDir, ".claude", "skills"), "project"),
     ...commandsIn(join(roots.userDir, "commands"), "user"),
     ...skillsIn(join(roots.userDir, "skills"), "user"),
     ...pluginSkills(roots.pluginManifest),
-  ];
-  // Project definitions shadow user ones of the same name, exactly as the runtime resolves them.
+  ]);
+}
+
+/**
+ * The Codex layout: custom prompts in `prompts/*.md`, skills in `skills/`
+ * with the same SKILL.md frontmatter Claude uses, and the CLI's built-in
+ * skills one level down in `skills/.system/`. Codex has no per-project
+ * command directory or plugin manifest to read.
+ */
+export function discoverCodexSlashCommands(codexDir: string): SlashCommand[] {
+  return dedupe([
+    ...commandsIn(join(codexDir, "prompts"), "user"),
+    ...skillsIn(join(codexDir, "skills"), "user"),
+    ...skillsIn(join(codexDir, "skills", ".system"), "plugin"),
+  ]);
+}
+
+function dedupe(discovered: SlashCommand[]): SlashCommand[] {
+  // Earlier roots shadow later ones of the same name, exactly as the runtime resolves them.
   const byName = new Map<string, SlashCommand>();
   for (const command of discovered)
     if (!byName.has(command.name)) byName.set(command.name, command);

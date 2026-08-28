@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import {
   AgentDeckClient,
   clip,
@@ -15,8 +15,19 @@ import {
   type ApprovalMode,
 } from "./approval-policy";
 import { mutatesFile, readFileForDiff } from "../../packages/agent-adapter/src/file-snapshot";
+import type {
+  CanonicalRuntimeEvent,
+  RuntimeEventType,
+} from "../../packages/agent-adapter/src/runtime-events";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
+import { asObject, asString, type JsonValue } from "./payload";
 import { askedQuestion, isAskUserQuestionTool } from "./questions";
+import {
+  changedPaths,
+  diffForPath,
+  fingerprintWorkspace,
+  type WorkspaceFingerprint,
+} from "./workspace-changes";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const COMMAND_INTERVAL_MS = 2_000;
@@ -40,40 +51,59 @@ type ReloadHandoff = {
   stop: () => void;
   context: () => ExtensionContext | undefined;
 };
+// SAFETY: widens globalThis with one optional slot under a registry-scoped
+// symbol; the symbol names this extension alone, so nothing else can claim the
+// key with a different value.
 const handoffSlot = globalThis as typeof globalThis & { [RELOAD_HANDOFF]?: ReloadHandoff };
 
 const bridge = new AgentDeckClient();
 /** Contents of each file a tool is about to rewrite, captured at execution start and diffed at end. */
 const pendingFileEdits = new Map<string, { target: string; before: string }>();
 const MAX_PENDING_FILE_EDITS = 64;
+/** Workspace state as each shell command starts, compared once it ends to see what it touched. */
+const pendingShellCommands = new Map<string, { cwd: string; before: WorkspaceFingerprint }>();
+const MAX_PENDING_SHELL_COMMANDS = 16;
+
+/** Pi's shell tools: their edits arrive as opaque command text, never as a named target path. */
+const isShellTool = (toolName: string) => /^(bash|powershell|shell|run|terminal)/i.test(toolName);
 
 type UsageTotals = { tokens: number; costUsd: number };
 
-function clipMultiline(value: unknown, limit = 64_000): string {
-  const text = String(value ?? "")
-    .replace(/\r\n?/g, "\n")
-    .trim();
+/** What a deck event can carry beyond its summary and detail. */
+type EventDetails = {
+  tool?: string;
+  path?: string;
+  command?: string;
+  diff?: string;
+  options?: ReadonlyArray<string>;
+};
+
+function clipMultiline(value: string, limit = 64_000): string {
+  const text = value.replace(/\r\n?/g, "\n").trim();
   return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
 function contentOfType(
-  content: unknown,
+  content: JsonValue | undefined,
   type: "text" | "thinking",
   field: "text" | "thinking",
 ): string {
-  if (typeof content === "string") return type === "text" ? content : "";
+  const inline = asString(content);
+  if (inline !== undefined) return type === "text" ? inline : "";
   if (!Array.isArray(content)) return "";
   return content
     .flatMap((part) => {
-      if (!part || typeof part !== "object") return [];
-      const item = part as Record<string, unknown>;
-      return item.type === type && typeof item[field] === "string" ? [item[field] as string] : [];
+      const item = asObject(part);
+      if (item === undefined) return [];
+      const value = asString(item[field]);
+      return item.type === type && value !== undefined ? [value] : [];
     })
     .join("\n");
 }
 
-const textContent = (content: unknown) => contentOfType(content, "text", "text");
-const reasoningContent = (content: unknown) => contentOfType(content, "thinking", "thinking");
+const textContent = (content: JsonValue | undefined) => contentOfType(content, "text", "text");
+const reasoningContent = (content: JsonValue | undefined) =>
+  contentOfType(content, "thinking", "thinking");
 
 function usageTotals(ctx: ExtensionContext): UsageTotals {
   let tokens = 0;
@@ -191,23 +221,24 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
   };
 
   const publishRuntime = (
-    type: string,
-    payload: Record<string, unknown>,
+    type: RuntimeEventType,
+    payload: CanonicalRuntimeEvent["payload"],
     refs: { id?: string; turnId?: string; itemId?: string; requestId?: string } = {},
   ) => {
     if (!ctx) return Promise.resolve();
+    const body: CanonicalRuntimeEvent = {
+      id: refs.id ?? crypto.randomUUID(),
+      agentId: agentId(),
+      type,
+      createdAt: new Date().toISOString(),
+      payload,
+    };
+    if (refs.turnId) body.turnId = refs.turnId;
+    if (refs.itemId) body.itemId = refs.itemId;
+    if (refs.requestId) body.requestId = refs.requestId;
     return bridgeRequest(`/agents/${encodeURIComponent(agentId())}/runtime-events`, {
       method: "POST",
-      body: JSON.stringify({
-        id: refs.id ?? crypto.randomUUID(),
-        agentId: agentId(),
-        type,
-        createdAt: new Date().toISOString(),
-        payload,
-        ...(refs.turnId ? { turnId: refs.turnId } : {}),
-        ...(refs.itemId ? { itemId: refs.itemId } : {}),
-        ...(refs.requestId ? { requestId: refs.requestId } : {}),
-      }),
+      body: JSON.stringify(body),
     });
   };
 
@@ -216,7 +247,7 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     summary: string,
     detail?: string,
     id?: string,
-    extra: Record<string, unknown> = {},
+    extra: EventDetails = {},
   ) => {
     if (!ctx) return;
     void bridgeRequest(`/agents/${encodeURIComponent(agentId())}/events`, {
@@ -456,7 +487,10 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     objective = clip(event.prompt, 500);
     activeTurnId = crypto.randomUUID();
     void publishRuntime("turn.started", { objective }, { turnId: activeTurnId }).catch(() => {});
-    publishEvent("thought", "Received instruction", task);
+    // The prompt is the person's own message, so it is published as one - the phone renders it as
+    // a user bubble, not as the agent thinking. One prompt opens one turn, so the turn id keys the
+    // event: republishing lands on the same entry instead of doubling it.
+    publishEvent("user", "Message", event.prompt, `user:${agentId()}:${activeTurnId}`);
     void heartbeat();
   });
 
@@ -468,7 +502,7 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, nextCtx) => {
     adopt(nextCtx);
-    const input = event.input as Record<string, unknown>;
+    const input = asObject(event.input) ?? {};
     if (isAskUserQuestionTool(event.toolName)) {
       const { question, options } = askedQuestion(input);
       if (options.length === 0 || QUESTION_TIMEOUT_MS === 0) {
@@ -521,7 +555,7 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
 
   pi.on("tool_execution_start", (event, nextCtx) => {
     adopt(nextCtx);
-    const args = event.args as Record<string, unknown>;
+    const args = asObject(event.args) ?? {};
     // A question tool only gets this far when the deck could not take it: no
     // options to offer, or nobody answered in time. Reaching execution means it
     // is now asking the host terminal and the session is blocked on a person -
@@ -532,15 +566,11 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     } else {
       state = "running";
     }
-    const itemId = String(
-      (event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID(),
-    );
-    const target =
-      typeof args.file_path === "string"
-        ? args.file_path
-        : typeof args.path === "string"
-          ? args.path
-          : undefined;
+    // SAFETY: `toolCallId` rides on tool execution events at runtime but is not
+    // part of the published event type; only that one optional field is read,
+    // and a missing value falls back to a fresh id.
+    const itemId = String((event as { toolCallId?: string }).toolCallId ?? crypto.randomUUID());
+    const target = asString(args.file_path) ?? asString(args.path);
     // The tool has not run yet, so the file still holds its old contents. Keep them to diff against
     // once it completes, which turns a whole-file write into a real change instead of all additions.
     if (mutatesFile(event.toolName, target)) {
@@ -549,6 +579,16 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
         if (pendingFileEdits.size >= MAX_PENDING_FILE_EDITS)
           pendingFileEdits.delete(pendingFileEdits.keys().next().value!);
         pendingFileEdits.set(itemId, { target, before });
+      }
+    }
+    // A shell command names no file to snapshot, so the workspace is asked instead: its state now,
+    // held against its state when the command finishes, is the set of files the command touched.
+    if (isShellTool(event.toolName)) {
+      const before = fingerprintWorkspace(nextCtx.cwd);
+      if (before) {
+        if (pendingShellCommands.size >= MAX_PENDING_SHELL_COMMANDS)
+          pendingShellCommands.delete(pendingShellCommands.keys().next().value!);
+        pendingShellCommands.set(itemId, { cwd: nextCtx.cwd, before });
       }
     }
     const started = publishRuntime(
@@ -574,6 +614,10 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     } else {
       void started;
     }
+    const command = asString(args.command);
+    const removed = asString(args.old_string);
+    const added = asString(args.new_string);
+    const written = asString(args.content);
     publishEvent(
       "tool",
       `Using ${event.toolName}`,
@@ -582,15 +626,15 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
       {
         tool: event.toolName,
         path: target,
-        command: typeof args.command === "string" ? clipMultiline(args.command, 8_000) : undefined,
+        command: command !== undefined ? clipMultiline(command, 8_000) : undefined,
         diff:
-          typeof args.old_string === "string" && typeof args.new_string === "string"
+          removed !== undefined && added !== undefined
             ? clipMultiline(
-                `- ${args.old_string.replace(/\n/g, "\n- ")}\n+ ${args.new_string.replace(/\n/g, "\n+ ")}`,
+                `- ${removed.replace(/\n/g, "\n- ")}\n+ ${added.replace(/\n/g, "\n+ ")}`,
                 16_000,
               )
-            : /write|create/i.test(event.toolName) && typeof args.content === "string"
-              ? clipMultiline(`+ ${args.content.replace(/\n/g, "\n+ ")}`, 16_000)
+            : /write|create/i.test(event.toolName) && written !== undefined
+              ? clipMultiline(`+ ${written.replace(/\n/g, "\n+ ")}`, 16_000)
               : undefined,
       },
     );
@@ -598,9 +642,10 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
 
   pi.on("tool_execution_end", (event, nextCtx) => {
     adopt(nextCtx);
-    const itemId = String(
-      (event as unknown as Record<string, unknown>).toolCallId ?? crypto.randomUUID(),
-    );
+    // SAFETY: `toolCallId` rides on tool execution events at runtime but is not
+    // part of the published event type; only that one optional field is read,
+    // and a missing value falls back to a fresh id.
+    const itemId = String((event as { toolCallId?: string }).toolCallId ?? crypto.randomUUID());
     const summary = `${event.toolName} ${event.isError ? "failed" : "completed"}`;
     // The terminal question has been answered, so the session is a running
     // agent again. Said here rather than left to the next tool call, which may
@@ -612,6 +657,42 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     pendingFileEdits.delete(itemId);
     const after = pending && !event.isError ? readFileForDiff(pending.target) : null;
     const unified = pending && after !== null ? unifiedDiff(pending.before, after) : null;
+    // The workspace answered for this command at start; asking again now names every file the
+    // command touched. A failed command has often already written before failing, so its changes
+    // are reported too - with per-command snapshots there is no later baseline to catch them.
+    const shell = pendingShellCommands.get(itemId);
+    pendingShellCommands.delete(itemId);
+    const workspaceNow = shell ? fingerprintWorkspace(shell.cwd) : undefined;
+    if (shell && workspaceNow) {
+      for (const changed of changedPaths(shell.before, workspaceNow)) {
+        const body = diffForPath(shell.cwd, changed);
+        if (!body) continue;
+        const absolute = join(shell.cwd, changed);
+        const changeSummary = `${event.toolName} changed ${basename(changed)}`;
+        void publishRuntime(
+          "item.completed",
+          { tool: event.toolName, summary: changeSummary, path: absolute, diff: body },
+          {
+            id: `item-completed:${agentId()}:${itemId}:${changed}`,
+            itemId: `${itemId}:${changed}`,
+            turnId: activeTurnId,
+          },
+        ).catch(() => {});
+        // The runtime event feeds the projection; this is what lands the diff in the session's
+        // file history, which is what the Changes tab reads.
+        publishEvent(
+          "output",
+          changeSummary,
+          undefined,
+          `shell-change:${agentId()}:${itemId}:${changed}`,
+          {
+            tool: event.toolName,
+            path: absolute,
+            diff: body,
+          },
+        );
+      }
+    }
     void publishRuntime(
       event.isError ? "runtime.error" : "item.completed",
       event.isError ? { message: summary } : { tool: event.toolName, summary },
@@ -621,15 +702,14 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
         turnId: activeTurnId,
       },
     ).catch(() => {});
+    const completion: EventDetails = { tool: event.toolName };
+    if (unified) completion.diff = clipMultiline(unified, 16_000);
     publishEvent(
       event.isError ? "error" : "output",
       summary,
       undefined,
       `tool:${agentId()}:${itemId}`,
-      {
-        tool: event.toolName,
-        ...(unified ? { diff: clipMultiline(unified, 16_000) } : {}),
-      },
+      completion,
     );
     void heartbeat();
   });
@@ -733,8 +813,8 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
   pi.registerCommand("deck-gate", {
     description: "Set remote approval mode: off, destructive, or all",
     handler: async (args, commandCtx) => {
-      const requested = args.trim() as ApprovalMode;
-      if (!["off", "destructive", "all"].includes(requested)) {
+      const requested = args.trim();
+      if (requested !== "off" && requested !== "destructive" && requested !== "all") {
         commandCtx.ui.notify(
           `Approval mode: ${approvalMode}. Usage: /deck-gate off|destructive|all`,
           "info",

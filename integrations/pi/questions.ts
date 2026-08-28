@@ -6,6 +6,8 @@
  * twice is how the two drift into disagreeing about what a question even is.
  */
 
+import { asObject, type JsonObject, type JsonValue } from "./payload";
+
 export function isAskUserQuestionTool(toolName: string): boolean {
   return /ask.?user.?question/i.test(toolName);
 }
@@ -15,24 +17,24 @@ export interface AskedQuestion {
   readonly options: ReadonlyArray<string>;
 }
 
-export function askedQuestion(input: Record<string, unknown>): AskedQuestion {
-  const questions = Array.isArray(input.questions)
-    ? (input.questions as Array<Record<string, unknown>>)
-    : [];
+/**
+ * An option is usually `{ label }` and sometimes a bare value that is its own
+ * label. Anything object-like without a label collapses to the empty string,
+ * which the caller filters out rather than showing as a blank button.
+ */
+function optionLabel(option: JsonValue): string {
+  return option !== null && Object(option) === option
+    ? String(asObject(option)?.label ?? "")
+    : String(option);
+}
+
+export function askedQuestion(input: JsonObject): AskedQuestion {
+  const questions = Array.isArray(input.questions) ? input.questions : [];
   // A tool may carry its question in a `questions` array or inline on the call
-  // itself; both shapes are in use, so neither is treated as the malformed one.
-  const first = questions[0] ?? input;
+  // itself; both forms are in use, so neither is treated as the malformed one.
+  const first = asObject(questions[0] ?? input) ?? {};
   const options = Array.isArray(first.options)
-    ? first.options
-        .map((option) =>
-          // SAFETY: guarded on `option` being a non-null object immediately
-          // above, which is the only claim the assertion makes; every value
-          // read from it is then coerced rather than trusted.
-          typeof option === "object" && option
-            ? String((option as Record<string, unknown>).label ?? "")
-            : String(option),
-        )
-        .filter(Boolean)
+    ? first.options.map(optionLabel).filter(Boolean)
     : [];
   return {
     question: String(first.question ?? first.header ?? "Agent needs your answer"),

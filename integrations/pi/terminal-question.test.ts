@@ -1,7 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import agentDeckExtension from "./index";
 
-type Handler = (event: unknown, ctx: unknown) => unknown;
+/** The slice of a Pi tool event these tests ever fire. */
+type FiredEvent = {
+  toolName?: string;
+  isError?: boolean;
+  args?: {
+    questions?: ReadonlyArray<{ question: string }>;
+    command?: string;
+  };
+};
+
+type FakeContext = ReturnType<typeof fakeContext>;
+type Handler = (event: FiredEvent, ctx: FakeContext) => Promise<void> | void;
 
 function fakePi() {
   const handlers = new Map<string, Handler>();
@@ -11,8 +22,16 @@ function fakePi() {
       registerCommand: () => {},
       getSessionName: () => "Pi · test",
     },
-    fire: (name: string, event: unknown, ctx: unknown) => handlers.get(name)?.(event, ctx),
+    fire: (name: string, event: FiredEvent, ctx: FakeContext) => handlers.get(name)?.(event, ctx),
   };
+}
+
+/** Registers the extension against a fake runtime. */
+function install(pi: ReturnType<typeof fakePi>) {
+  // SAFETY: the fake carries the three ExtensionAPI members the extension
+  // touches; `never` satisfies the imported parameter type without pulling the
+  // real runtime into the test.
+  agentDeckExtension(pi.api as never);
 }
 
 const fakeContext = (sessionId: string) => ({
@@ -24,12 +43,21 @@ const fakeContext = (sessionId: string) => ({
 });
 
 const RELOAD_HANDOFF = Symbol.for("agent-deck.pi.reload-handoff");
-let posts: Array<{ path: string; body: Record<string, unknown> }>;
+
+/** The slice of each posted body these tests read back. */
+type PostedBody = {
+  type?: string;
+  payload?: { state?: string; task?: string };
+};
+
+let posts: Array<{ path: string; body: PostedBody }>;
 let originalFetch: typeof fetch;
 
 beforeEach(() => {
   posts = [];
   originalFetch = globalThis.fetch;
+  // SAFETY: the extension only ever calls the mock as a plain request function;
+  // the statics Bun hangs off `fetch` (preconnect) go unused here.
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     posts.push({ path: String(url), body: init?.body ? JSON.parse(String(init.body)) : {} });
     return new Response(JSON.stringify({ commands: [] }), {
@@ -41,7 +69,10 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
-  (globalThis as Record<symbol, unknown>)[RELOAD_HANDOFF] = undefined;
+  // SAFETY: clears the reload-handoff slot the extension declares on
+  // globalThis; the test only ever writes undefined, so undefined is the whole
+  // value contract it needs.
+  (globalThis as Record<symbol, undefined>)[RELOAD_HANDOFF] = undefined;
 });
 
 /** Handlers publish without awaiting, so let the chained posts land. */
@@ -52,22 +83,20 @@ const settle = () => Bun.sleep(30);
  * heartbeat, so the events are what these assert on.
  */
 const runtimeEvents = () =>
-  posts
-    .filter((post) => post.path.endsWith("/runtime-events"))
-    .map((post) => post.body as { type: string; payload: Record<string, unknown> });
+  posts.filter((post) => post.path.endsWith("/runtime-events")).map((post) => post.body);
 
 const projectedState = () => {
   const carrying = runtimeEvents().filter(
     (event) => event.type === "item.started" || event.type === "session.state.changed",
   );
   const last = carrying.at(-1);
-  return last?.type === "item.started" ? "running" : last?.payload.state;
+  return last?.type === "item.started" ? "running" : last?.payload?.state;
 };
 
 describe("a question the deck could not take", () => {
   test("blocks the session rather than reporting it as running", async () => {
     const pi = fakePi();
-    agentDeckExtension(pi.api as never);
+    install(pi);
     await pi.fire("session_start", {}, fakeContext("session-q1"));
     await pi.fire("agent_start", {}, fakeContext("session-q1"));
 
@@ -86,7 +115,7 @@ describe("a question the deck could not take", () => {
 
   test("says waiting after item.started, not before it", async () => {
     const pi = fakePi();
-    agentDeckExtension(pi.api as never);
+    install(pi);
     await pi.fire("session_start", {}, fakeContext("session-q2"));
     await pi.fire("agent_start", {}, fakeContext("session-q2"));
 
@@ -106,7 +135,7 @@ describe("a question the deck could not take", () => {
 
   test("names the question, so the deck says what is being asked", async () => {
     const pi = fakePi();
-    agentDeckExtension(pi.api as never);
+    install(pi);
     await pi.fire("session_start", {}, fakeContext("session-q3"));
     await pi.fire("agent_start", {}, fakeContext("session-q3"));
 
@@ -119,12 +148,12 @@ describe("a question the deck could not take", () => {
     await settle();
 
     const changed = runtimeEvents().find((event) => event.type === "session.state.changed");
-    expect(changed?.payload.task).toBe("Which branch?");
+    expect(changed?.payload?.task).toBe("Which branch?");
   });
 
   test("answering it lets the session read as running again", async () => {
     const pi = fakePi();
-    agentDeckExtension(pi.api as never);
+    install(pi);
     await pi.fire("session_start", {}, fakeContext("session-q4"));
     await pi.fire("agent_start", {}, fakeContext("session-q4"));
     await pi.fire(
@@ -149,7 +178,7 @@ describe("a question the deck could not take", () => {
 
   test("an ordinary tool never claims the session is blocked", async () => {
     const pi = fakePi();
-    agentDeckExtension(pi.api as never);
+    install(pi);
     await pi.fire("session_start", {}, fakeContext("session-q5"));
     await pi.fire("agent_start", {}, fakeContext("session-q5"));
 

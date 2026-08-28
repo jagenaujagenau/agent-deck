@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { AgentDeckClient } from "../../packages/agent-adapter/src/client";
-import type { RuntimeEventType } from "../../packages/agent-adapter/src/runtime-events";
+import type {
+  CanonicalRuntimeEvent,
+  RuntimeEventType,
+} from "../../packages/agent-adapter/src/runtime-events";
 import { drainRemoteMessages, promptContext } from "../runtime-hooks/remote-messages";
 import { listAgents, promptAgent, readPane, sendKeys } from "./herdr-cli";
 import { parsePrompt, type TerminalPrompt } from "./prompt";
@@ -78,7 +81,7 @@ async function deckAgents(): Promise<Map<string, DeckAgent>> {
 const publish = (
   agentId: string,
   type: RuntimeEventType,
-  payload: Record<string, unknown>,
+  payload: CanonicalRuntimeEvent["payload"],
   id?: string,
 ) =>
   client
@@ -189,7 +192,7 @@ async function deliver(agent: HerdrAgent, agentId: string) {
   // Draining acknowledges each message before delivering it, so a message cannot
   // be sent twice even if a Stop hook drains the same queue at the same moment:
   // whichever acknowledges first is the one that delivers.
-  const messages = await drainRemoteMessages(client, agentId).catch(() => [] as string[]);
+  const messages = await drainRemoteMessages(client, agentId).catch((): string[] => []);
   if (messages.length === 0) return;
   const text = promptContext(messages);
   const delivered = await promptAgent(agent.target, text).catch(() => false);

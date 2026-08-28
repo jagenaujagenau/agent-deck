@@ -9,10 +9,40 @@ import type { HerdrAgent, HerdrStatus } from "./reconcile";
  * and means a hung Herdr cannot wedge this loop.
  */
 
-const STATUSES = new Set<string>(["idle", "working", "blocked", "done", "unknown"]);
+/**
+ * What `herdr agent list` can put in its JSON output. The CLI's schema is
+ * versioned but not vendored here, so each field is read through one of these
+ * helpers before anything downstream trusts it.
+ */
+type JsonValue = string | number | boolean | null | ReadonlyArray<JsonValue> | JsonObject;
 
-function asStatus(value: unknown): HerdrStatus {
-  return typeof value === "string" && STATUSES.has(value) ? (value as HerdrStatus) : "unknown";
+interface JsonObject {
+  readonly [key: string]: JsonValue | undefined;
+}
+
+/** True when an output value is an object rather than a primitive or an array. */
+function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+  return value !== null && value !== undefined && !Array.isArray(value) && Object(value) === value;
+}
+
+function asObject(value: JsonValue | undefined): JsonObject | undefined {
+  return isJsonObject(value) ? value : undefined;
+}
+
+/**
+ * The value itself when it is a string. `String()` hands back the very same
+ * primitive for a string and something new for everything else, which makes the
+ * identity comparison the whole test.
+ */
+function asString(value: JsonValue | undefined): string | undefined {
+  const coerced = String(value);
+  return coerced === value ? coerced : undefined;
+}
+
+function asStatus(value: JsonValue | undefined): HerdrStatus {
+  return value === "idle" || value === "working" || value === "blocked" || value === "done"
+    ? value
+    : "unknown";
 }
 
 async function run(args: ReadonlyArray<string>, timeoutMs: number) {
@@ -30,24 +60,24 @@ async function run(args: ReadonlyArray<string>, timeoutMs: number) {
 export async function listAgents(timeoutMs = 5_000): Promise<ReadonlyArray<HerdrAgent>> {
   const { stdout, code } = await run(["agent", "list"], timeoutMs);
   if (code !== 0) return [];
-  let parsed: unknown;
+  let parsed: JsonValue;
   try {
     parsed = JSON.parse(stdout);
   } catch {
     return [];
   }
-  const agents = (parsed as { result?: { agents?: ReadonlyArray<Record<string, unknown>> } })
-    ?.result?.agents;
+  const agents = asObject(asObject(parsed)?.result)?.agents;
   if (!Array.isArray(agents)) return [];
   return agents.flatMap((agent) => {
-    const session = agent.agent_session as { value?: unknown } | undefined;
-    const sessionId = typeof session?.value === "string" ? session.value : undefined;
-    const kind = typeof agent.agent === "string" ? agent.agent : undefined;
-    const target = typeof agent.pane_id === "string" ? agent.pane_id : undefined;
+    const entry = asObject(agent);
+    if (entry === undefined) return [];
+    const sessionId = asString(asObject(entry.agent_session)?.value);
+    const kind = asString(entry.agent);
+    const target = asString(entry.pane_id);
     // An agent Herdr cannot identify by session is one this integration has no
     // way to name on the deck, so it is skipped rather than guessed at.
     if (!sessionId || !kind || !target) return [];
-    return [{ kind, sessionId, target, status: asStatus(agent.agent_status) }];
+    return [{ kind, sessionId, target, status: asStatus(entry.agent_status) }];
   });
 }
 

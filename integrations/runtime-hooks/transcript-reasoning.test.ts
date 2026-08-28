@@ -149,11 +149,85 @@ describe("conversation sync", () => {
       },
     );
 
-    expect(readConversationBacklog(path, "s").map((m) => [m.role, m.text])).toEqual([
+    expect(readConversationBacklog(path, "s").messages.map((m) => [m.role, m.text])).toEqual([
       ["user", "fix the flaky test"],
       ["assistant", "On it."],
       ["user", "thanks"],
     ]);
+  });
+
+  test("a background agent's report is the agent speaking, not the person", () => {
+    const path = transcript({
+      type: "user",
+      uuid: "u1",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              "<task-notification>",
+              "<task-id>abc123</task-id>",
+              "<output-file>/tmp/tasks/abc123.output</output-file>",
+              "<status>completed</status>",
+              '<summary>Agent "Close the iOS feature gap" finished</summary>',
+              "<note>Addressed to the model, not to a reader.</note>",
+              "<result>Shipped build 202608261337.</result>",
+              "<usage><subagent_tokens>434045</subagent_tokens></usage>",
+              "</task-notification>",
+            ].join("\n"),
+          },
+        ],
+      },
+    });
+
+    expect(readConversationBacklog(path, "s").messages).toEqual([
+      {
+        id: "chat:s:u1",
+        role: "assistant",
+        text: "Shipped build 202608261337.",
+        summary: 'Agent "Close the iOS feature gap" finished',
+      },
+    ]);
+  });
+
+  test("a Task result naming its subagent becomes a spawn, not conversation", () => {
+    const path = transcript(
+      {
+        type: "user",
+        uuid: "u1",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "launched" }],
+        },
+        toolUseResult: {
+          isAsync: true,
+          status: "async_launched",
+          agentId: "ab39b2830758932e5",
+          description: "Fix lint in apps/server",
+        },
+      },
+      // A Bash result also carries toolUseResult, but names no agent.
+      {
+        type: "user",
+        uuid: "u2",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_2", content: "ok" }],
+        },
+        toolUseResult: { stdout: "ok", stderr: "" },
+      },
+    );
+
+    const backlog = readConversationBacklog(path, "s");
+    expect(backlog.spawns).toEqual([
+      {
+        id: "subagent-named:s:ab39b2830758932e5",
+        subagentId: "ab39b2830758932e5",
+        name: "Fix lint in apps/server",
+      },
+    ]);
+    expect(backlog.messages).toEqual([]);
   });
 
   test("the backlog covers the whole file, unlike the reasoning cursor which starts at the end", () => {
@@ -162,7 +236,7 @@ describe("conversation sync", () => {
       { type: "assistant", uuid: "a1", message: { content: [{ type: "text", text: "reply" }] } },
     );
 
-    expect(readConversationBacklog(path, "s").length).toBe(2);
+    expect(readConversationBacklog(path, "s").messages.length).toBe(2);
     expect(readNewReasoning(path, {}, "s")).toEqual([]);
   });
 
@@ -172,9 +246,9 @@ describe("conversation sync", () => {
       uuid: "u1",
       message: { role: "user", content: "hello" },
     });
-    expect(readConversationBacklog(path, "key")[0].id).toBe("chat:key:u1");
-    expect(readConversationBacklog(path, "key")[0].id).toBe(
-      readConversationBacklog(path, "key")[0].id,
+    expect(readConversationBacklog(path, "key").messages[0].id).toBe("chat:key:u1");
+    expect(readConversationBacklog(path, "key").messages[0].id).toBe(
+      readConversationBacklog(path, "key").messages[0].id,
     );
   });
 
@@ -188,6 +262,6 @@ describe("conversation sync", () => {
       },
       { type: "user", uuid: "u1", message: { role: "user", content: "real message" } },
     );
-    expect(readConversationBacklog(path, "s").map((m) => m.text)).toEqual(["real message"]);
+    expect(readConversationBacklog(path, "s").messages.map((m) => m.text)).toEqual(["real message"]);
   });
 });

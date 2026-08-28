@@ -2,6 +2,8 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { isJsonObject, parseJson } from "./json-value";
+import type { JsonObject } from "./json-value";
 
 const target = process.argv[2] ?? "all";
 const hook = resolve(import.meta.dir, "index.ts");
@@ -19,24 +21,30 @@ const events = [
   "SessionEnd",
 ];
 
+/** One entry in a runtime's hook registry, in the shape the runtime reads back. */
+type HookRegistration = {
+  matcher?: string;
+  hooks: Array<{ type: "command"; command: string; timeout: number }>;
+};
+
 function install(runtime: "claude" | "codex", path: string) {
   mkdirSync(dirname(path), { recursive: true });
-  const settings = existsSync(path)
-    ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>)
-    : {};
-  const hooks = (
-    settings.hooks && typeof settings.hooks === "object" ? settings.hooks : {}
-  ) as Record<string, unknown[]>;
+  const stored = existsSync(path) ? parseJson(readFileSync(path, "utf8")) : {};
+  const settings: JsonObject = isJsonObject(stored) ? stored : {};
+  const hooks: JsonObject = isJsonObject(settings.hooks) ? settings.hooks : {};
   for (const event of events) {
-    const entries = Array.isArray(hooks[event]) ? hooks[event] : [];
+    const existing = hooks[event];
     const command = `${quote(process.execPath)} ${quote(hook)} ${runtime} ${event}`;
-    const cleaned = entries.filter(
+    const cleaned = (Array.isArray(existing) ? existing : []).filter(
       (entry) => !JSON.stringify(entry).includes("integrations/runtime-hooks/index.ts"),
     );
-    cleaned.push({
-      ...(event === "PreToolUse" ? { matcher: "*" } : {}),
-      hooks: [{ type: "command", command, timeout: event === "PreToolUse" ? 620 : 10 }],
-    });
+    // Two literals rather than a conditional spread, so the matcher stays ahead
+    // of the hooks in the file exactly as previous installs wrote it.
+    const registration: HookRegistration =
+      event === "PreToolUse"
+        ? { matcher: "*", hooks: [{ type: "command", command, timeout: 620 }] }
+        : { hooks: [{ type: "command", command, timeout: 10 }] };
+    cleaned.push(registration);
     hooks[event] = cleaned;
   }
   settings.hooks = hooks;

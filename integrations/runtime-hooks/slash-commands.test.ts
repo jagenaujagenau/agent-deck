@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverSlashCommands } from "./slash-commands";
+import { discoverCodexSlashCommands, discoverSlashCommands } from "./slash-commands";
 
 function scratch() {
   const root = mkdtempSync(join(tmpdir(), "agent-deck-commands-"));
@@ -130,5 +130,37 @@ describe("discoverSlashCommands", () => {
     const huge = discoverSlashCommands(s.roots).find((command) => command.name === "huge");
     expect(huge).toBeDefined();
     expect(huge!.description).toBe("Still discoverable.");
+  });
+});
+
+describe("discoverCodexSlashCommands", () => {
+  test("reads prompts, skills, and the CLI's own .system skills from one codex dir", () => {
+    const root = mkdtempSync(join(tmpdir(), "agent-deck-codex-"));
+    mkdirSync(join(root, "prompts"), { recursive: true });
+    writeFileSync(
+      join(root, "prompts", "ship.md"),
+      "---\ndescription: Ship the release\n---\nDo it",
+    );
+    mkdirSync(join(root, "skills", "deploy"), { recursive: true });
+    writeFileSync(
+      join(root, "skills", "deploy", "SKILL.md"),
+      "---\nname: deploy\ndescription: Deploy the service\n---\n\n# deploy",
+    );
+    mkdirSync(join(root, "skills", ".system", "skill-creator"), { recursive: true });
+    writeFileSync(
+      join(root, "skills", ".system", "skill-creator", "SKILL.md"),
+      "---\nname: skill-creator\ndescription: Create skills\n---\n\n# skill-creator",
+    );
+
+    expect(discoverCodexSlashCommands(root)).toEqual([
+      { name: "deploy", description: "Deploy the service", source: "user" },
+      { name: "ship", description: "Ship the release", source: "user" },
+      { name: "skill-creator", description: "Create skills", source: "plugin" },
+    ]);
+  });
+
+  test("a machine with no prompts directory yields an empty catalog, not an error", () => {
+    const root = mkdtempSync(join(tmpdir(), "agent-deck-codex-empty-"));
+    expect(discoverCodexSlashCommands(root)).toEqual([]);
   });
 });

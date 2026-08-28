@@ -7,10 +7,13 @@ import {
   type ControlAction,
 } from "../../packages/agent-adapter/src/index";
 import { countQueuedMessages, queuedMessageNotice } from "./remote-messages";
+import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 import {
   readConversationBacklog,
   readNewTranscript,
+  type SubagentSpawn,
   type TranscriptMessage,
+  type TranscriptRuntime,
 } from "./transcript-reasoning";
 
 type DaemonState = {
@@ -25,6 +28,8 @@ type DaemonState = {
   capabilities?: ControlAction[];
   transcriptPath?: string;
   transcriptOffset?: number;
+  /** The report counter shared with the hook; every runtime event advances it. */
+  reportSeq?: number;
   rateLimits?: Array<{
     id: string;
     label: string;
@@ -50,6 +55,9 @@ const agentId = requiredArgument(2);
 const statePath = requiredArgument(3);
 const project = requiredArgument(4);
 const pidPath = `${statePath}.pid`;
+// The agentId prefix is the keying convention for which runtime owns this session,
+// and therefore which line grammar its transcript is read with.
+const runtime: TranscriptRuntime = agentId.startsWith("claude-") ? "claude" : "codex";
 const client = new AgentDeckClient();
 const HEARTBEAT_INTERVAL_MS = 10_000;
 /** How often a running session's transcript is tailed for new reasoning. */
@@ -59,6 +67,9 @@ let lastStateFingerprint = "";
 
 function loadState(): DaemonState | undefined {
   try {
+    // SAFETY: the state file is this adapter's own — only the hook process and
+    // this daemon write it, and both serialise exactly this shape. A corrupt
+    // file fails the parse and lands in the catch, never in a caller.
     return JSON.parse(readFileSync(statePath, "utf8")) as DaemonState;
   } catch {
     return undefined;
@@ -92,26 +103,51 @@ function publishMessage(message: TranscriptMessage) {
       })
     : client.event(agentId, {
         kind: "output",
-        summary: "Response",
+        // A background agent finishing has a better headline than "Response",
+        // and the runtime already wrote it.
+        summary: message.summary ?? "Response",
         detail: message.text,
         id: message.id,
       });
+}
+
+/**
+ * Names a subagent's run on the deck. The event is the delegation itself —
+ * "Fix lint in apps/server" — and it carries the child's id, so the lens over
+ * that subagent opens under the errand instead of under "general-purpose".
+ */
+function publishSpawn(spawn: SubagentSpawn) {
+  return client.event(agentId, {
+    kind: "tool",
+    tool: "Task",
+    summary: spawn.name,
+    id: spawn.id,
+    subagentId: spawn.subagentId,
+    subagentName: spawn.name,
+  });
 }
 
 /** One pass over the whole transcript, so the app shows turns that predate the bridge ever seeing this session. */
 async function syncConversationBacklog() {
   const state = loadState();
   if (!state?.transcriptPath) return;
-  for (const message of readConversationBacklog(state.transcriptPath, agentId)) {
+  const backlog = readConversationBacklog(state.transcriptPath, agentId, runtime);
+  for (const message of backlog.messages) {
     await publishMessage(message).catch(() => {});
   }
+  for (const spawn of backlog.spawns) await publishSpawn(spawn).catch(() => {});
 }
 
 async function streamReasoning() {
   const state = loadState();
   if (!state?.transcriptPath) return;
   const cursor = { offset: state.transcriptOffset };
-  const { reasoning, messages } = readNewTranscript(state.transcriptPath, cursor, agentId);
+  const { reasoning, messages, spawns } = readNewTranscript(
+    state.transcriptPath,
+    cursor,
+    agentId,
+    runtime,
+  );
   if (cursor.offset !== state.transcriptOffset) {
     // Re-read the state file first: a hook may have written it while this pass was reading.
     const current = loadState() ?? state;
@@ -119,6 +155,7 @@ async function streamReasoning() {
     writeFileSync(statePath, JSON.stringify(current));
   }
   for (const message of messages) await publishMessage(message).catch(() => {});
+  for (const spawn of spawns) await publishSpawn(spawn).catch(() => {});
   for (const block of reasoning) {
     await client
       .event(agentId, { kind: "thought", summary: "Reasoning", detail: block.text, id: block.id })
@@ -156,12 +193,20 @@ async function heartbeat() {
     .digest("hex")
     .slice(0, 20);
   if (stateFingerprint !== lastStateFingerprint) {
+    // This daemon and the hook race on the same session: a heartbeat that
+    // loaded the state file, then lost the CPU while a hook advanced it, would
+    // otherwise publish that older state over the newer one. The shared
+    // counter is what lets the bridge drop this report when the hook already
+    // spoke past it. Persisted before the wire, same as the hook.
+    const seq = nextReportSeq(statePath, state);
+    writeFileSync(statePath, JSON.stringify(state));
     await client
       .runtimeEvent({
         id: `daemon-state:${agentId}:${stateFingerprint}`,
         agentId,
         type: "session.state.changed",
         createdAt: new Date().toISOString(),
+        origin: { source: REPORT_SOURCE, seq },
         payload: { state: state.state, task: displayTask },
       })
       .then(() => {
@@ -174,8 +219,8 @@ async function heartbeat() {
       id: agentId,
       name: state.name,
       project,
-      model: state.model ?? (agentId.startsWith("claude-") ? "Claude Code" : "Codex"),
-      runtime: agentId.startsWith("claude-") ? "claude" : "codex",
+      model: state.model ?? (runtime === "claude" ? "Claude Code" : "Codex"),
+      runtime,
       runtimeProtocol: "canonical-v1",
       state: state.state,
       task: displayTask,
