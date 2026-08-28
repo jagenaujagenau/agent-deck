@@ -1,9 +1,29 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Context, Effect, Layer, Option } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BridgeConfig } from "./Config";
 
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
+
+/**
+ * Whether the caller presented the master runtime credential.
+ *
+ * Compared in constant time: the bridge is reachable over a tailnet, and a
+ * `===` on the token would let response timing leak how much of a guess
+ * matched. Hashing both sides first gives `timingSafeEqual` the equal-length
+ * buffers it insists on.
+ */
+export const isMasterToken = (
+  masterToken: Option.Option<string>,
+  header: string | undefined,
+): boolean =>
+  Option.match(masterToken, {
+    onNone: () => false,
+    onSome: (master) => {
+      const digest = (token: string) => createHash("sha256").update(token).digest();
+      return timingSafeEqual(digest(bearerOf(header)), digest(master));
+    },
+  });
 
 type Scope = "read" | "control";
 
@@ -70,17 +90,20 @@ export class Authorizer extends Context.Service<
         path: string,
         header: string | undefined,
       ) {
+        if (isMasterToken(config.masterToken, header)) return true;
         const bearer = bearerOf(header);
-        const isMaster = Option.match(config.masterToken, {
-          onNone: () => false,
-          onSome: (master) => bearer === master,
-        });
-        if (isMaster) return true;
         const { runtimeOnly, requiredScope } = routePolicy(method, path);
         if (runtimeOnly || bearer === "") return false;
         return yield* authorizeDevice(bearer, requiredScope);
       });
 
+      if (!config.requireAuth) {
+        // Said once at startup rather than discovered during an incident:
+        // observation mode means an unauthorized call is noted and allowed.
+        yield* Effect.logWarning(
+          "Auth enforcement is OFF (BRIDGE_REQUIRE_AUTH=false): unauthorized calls are allowed through. Anything that can reach this port can read and steer the deck.",
+        );
+      }
       return Authorizer.of({ authorize, enforcing: config.requireAuth });
     }),
   );

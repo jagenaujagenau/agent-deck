@@ -6,6 +6,7 @@ import {
   projectRuntimeEvent,
 } from "@agent-control-dashboard/agent-adapter";
 import type { RuntimeProjection } from "@agent-control-dashboard/agent-adapter";
+import type { JsonObject } from "./Domain";
 
 /**
  * Everything that has to be true of the database before the bridge serves a
@@ -29,7 +30,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS bridge_activity (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, project TEXT NOT NULL, runtime TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_file_changes (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, path TEXT, tool TEXT, diff TEXT NOT NULL, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_slash_commands (agent_id TEXT PRIMARY KEY, commands TEXT NOT NULL, updated_at TEXT NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS bridge_session_events (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT, tool TEXT, command TEXT, path TEXT, options TEXT, subagent_id TEXT, subagent_type TEXT, created_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS bridge_session_events (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT, tool TEXT, command TEXT, path TEXT, options TEXT, subagent_id TEXT, subagent_type TEXT, subagent_name TEXT, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS bridge_session_events_agent_idx ON bridge_session_events(agent_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS bridge_file_changes_agent_idx ON bridge_file_changes(agent_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS bridge_activity_created_idx ON bridge_activity(created_at)`,
@@ -79,6 +80,10 @@ export const BridgeSchema = Layer.effectDiscard(
       yield* sql.unsafe("ALTER TABLE bridge_session_events ADD COLUMN subagent_id TEXT");
       yield* sql.unsafe("ALTER TABLE bridge_session_events ADD COLUMN subagent_type TEXT");
     }
+    // The run's own name arrived after subagent attribution shipped.
+    if (!eventColumns.some((column) => column.name === "subagent_name")) {
+      yield* sql.unsafe("ALTER TABLE bridge_session_events ADD COLUMN subagent_name TEXT");
+    }
 
     // Tool hooks may run from nested directories, so a fact can arrive tagged
     // with a transient cwd. History belongs to the session's stable project.
@@ -118,9 +123,9 @@ export const BridgeSchema = Layer.effectDiscard(
     const managed = yield* sql<{ id: string; data: string }>`
       SELECT id, data FROM bridge_agents WHERE id LIKE 'managed-%'`;
     for (const row of managed) {
-      let agent: Record<string, unknown>;
+      let agent: JsonObject;
       try {
-        agent = JSON.parse(row.data) as Record<string, unknown>;
+        agent = JSON.parse(row.data);
       } catch {
         continue;
       }
@@ -139,12 +144,12 @@ export const BridgeSchema = Layer.effectDiscard(
     const agents = yield* sql<{ id: string; data: string }>`SELECT id, data FROM bridge_agents`;
     for (const row of agents) {
       try {
-        const agent = JSON.parse(row.data) as {
+        const agent: {
           tokens?: number;
           processedTokens?: number;
           costUsd?: number;
           lastSeenAt?: string;
-        };
+        } = JSON.parse(row.data);
         const tokens = Math.max(0, agent.processedTokens ?? agent.tokens ?? 0);
         const cost = Math.max(0, agent.costUsd ?? 0);
         yield* sql`INSERT OR IGNORE INTO bridge_usage_cursors (agent_id, tokens, cost_usd, updated_at)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { bearerOf, routePolicy } from "./Auth";
+import { Option } from "effect";
+import { bearerOf, isMasterToken, routePolicy } from "./Auth";
 
 const AGENT = "01a02e7b-3852-794f-b871-543c3c9147e9";
 const REQ = "req_123";
@@ -21,7 +22,7 @@ describe("routePolicy", () => {
   });
 
   it("reserves runtime ingestion for the runtime credential", () => {
-    for (const [method, path] of [
+    const routes: Array<[string, string]> = [
       ["POST", "/agents/heartbeat"],
       ["POST", `/agents/${AGENT}/events`],
       ["POST", `/agents/${AGENT}/runtime-events`],
@@ -33,7 +34,8 @@ describe("routePolicy", () => {
       ["GET", `/agents/${AGENT}/requests/${REQ}`],
       // Publishing a command catalog is the runtime describing itself.
       ["POST", `/agents/${AGENT}/slash-commands`],
-    ] as Array<[string, string]>) {
+    ];
+    for (const [method, path] of routes) {
       expect({ path, runtimeOnly: routePolicy(method, path).runtimeOnly }).toEqual({
         path,
         runtimeOnly: true,
@@ -57,6 +59,27 @@ describe("routePolicy", () => {
       const policy = routePolicy("POST", path);
       expect({ path, ...policy }).toEqual({ path, runtimeOnly: false, requiredScope: "control" });
     }
+  });
+});
+
+describe("isMasterToken", () => {
+  it("accepts the exact token, with or without the Bearer scheme", () => {
+    const master = Option.some("s3cret");
+    expect(isMasterToken(master, "Bearer s3cret")).toBe(true);
+    expect(isMasterToken(master, "s3cret")).toBe(true);
+  });
+
+  it("refuses wrong guesses of any length, prefixes included", () => {
+    const master = Option.some("s3cret");
+    expect(isMasterToken(master, "Bearer s3cre")).toBe(false);
+    expect(isMasterToken(master, "Bearer s3cret-and-more")).toBe(false);
+    expect(isMasterToken(master, "Bearer ")).toBe(false);
+    expect(isMasterToken(master, undefined)).toBe(false);
+  });
+
+  it("matches nothing when no master token is configured — not even an empty guess", () => {
+    expect(isMasterToken(Option.none(), undefined)).toBe(false);
+    expect(isMasterToken(Option.none(), "Bearer ")).toBe(false);
   });
 });
 

@@ -7,16 +7,17 @@
  * shapes a runtime actually produces - and reports any divergence.
  */
 import { Database } from "bun:sqlite";
+import type { JsonObject } from "../src/effect/Domain";
 
 const TOKEN = process.env.BRIDGE_TOKEN!;
 const ORIG = "http://127.0.0.1:3997/bridge/v1";
 const EFFECT = "http://127.0.0.1:3998/bridge/v1";
 
-const post = async (base: string, path: string, body: unknown) => {
+const post = async (base: string, path: string, payload: string) => {
   const res = await fetch(base + path, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-    body: typeof body === "string" ? body : JSON.stringify(body),
+    body: payload,
   });
   return res.status;
 };
@@ -25,7 +26,7 @@ const db = new Database(process.env.DB!, { readonly: true });
 const agents = db
   .query<{ data: string }, []>("SELECT data FROM bridge_agents LIMIT 40")
   .all()
-  .map((r) => JSON.parse(r.data) as Record<string, unknown>);
+  .map((r): JsonObject => JSON.parse(r.data));
 const events = db
   .query<
     {
@@ -40,7 +41,10 @@ const events = db
   >("SELECT kind, summary, detail, tool, command, path FROM bridge_session_events LIMIT 60")
   .all();
 
-type Case = { label: string; path: string; body: unknown };
+// `body` is deliberately open: the whole point of these cases is to replay the
+// awkward, unparsed shapes a runtime actually sends. `raw` carries the one body
+// that must go over the wire without being serialised as JSON first.
+type Case = { label: string; path: string; body?: unknown; raw?: string };
 const cases: Case[] = [];
 
 // Real heartbeats, exactly as they were stored.
@@ -99,7 +103,7 @@ const edge: Case[] = [
   },
   { label: "heartbeat/bad-state", path: "/agents/heartbeat", body: { ...base, state: "zzz" } },
   { label: "heartbeat/empty", path: "/agents/heartbeat", body: {} },
-  { label: "heartbeat/not-json", path: "/agents/heartbeat", body: "<<not json>>" },
+  { label: "heartbeat/not-json", path: "/agents/heartbeat", raw: "<<not json>>" },
   { label: "event/minimal", path: "/agents/wp/events", body: { kind: "output", summary: "s" } },
   {
     label: "event/null-detail",
@@ -164,7 +168,8 @@ cases.push(...edge);
 let same = 0;
 const diffs: string[] = [];
 for (const c of cases) {
-  const [a, b] = await Promise.all([post(ORIG, c.path, c.body), post(EFFECT, c.path, c.body)]);
+  const payload = c.raw ?? JSON.stringify(c.body);
+  const [a, b] = await Promise.all([post(ORIG, c.path, payload), post(EFFECT, c.path, payload)]);
   if (a === b) same += 1;
   else diffs.push(`  ${c.label.padEnd(34)} original=${a}  effect=${b}`);
 }

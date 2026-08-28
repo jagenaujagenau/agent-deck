@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import type { AgentEvent } from "./Domain";
+import type { AgentEvent, JsonValue } from "./Domain";
 
 /**
  * Reading a persisted row is a boundary: the JSON blob in `bridge_agents` was
@@ -37,20 +37,57 @@ const cardEvent = (event: AgentEvent): AgentEvent => {
   };
 };
 
+/**
+ * Trims a fetched history to `limit`, keeping both streams alive.
+ *
+ * Fetching conversation and recent activity separately is pointless if the two
+ * are then trimmed together: tool events outnumber messages by two hundred to
+ * one, so a flat newest-N evicts every word said more than an hour ago. The
+ * first fix gave conversation absolute priority — and a session whose chat
+ * alone exceeded the limit then returned a terminal with no commands and a
+ * Changes tab with no files. So the conversation keeps priority, but never the
+ * whole budget: a third is reserved for activity, and either side's unused
+ * share spills to the other.
+ */
+export const trimHistory = (
+  ordered: ReadonlyArray<AgentEvent>,
+  spoken: ReadonlySet<string>,
+  limit?: number,
+): ReadonlyArray<AgentEvent> => {
+  if (limit === undefined || limit <= 0 || ordered.length <= limit) return ordered;
+  const words = ordered.filter((event) => spoken.has(event.id));
+  const chatter = ordered.filter((event) => !spoken.has(event.id));
+  const activityShare = Math.min(chatter.length, Math.floor(limit / 3));
+  const keptWords = words.slice(-(limit - activityShare));
+  const keptChatter = chatter.slice(-(limit - keptWords.length));
+  const kept = new Set([...keptWords, ...keptChatter].map((event) => event.id));
+  return ordered.filter((event) => kept.has(event.id));
+};
+
 const parseOptions = (value: string | null): ReadonlyArray<string> | undefined => {
   if (value === null) return undefined;
   try {
-    return JSON.parse(value) as ReadonlyArray<string>;
+    return JSON.parse(value);
   } catch {
     return undefined;
   }
 };
 
+/**
+ * A stored agent blob as `agents` serves it: whichever fields the build that
+ * wrote the row put there, with the live window replaced by trimmed card
+ * events. The open shape is deliberate - the snapshot passes a stored agent
+ * through rather than deciding which of an older build's fields to drop.
+ */
+export interface StoredAgentSnapshot {
+  [key: string]: JsonValue | ReadonlyArray<AgentEvent> | undefined;
+}
+
 export class BridgeStore extends Context.Service<
   BridgeStore,
   {
     /** Every agent the bridge knows, as the snapshot renders them. */
-    readonly agents: Effect.Effect<ReadonlyArray<Record<string, unknown>>, StoredAgentError>;
+    readonly agents: Effect.Effect<ReadonlyArray<StoredAgentSnapshot>, StoredAgentError>;
     /** A session's retained history: whole conversation plus recent activity. */
     /**
      * A session's retained history. `limit` trims it to the most recent
@@ -61,7 +98,7 @@ export class BridgeStore extends Context.Service<
     /** Every file change a session produced, oldest first. */
     readonly fileChanges: (agentId: string) => Effect.Effect<ReadonlyArray<AgentEvent>>;
     /** What a session can be asked to run by name. */
-    readonly slashCommands: (agentId: string) => Effect.Effect<ReadonlyArray<unknown>>;
+    readonly slashCommands: (agentId: string) => Effect.Effect<ReadonlyArray<JsonValue>>;
     /** Historical token and cost totals shown in the snapshot summary. */
     readonly usageTotals: Effect.Effect<{ tokens: number; costUsd: number }>;
   }
@@ -76,12 +113,14 @@ export class BridgeStore extends Context.Service<
           id: string;
           data: string;
         }>`SELECT id, data FROM bridge_agents`.pipe(Effect.orDie);
-        const decoded: Array<Record<string, unknown>> = [];
+        const decoded: Array<StoredAgentSnapshot> = [];
         for (const row of rows) {
           const agent = yield* Effect.try({
-            try: () => JSON.parse(row.data) as Record<string, unknown>,
+            try: (): StoredAgentSnapshot => JSON.parse(row.data),
             catch: (cause) => new StoredAgentError({ agentId: row.id, cause }),
           });
+          // SAFETY: the row was written by persistAgent from an AgentRecord, so
+          // an `events` value that is an array holds AgentEvent documents.
           const events = Array.isArray(agent.events) ? (agent.events as Array<AgentEvent>) : [];
           decoded.push({
             ...agent,
@@ -103,6 +142,7 @@ export class BridgeStore extends Context.Service<
           options: string | null;
           subagent_id: string | null;
           subagent_type: string | null;
+          subagent_name: string | null;
           created_at: string;
         }>,
       ): ReadonlyArray<AgentEvent> =>
@@ -110,6 +150,8 @@ export class BridgeStore extends Context.Service<
         // stable sort in `history` breaks equal-timestamp ties in real order.
         [...rows].reverse().map((row) => ({
           id: row.id,
+          // SAFETY: the kind column is only ever written from a validated
+          // AgentEvent, so a stored value is one of the event kinds.
           kind: row.kind as AgentEvent["kind"],
           summary: row.summary,
           // A tool event's detail is the rendered tool call, which no tab
@@ -127,6 +169,7 @@ export class BridgeStore extends Context.Service<
           options: parseOptions(row.options),
           subagentId: row.subagent_id ?? undefined,
           subagentType: row.subagent_type ?? undefined,
+          subagentName: row.subagent_name ?? undefined,
           createdAt: row.created_at,
         }));
 
@@ -135,7 +178,7 @@ export class BridgeStore extends Context.Service<
         // outnumber messages by an order of magnitude, so a flat "most recent
         // N" would keep the chatter and drop the conversation.
         const conversation = yield* sql<any>`
-          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, created_at
+          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, created_at
           FROM bridge_session_events
           WHERE agent_id = ${agentId}
             AND (kind = 'user' OR summary LIKE 'Remote command:%'
@@ -147,7 +190,7 @@ export class BridgeStore extends Context.Service<
                  OR (kind = 'output' AND tool IS NULL AND command IS NULL))
           ORDER BY created_at DESC LIMIT 500`;
         const recent = yield* sql<any>`
-          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, created_at
+          SELECT id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, created_at
           FROM bridge_session_events
           WHERE agent_id = ${agentId}
           ORDER BY created_at DESC LIMIT 600`;
@@ -159,22 +202,7 @@ export class BridgeStore extends Context.Service<
         }
         for (const event of rowsToEvents(recent)) byId.set(event.id, event);
         const ordered = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-        if (limit === undefined || limit <= 0 || ordered.length <= limit) return ordered;
-        // Trim the chatter, not the conversation. Fetching them separately
-        // above is pointless if the two are then trimmed together: a session
-        // running a subagent produces tool events at two hundred to one, so a
-        // flat newest-N evicts every word said more than an hour ago - which
-        // is how a subagent's only message was lost while four hundred of its
-        // `Bash completed` lines survived.
-        const words = ordered.filter((event) => spoken.has(event.id)).slice(-limit);
-        const kept = new Set(words.map((event) => event.id));
-        const room = limit - kept.size;
-        if (room > 0) {
-          for (const event of ordered.filter((item) => !kept.has(item.id)).slice(-room)) {
-            kept.add(event.id);
-          }
-        }
-        return ordered.filter((event) => kept.has(event.id));
+        return trimHistory(ordered, spoken, limit);
       }, Effect.orDie);
 
       const fileChanges = Effect.fn("BridgeStore.fileChanges")(function* (agentId: string) {
@@ -203,9 +231,9 @@ export class BridgeStore extends Context.Service<
         const row = rows[0];
         if (row === undefined) return [];
         return yield* Effect.try({
-          try: () => JSON.parse(row.commands) as ReadonlyArray<unknown>,
-          catch: () => [] as ReadonlyArray<unknown>,
-        }).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<unknown>));
+          try: (): ReadonlyArray<JsonValue> => JSON.parse(row.commands),
+          catch: (): ReadonlyArray<JsonValue> => [],
+        }).pipe(Effect.orElseSucceed((): ReadonlyArray<JsonValue> => []));
       }, Effect.orDie);
 
       const usageTotals = Effect.gen(function* () {

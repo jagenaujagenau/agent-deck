@@ -8,8 +8,9 @@ import {
   parseCodexUsageLine,
   scanClaudeUsage,
 } from "./transcriptUsage";
+import type { JsonObject } from "./effect/Domain";
 
-function line(overrides: Record<string, unknown> = {}) {
+function line(overrides: JsonObject = {}) {
   return JSON.stringify({
     type: "assistant",
     timestamp: "2026-08-24T00:00:00.000Z",

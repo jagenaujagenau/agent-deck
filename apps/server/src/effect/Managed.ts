@@ -1,13 +1,15 @@
 import { stat } from "node:fs/promises";
-import { Context, Effect, Layer, Ref, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import {
   ClaudeSdkManagedRuntimeAdapter,
+  type CanonicalRuntimeEvent,
   type ManagedRequestStore,
+  type ManagedRuntimeCapabilities,
   type ManagedSession,
   type RuntimeRequestStatus,
 } from "@agent-control-dashboard/agent-adapter";
-import type { AgentState } from "./Domain";
+import type { AgentState, JsonObject, JsonValue } from "./Domain";
 import { BridgeState, type AgentRecord, type Command } from "./State";
 
 const now = () => new Date().toISOString();
@@ -35,6 +37,30 @@ interface Hosted {
   timer: ReturnType<typeof setInterval>;
 }
 
+/** What /managed/runtimes advertises for one runtime the bridge can host. */
+export interface ManagedRuntimeDescriptor {
+  runtime: string;
+  capabilities: ManagedRuntimeCapabilities;
+  managed: boolean;
+}
+
+/** What a caller gets back once a hosted session is running. */
+export interface StartedManagedSession {
+  agentId: string;
+  providerSessionId: string;
+  project: string;
+  model: string;
+  permissionMode: NonNullable<StartInput["permissionMode"]>;
+}
+
+/**
+ * The event vocabulary leaves payload fields open, so each consumer parses the
+ * fields it renders - the same per-field tolerance the deployed bridge had,
+ * where one malformed field never discarded the rest of an event.
+ */
+const decodeString = Schema.decodeUnknownOption(Schema.String);
+const decodeNumber = Schema.decodeUnknownOption(Schema.Number);
+
 /**
  * Sessions the bridge itself runs, as opposed to hook sessions that live in
  * their own process. The adapter streams canonical events; this turns them into
@@ -43,15 +69,15 @@ interface Hosted {
 export class ManagedRuntime extends Context.Service<
   ManagedRuntime,
   {
-    readonly available: Effect.Effect<ReadonlyArray<Record<string, unknown>>>;
+    readonly available: Effect.Effect<ReadonlyArray<ManagedRuntimeDescriptor>>;
     readonly start: (
       input: StartInput,
-    ) => Effect.Effect<Record<string, unknown>, ManagedStartError>;
+    ) => Effect.Effect<StartedManagedSession, ManagedStartError>;
     readonly resolve: (
       agentId: string,
       requestId: string,
       status: RuntimeRequestStatus,
-      value?: unknown,
+      value?: JsonValue,
     ) => Effect.Effect<boolean>;
     readonly handle: (command: Command) => Effect.Effect<boolean>;
   }
@@ -91,7 +117,12 @@ export class ManagedRuntime extends Context.Service<
                 Effect.orDie,
               );
               const agentId = rows[0]?.agent_id;
-              if (agentId) yield* state.resolveRuntimeRequest(agentId, requestId, status, value);
+              if (agentId) {
+                // SAFETY: the adapter hands back the resolution value it was
+                // given, which arrived through a JSON body or a JSON column,
+                // so it is a JSON value by construction.
+                yield* state.resolveRuntimeRequest(agentId, requestId, status, value as JsonValue);
+              }
             }),
           );
         },
@@ -112,9 +143,9 @@ export class ManagedRuntime extends Context.Service<
             );
             if (!row) throw new Error(`Managed request disappeared: ${requestId}`);
             if (row.status !== "pending") {
-              let data: Record<string, unknown> = {};
+              let data: JsonObject = {};
               try {
-                data = JSON.parse(row.data) as Record<string, unknown>;
+                data = JSON.parse(row.data);
               } catch {
                 /* No resolution value. */
               }
@@ -143,20 +174,30 @@ export class ManagedRuntime extends Context.Service<
       ]);
 
       /** Turns one canonical event into the heartbeat and activity a card shows. */
-      const consumeEvent = (agentId: string, hosted: Hosted, event: any) =>
+      const consumeEvent = (agentId: string, hosted: Hosted, event: CanonicalRuntimeEvent) =>
         Effect.gen(function* () {
           yield* state.ingestRuntimeEvent(event).pipe(Effect.ignore);
-          if (event.type === "session.state.changed" && typeof event.payload.state === "string") {
-            hosted.agent.state = event.payload.state as AgentState;
-            if (typeof event.payload.task === "string") hosted.agent.task = event.payload.task;
+          if (event.type === "session.state.changed") {
+            const sessionState = Option.getOrUndefined(decodeString(event.payload.state));
+            if (sessionState !== undefined) {
+              // SAFETY: an adapter only publishes canonical session states;
+              // this trusts that rather than validating, exactly as the
+              // deployed bridge did.
+              hosted.agent.state = sessionState as AgentState;
+              const task = Option.getOrUndefined(decodeString(event.payload.task));
+              if (task !== undefined) hosted.agent.task = task;
+            }
           }
-          if (event.type === "turn.completed" && typeof event.payload.costUsd === "number") {
-            hosted.agent.costUsd += event.payload.costUsd;
+          if (event.type === "turn.completed") {
+            const costUsd = Option.getOrUndefined(decodeNumber(event.payload.costUsd));
+            if (costUsd !== undefined) hosted.agent.costUsd += costUsd;
           }
           if (event.type === "token-usage.updated") {
-            const usage = event.payload.usage as Record<string, unknown> | undefined;
+            // SAFETY: the adapter publishes `usage` as the SDK's token-usage
+            // object; each field is still parsed before it is counted.
+            const usage = event.payload.usage as JsonObject | undefined;
             const num = (key: string) =>
-              typeof usage?.[key] === "number" ? (usage[key] as number) : 0;
+              Option.getOrElse(decodeNumber(usage?.[key]), () => 0);
             const turnTokens =
               num("input_tokens") +
               num("cache_read_input_tokens") +
@@ -166,14 +207,19 @@ export class ManagedRuntime extends Context.Service<
             hosted.agent.processedTokens = (hosted.agent.processedTokens ?? 0) + turnTokens;
           }
           if (event.type === "user-input.requested") {
+            // SAFETY: the adapter publishes `questions` as the SDK's question
+            // list; the fields a card renders are read leniently below.
             const questions = Array.isArray(event.payload.questions)
-              ? (event.payload.questions as Array<Record<string, unknown>>)
+              ? (event.payload.questions as Array<JsonObject>)
               : [];
             const first = questions[0];
+            const firstOptions = first?.options;
             // Only a single-answer question maps onto the device's option list.
+            // SAFETY: the SDK's options are labelled objects; a label that is
+            // not there anyway falls back to an empty string and is dropped.
             const options =
-              questions.length === 1 && first?.multiSelect !== true && Array.isArray(first?.options)
-                ? (first.options as Array<Record<string, unknown>>)
+              questions.length === 1 && first?.multiSelect !== true && Array.isArray(firstOptions)
+                ? (firstOptions as Array<JsonObject>)
                     .map((option) => String(option.label ?? ""))
                     .filter(Boolean)
                 : [];
@@ -197,20 +243,24 @@ export class ManagedRuntime extends Context.Service<
                   : event.payload.kind === "reasoning"
                     ? "thought"
                     : "output";
+            const text = Option.getOrUndefined(decodeString(event.payload.text));
+            const tool = Option.getOrUndefined(decodeString(event.payload.tool));
             const summary =
               kind === "thought"
                 ? "Reasoning"
-                : typeof event.payload.text === "string"
-                  ? event.payload.text.slice(0, 300)
-                  : typeof event.payload.tool === "string"
-                    ? `${event.payload.tool}`
+                : text !== undefined
+                  ? text.slice(0, 300)
+                  : tool !== undefined
+                    ? `${tool}`
                     : event.type === "runtime.error"
                       ? String(event.payload.message ?? "Runtime error")
                       : "Activity";
-            const toolInput = event.payload.input as Record<string, unknown> | undefined;
+            // SAFETY: the adapter publishes `input` as the tool call's
+            // argument object; the fields a card renders are parsed below.
+            const toolInput = event.payload.input as JsonObject | undefined;
             const detail =
-              (kind === "output" || kind === "thought") && typeof event.payload.text === "string"
-                ? event.payload.text
+              (kind === "output" || kind === "thought") && text !== undefined
+                ? text
                 : toolInput
                   ? JSON.stringify(toolInput, null, 2)
                   : undefined;
@@ -219,14 +269,11 @@ export class ManagedRuntime extends Context.Service<
               kind,
               summary,
               detail,
-              tool: typeof event.payload.tool === "string" ? event.payload.tool : undefined,
-              command: typeof toolInput?.command === "string" ? toolInput.command : undefined,
+              tool,
+              command: Option.getOrUndefined(decodeString(toolInput?.command)),
               path:
-                typeof toolInput?.path === "string"
-                  ? toolInput.path
-                  : typeof toolInput?.file_path === "string"
-                    ? toolInput.file_path
-                    : undefined,
+                Option.getOrUndefined(decodeString(toolInput?.path)) ??
+                Option.getOrUndefined(decodeString(toolInput?.file_path)),
             });
           }
           yield* state.heartbeat(hosted.agent);
@@ -339,7 +386,7 @@ export class ManagedRuntime extends Context.Service<
         agentId: string,
         requestId: string,
         status: RuntimeRequestStatus,
-        value?: unknown,
+        value?: JsonValue,
       ) {
         const hosted = (yield* Ref.get(sessions)).get(agentId);
         if (hosted === undefined || !(yield* canResolve(agentId, requestId, status))) return false;

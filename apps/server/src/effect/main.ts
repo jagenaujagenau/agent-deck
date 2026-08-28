@@ -55,7 +55,10 @@ const MainLayer = Layer.unwrap(
       // empty database file still comes up.
       Layer.provide(BridgeSchema),
       Layer.provide(Sql),
-      Layer.provide(BunHttpServer.layer({ port: config.port })),
+      // Above Bun's 10-second default, which sits under the SSE stream's
+      // 15-second pings and was quietly killing every quiet /events
+      // connection, forcing devices into reconnect churn.
+      Layer.provide(BunHttpServer.layer({ port: config.port, idleTimeout: 60 })),
     );
   }),
 );

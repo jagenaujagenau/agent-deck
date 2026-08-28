@@ -29,8 +29,9 @@ export interface RateLimitWindow {
   id: string;
   label: string;
   usedPercent: number;
-  resetsAt?: string;
-  account?: string;
+  // The wire allows an explicit null here, so the roll-up must too.
+  resetsAt?: string | null;
+  account?: string | null;
 }
 
 interface AnalyticsAgent {
@@ -58,19 +59,21 @@ export interface AnalyticsInput {
   };
 }
 
-const RANGE_DAYS: Record<string, number> = {
+const RANGE_DAYS = {
   day: 1,
   week: 7,
   month: 30,
   quarter: 90,
   year: 365,
-};
+} satisfies Record<string, number>;
+
+const isRangeName = (range: string): range is keyof typeof RANGE_DAYS => range in RANGE_DAYS;
 
 export const rangeCutoff = (range: string, from: number) => {
-  const selected = range in RANGE_DAYS ? range : "month";
+  const selected = isRangeName(range) ? range : "month";
   return {
     selected,
-    cutoff: new Date(from - RANGE_DAYS[selected]! * 86_400_000).toISOString(),
+    cutoff: new Date(from - RANGE_DAYS[selected] * 86_400_000).toISOString(),
   };
 };
 
@@ -88,7 +91,7 @@ export const buildAnalytics = (input: AnalyticsInput) => {
   const transcriptBacked = new Set(trackedTranscriptRows.map((row) => row.agent_id));
   const usage: Array<UsageRow> = [
     ...input.ledgerUsage.filter((row) => !transcriptBacked.has(row.agent_id)),
-    ...(trackedTranscriptRows as unknown as Array<UsageRow>),
+    ...trackedTranscriptRows,
   ]
     .filter((row) => !project || row.project === project)
     .sort((left, right) => left.created_at.localeCompare(right.created_at));

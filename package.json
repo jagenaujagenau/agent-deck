@@ -21,7 +21,9 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "release:desktop": "bun run scripts/release-desktop.ts",
+    "bench": "bun run scripts/bench-bridge.ts",
     "service": "bun run scripts/agent-deck-service.ts",
+    "test": "bun test --cwd apps/server && bun test --cwd packages/agent-adapter && bun test --cwd integrations",
     "knip": "knip",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix"

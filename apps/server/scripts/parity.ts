@@ -4,10 +4,10 @@ import { BridgeStore } from "../src/effect/Store";
 
 const TOKEN = process.env.BRIDGE_TOKEN!;
 const BASE = "http://127.0.0.1:3000/bridge/v1";
-const get = async (path: string) => {
+const get = async (path: string): Promise<any> => {
   const res = await fetch(BASE + path, { headers: { authorization: `Bearer ${TOKEN}` } });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
-  return res.json() as any;
+  return res.json();
 };
 
 const program = Effect.gen(function* () {
@@ -18,7 +18,7 @@ const program = Effect.gen(function* () {
   let pass = 0,
     fail = 0;
   for (const id of ids) {
-    for (const [label, live, mine] of [
+    const comparisons: Array<[string, any, any]> = [
       [
         "history",
         (yield* Effect.promise(() => get(`/agents/${id}/history`))).events,
@@ -34,7 +34,8 @@ const program = Effect.gen(function* () {
         (yield* Effect.promise(() => get(`/agents/${id}/slash-commands`))).commands,
         yield* store.slashCommands(id),
       ],
-    ] as Array<[string, any, any]>) {
+    ];
+    for (const [label, live, mine] of comparisons) {
       const a = JSON.stringify(live),
         b = JSON.stringify(mine);
       if (a === b) {

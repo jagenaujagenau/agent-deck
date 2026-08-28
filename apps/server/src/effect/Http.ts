@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
+import { Effect, Schema, Stream, SubscriptionRef } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import {
   AgentEventInput,
@@ -10,11 +10,13 @@ import {
   ResolveRequestBody,
   RuntimeEventEnvelope,
   SlashCommandPublication,
+  type JsonValue,
 } from "./Domain";
+import { isMasterToken } from "./Auth";
 import { BridgeConfig } from "./Config";
 import { agentFingerprint } from "./Fingerprint";
 import { ManagedRuntime } from "./Managed";
-import { BridgeState } from "./State";
+import { BridgeState, type PendingBlock } from "./State";
 import { BRIDGE_VERSION } from "./Version";
 import { BridgeStore } from "./Store";
 
@@ -25,6 +27,18 @@ const param = (name: string) => Effect.map(HttpRouter.params, (params) => params
 
 const error = (message: string, status: number) =>
   HttpServerResponse.json({ error: message }, { status });
+
+/**
+ * The one sentence a refused prompt carries, naming what the agent is
+ * actually waiting on so the person steering can go answer it instead.
+ */
+export const blockedDetail = (block: PendingBlock): string =>
+  block.kind === "approval"
+    ? `The agent is waiting for approval to run ${block.tool}`
+    : `The agent is waiting for an answer to: ${block.question}`;
+
+/** The prompt-shaped actions: the ones a blocked agent would silently queue. */
+const promptActions: ReadonlyArray<string> = ["prompt", "steer", "follow_up"];
 
 /**
  * Parses a request body against the wire contract, so a handler receives a
@@ -192,7 +206,9 @@ export const BridgeRoutes = HttpRouter.addAll([
       const id = yield* param("id");
       if (envelope?.agentId !== id)
         return yield* error("Runtime event agent does not match route", 400);
-      return yield* state.ingestRuntimeEvent(raw).pipe(
+      // SAFETY: `raw` came out of the JSON body parser - the envelope decode
+      // above just read a field from it - so it is a parsed JSON document.
+      return yield* state.ingestRuntimeEvent(raw as JsonValue).pipe(
         Effect.flatMap((result) => HttpServerResponse.json(result, { status: 201 })),
         Effect.catchTag("InvalidRuntimeEvent", (failure) => error(failure.reason, 400)),
       );
@@ -209,6 +225,22 @@ export const BridgeRoutes = HttpRouter.addAll([
         const support = yield* state.supportsControl(id, input.action);
         if (support === undefined) return yield* error("Agent not found", 404);
         if (!support) return yield* error(`This runtime does not support ${input.action}`, 409);
+        // A prompt sent while the agent is blocked on an approval or question
+        // queues silently behind it — the sender believes they steered when
+        // nothing moved. Refused unless the sender said "queue anyway" with
+        // `force`. approve/reject/stop/pause/resume are never refused here:
+        // they are how a blocked agent gets unblocked.
+        if (promptActions.includes(input.action) && input.force !== true) {
+          const block = yield* state.pendingBlock(id);
+          if (block !== undefined) {
+            // "agent_blocked" is a wire contract: clients detect this refusal
+            // by matching the error string, so it must never be reworded.
+            return yield* HttpServerResponse.json(
+              { error: "agent_blocked", detail: blockedDetail(block) },
+              { status: 409 },
+            );
+          }
+        }
         if (
           (input.action === "approve" || input.action === "reject") &&
           !(yield* state.hasPendingApproval(id))
@@ -231,6 +263,23 @@ export const BridgeRoutes = HttpRouter.addAll([
       }).pipe(onMalformed("Invalid action"));
     }),
   ),
+  /**
+   * A person looked at this session. Seen is shared across surfaces — the
+   * phone marking a session viewed clears its "done" badge on the watch —
+   * so it lives on the bridge, not in each app's local store. Deliberately
+   * read-scoped: looking at a conversation is reading, not steering.
+   */
+  route(
+    "POST",
+    "/agents/:id/seen",
+    Effect.gen(function* () {
+      const state = yield* BridgeState;
+      const viewedAt = yield* state.markViewed(yield* param("id"));
+      return viewedAt === undefined
+        ? yield* error("Agent not found", 404)
+        : yield* HttpServerResponse.json({ viewedAt });
+    }),
+  ),
   route(
     "POST",
     "/agents/:id/commands/:commandId/ack",
@@ -249,7 +298,12 @@ export const BridgeRoutes = HttpRouter.addAll([
       const state = yield* BridgeState;
       return yield* Effect.gen(function* () {
         const input = yield* decodeBody(SlashCommandPublication);
-        yield* state.setSlashCommands(yield* param("agentId"), input.commands.slice(0, 400));
+        // SAFETY: the catalog was decoded from a JSON body; its entries stay
+        // deliberately unconstrained, but they can only be JSON values.
+        yield* state.setSlashCommands(
+          yield* param("agentId"),
+          input.commands.slice(0, 400) as Array<JsonValue>,
+        );
         return yield* HttpServerResponse.json({ stored: input.commands.length });
       }).pipe(onMalformed("commands must be an array"));
     }),
@@ -270,22 +324,23 @@ export const BridgeRoutes = HttpRouter.addAll([
       );
       if (input === undefined) return yield* error("Invalid request status", 400);
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const bearer = (request.headers["authorization"] ?? "").replace(/^Bearer\s+/i, "");
-      const isMaster = Option.match(config.masterToken, {
-        onNone: () => false,
-        onSome: (master) => bearer === master,
-      });
-      if (input.status !== "answered" && !isMaster) {
+      if (
+        input.status !== "answered" &&
+        !isMasterToken(config.masterToken, request.headers["authorization"])
+      ) {
         return yield* error("Only the runtime credential may resolve this request status", 403);
       }
       const managed = yield* ManagedRuntime;
       const agentId = yield* param("agentId");
       const requestId = yield* param("requestId");
+      // SAFETY: the resolution value was decoded from a JSON body; the wire
+      // leaves it opaque, but it can only be a JSON value.
+      const value = input.value as JsonValue | undefined;
       // A bridge-hosted session is handed the answer directly; otherwise it is
       // recorded durably for a blocked runtime to collect.
       const resolved =
-        (yield* managed.resolve(agentId, requestId, input.status, input.value)) ||
-        (yield* state.resolveRuntimeRequest(agentId, requestId, input.status, input.value));
+        (yield* managed.resolve(agentId, requestId, input.status, value)) ||
+        (yield* state.resolveRuntimeRequest(agentId, requestId, input.status, value));
       return resolved
         ? yield* HttpServerResponse.json({ resolved: true })
         : yield* error("No pending request to resolve", 404);
@@ -347,19 +402,19 @@ export const BridgeRoutes = HttpRouter.addAll([
       );
       if (input === undefined) return yield* error("Invalid request status", 400);
       const request = yield* HttpServerRequest.HttpServerRequest;
-      const bearer = (request.headers["authorization"] ?? "").replace(/^Bearer\s+/i, "");
-      const isMaster = Option.match(config.masterToken, {
-        onNone: () => false,
-        onSome: (master) => bearer === master,
-      });
-      if (input.status !== "answered" && !isMaster) {
+      if (
+        input.status !== "answered" &&
+        !isMasterToken(config.masterToken, request.headers["authorization"])
+      ) {
         return yield* error("Only the runtime credential may resolve this request status", 403);
       }
+      // SAFETY: the resolution value was decoded from a JSON body; the wire
+      // leaves it opaque, but it can only be a JSON value.
       const resolved = yield* managed.resolve(
         yield* param("agentId"),
         yield* param("requestId"),
         input.status,
-        input.value,
+        input.value as JsonValue | undefined,
       );
       return resolved
         ? yield* HttpServerResponse.json({ resolved: true })
@@ -439,9 +494,12 @@ export const BridgeRoutes = HttpRouter.addAll([
       const encoder = new TextEncoder();
 
       const frame = Effect.gen(function* () {
-        const snapshot = yield* state.snapshot as Effect.Effect<any>;
+        const snapshot = yield* state.snapshot;
         const fingerprints = new Map<string, string>(
-          snapshot.agents.map((agent: any) => [String(agent.id), agentFingerprint(agent)]),
+          snapshot.agents.map((agent): [string, string] => [
+            String(agent.id),
+            agentFingerprint(agent),
+          ]),
         );
         const revision = String(snapshot.sequence);
         if (sent === undefined) {
@@ -449,7 +507,7 @@ export const BridgeRoutes = HttpRouter.addAll([
           return `event: snapshot\nid: ${revision}\ndata: ${JSON.stringify(snapshot)}\n\n`;
         }
         const agents = snapshot.agents.filter(
-          (agent: any) => sent!.get(String(agent.id)) !== fingerprints.get(String(agent.id)),
+          (agent) => sent!.get(String(agent.id)) !== fingerprints.get(String(agent.id)),
         );
         const removed = [...sent.keys()].filter((id) => !fingerprints.has(id));
         sent = fingerprints;

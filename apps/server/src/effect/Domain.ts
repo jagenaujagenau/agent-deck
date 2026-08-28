@@ -19,6 +19,21 @@ import { Schema } from "effect";
  */
 const optionalField = <S extends Schema.Top>(schema: S) => Schema.optional(Schema.NullOr(schema));
 
+/**
+ * A parsed JSON document, as JSON.parse produces one.
+ *
+ * The bridge stores several blobs it wrote with JSON.stringify and reads back
+ * with JSON.parse - stored agents, request payloads, resolution values. Naming
+ * what such a value can be lets those reads carry a real contract instead of
+ * `unknown`, without pretending to know a shape the wire deliberately leaves
+ * open.
+ */
+export type JsonValue = string | number | boolean | null | ReadonlyArray<JsonValue> | JsonObject;
+
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
+
 const EventKind = Schema.Literals([
   "thought",
   "tool",
@@ -50,6 +65,13 @@ export const AgentEvent = Schema.Struct({
    */
   subagentId: optionalField(Schema.String),
   subagentType: optionalField(Schema.String),
+  /**
+   * What the run was asked to do — the Task call's own wording, "Fix lint in
+   * apps/server". The type says what kind of agent ran; this says why. A
+   * surface titles the run with it when present, because five parallel
+   * "general-purpose" runs are indistinguishable by type alone.
+   */
+  subagentName: optionalField(Schema.String),
   createdAt: Schema.String,
 });
 export interface AgentEvent extends Schema.Schema.Type<typeof AgentEvent> {}
@@ -67,6 +89,7 @@ export const AgentEventInput = Schema.Struct({
   options: optionalField(Schema.Array(Schema.String)),
   subagentId: optionalField(Schema.String),
   subagentType: optionalField(Schema.String),
+  subagentName: optionalField(Schema.String),
 });
 export interface AgentEventInput extends Schema.Schema.Type<typeof AgentEventInput> {}
 
@@ -132,11 +155,18 @@ export const Heartbeat = Schema.Struct({
 });
 export interface Heartbeat extends Schema.Schema.Type<typeof Heartbeat> {}
 
-/** Body for resolving a durable approval or question. */
+/** Body for steering an agent or resolving what it is blocked on. */
 export const ControlCommand = Schema.Struct({
   action: ControlAction,
   value: optionalField(Schema.String),
   commandId: optionalField(Schema.String),
+  /**
+   * Queue a prompt even while the agent is blocked on an approval or a
+   * question. Without it, the bridge refuses such a prompt outright — text
+   * that silently queues behind a pending request reads as steering that
+   * never happened. Deliberate "queue anyway" is what this flag says.
+   */
+  force: optionalField(Schema.Boolean),
 });
 
 /**
@@ -223,6 +253,7 @@ export const StoredAgent = Schema.Struct({
   processedTokens: optionalField(Schema.Number),
   costUsd: Schema.Number,
   lastSeenAt: Schema.String,
+  viewedAt: optionalField(Schema.String),
   events: Schema.Array(AgentEvent),
   capabilities: optionalField(Schema.Array(ControlAction)),
   rateLimits: optionalField(Schema.Array(RateLimitWindow)),
