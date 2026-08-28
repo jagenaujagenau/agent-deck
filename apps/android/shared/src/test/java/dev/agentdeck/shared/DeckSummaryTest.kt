@@ -171,6 +171,17 @@ class HarnessTest {
     }
 
     @Test
+    fun `the wire's own runtime word outranks every guess`() {
+        // A renamed Pi session loses the name heuristic; the runtime field holds.
+        assertEquals(Harness.Pi, Harnesses.of("01a02e7b", "fx backfill", runtime = "pi"))
+        assertEquals(Harness.Claude, Harnesses.of("x-1", "anything", runtime = "claude"))
+        // A bridge-hosted session stays Managed even though its runtime is claude.
+        assertEquals(Harness.Managed, Harnesses.of("managed-abc", "Managed Claude", runtime = "claude"))
+        // A runtime word the deck does not know falls back to the prefix.
+        assertEquals(Harness.Codex, Harnesses.of("codex-abc", "Codex · fx", runtime = "cursor"))
+    }
+
+    @Test
     fun `Pi is read from its name, having no prefix to read`() {
         // Pi names sessions from the runtime's own id, which carries no prefix.
         assertEquals(Harness.Pi, Harnesses.of("01a02e7b-3852-794f", "Pi · agent-control-dashboard"))

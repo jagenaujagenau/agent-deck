@@ -276,13 +276,19 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         // that is not there: an empty token counts as refused before a request
         // is even made, because it is one.
         var refused = token.isBlank()
+        // Sockets bound to the watch's own Wi-Fi: the default network is the
+        // Bluetooth companion tunnel, where the bridge's LAN address times out.
+        val wifi = DirectWifi.socketFactory(getApplication())
         for (candidate in addresses.candidates(BuildConfig.BRIDGE_URL)) {
-            repository.configure(candidate, token)
             // The tail, not the whole session: a long run's full history is
             // most of a megabyte, and only the newest of each is shown here.
-            val attempt = runCatching { repository.history(agentId, limit = WATCH_HISTORY_LIMIT) }
+            val attempt = runCatching {
+                BridgeClient(candidate, token, wifi).history(agentId, limit = WATCH_HISTORY_LIMIT)
+            }
             val events = attempt.getOrNull()
             if (events == null) {
+                // Which candidate failed and why, or "unreachable" is undiagnosable from the wrist.
+                android.util.Log.w("AgentDeck", "history fetch failed via $candidate", attempt.exceptionOrNull())
                 // The client puts the status in the message. Reaching the
                 // bridge and being turned away means the address is right and
                 // the credential is not, so the other addresses are no help.
@@ -325,6 +331,35 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
 
     /** What becomes of the last command, when it is not simply collected. */
     val commandNotice = _commandNotice.asStateFlow()
+
+    private val seenStore = SeenStore(application)
+    private val _seenMarks = MutableStateFlow(seenStore.all())
+
+    /** This watch's own read marks. The phone keeps its own; a glance here silences only here. */
+    val seenMarks = _seenMarks.asStateFlow()
+
+    /** Called only from an open session - a relayed snapshot or a drawn list marks nothing. */
+    fun markSeen(agent: Agent) {
+        val at = latestActivityAt(agent)
+        if (seenCovers(_seenMarks.value[agent.id], at)) return
+        seenStore.markSeen(agent.id, at)
+        _seenMarks.update { it + (agent.id to at) }
+        // Echo the read to the bridge so the phone and desk drop their badges
+        // too. A throwaway client, not the shared repository: reconfiguring
+        // that would wake the stream for a call whose failure costs only the
+        // echo, and is swallowed for the same reason.
+        viewModelScope.launch {
+            val token = SecureTokenStore(getApplication()).get()
+            if (token.isBlank()) return@launch
+            val wifi = DirectWifi.socketFactory(getApplication())
+            for (candidate in addresses.candidates(BuildConfig.BRIDGE_URL)) {
+                if (runCatching { BridgeClient(candidate, token, wifi).markSeen(agent.id) }.isSuccess) {
+                    addresses.remember(candidate)
+                    break
+                }
+            }
+        }
+    }
 
     fun control(agent: Agent, action: String, value: String? = null) {
         val commandId = UUID.randomUUID().toString()
@@ -487,6 +522,7 @@ private fun WearDeck(openAgentId: String? = null, vm: WearDeckViewModel = viewMo
     val sessionEvents by vm.sessionEvents.collectAsStateWithLifecycle()
     val historyLoading by vm.historyLoading.collectAsStateWithLifecycle()
     val historyFailed by vm.historyFailed.collectAsStateWithLifecycle()
+    val seenMarks by vm.seenMarks.collectAsStateWithLifecycle()
     var selected by remember { mutableStateOf(openAgentId) }
     val snapshot = when (val current = state) {
         is BridgeState.Ready -> current.snapshot
@@ -507,8 +543,11 @@ private fun WearDeck(openAgentId: String? = null, vm: WearDeckViewModel = viewMo
         AnimatedContent(targetState = selectedAgent?.id, label = "wear-navigation") { openId ->
             val agent = openId?.let { id -> snapshot?.agents?.firstOrNull { it.id == id } }
             if (agent == null) {
-                AgentList(snapshot, state, vm::refresh) { selected = it.id }
+                AgentList(snapshot, state, seenMarks, vm::refresh) { selected = it.id }
             } else {
+                // Reading the session on this wrist is what "seen" means here,
+                // and it marks this watch only - the phone keeps its own marks.
+                LaunchedEffect(agent.id, latestActivityAt(agent)) { vm.markSeen(agent) }
                 // Controls, message and reasoning are pages of one session
                 // rather than screens to navigate between: a wrist has no room
                 // for a tab bar, and a sideways swipe is already how this app
@@ -550,7 +589,7 @@ private fun WearDeck(openAgentId: String? = null, vm: WearDeckViewModel = viewMo
 }
 
 @Composable
-private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: () -> Unit, onAgent: (Agent) -> Unit) {
+private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, seenMarks: Map<String, String>, onRefresh: () -> Unit, onAgent: (Agent) -> Unit) {
     if (snapshot == null) {
         Box(Modifier.fillMaxSize().background(Ink).padding(24.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -578,7 +617,7 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, onRefresh: 
         flingBehavior = pagerFlingBehavior,
     ) { pageIndex ->
         val page = pages[pageIndex]
-        val agents = agentsForPage(snapshot.agents, page)
+        val agents = agentsForPage(snapshot.agents, page, seenMarks)
         val pageColor = when (page) {
             WearStatePage.Running -> Signal
             WearStatePage.NeedsYou -> Amber
@@ -696,7 +735,7 @@ private fun WearAgentCard(agent: Agent, label: String, onClick: () -> Unit) {
             // card in view - 32dp of a 192dp screen saying what the page title
             // said. The disc keeps the state colour, so nothing is lost, and
             // the tile next door has always drawn the harness this way.
-            val harness = remember(agent.id, agent.name) { Harnesses.of(agent.id, agent.name) }
+            val harness = remember(agent.id, agent.name, agent.runtime) { Harnesses.of(agent) }
             Box(Modifier.size(32.dp).clip(CircleShape).background(color.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
                 val icon = harness.icon
                 if (icon != null) {

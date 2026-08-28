@@ -17,15 +17,68 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+import java.net.InetAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.SocketAddress
+import java.net.URI
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
+
+/**
+ * Connects to addresses on this device's own network directly, and everything
+ * else however the system says.
+ *
+ * Wear OS installs a system-wide SOCKS proxy that tunnels app traffic to the
+ * phone over Bluetooth — including, uselessly, traffic for the LAN the watch
+ * itself sits on, where the tunnel just times out. The shell's curl reached
+ * the bridge while the app reported it unreachable, because only the app was
+ * being routed through the proxy. A LAN-literal bridge address never benefits
+ * from a tunnel to another device, so it is dialed directly.
+ */
+private class LanDirectProxySelector : ProxySelector() {
+    private val system = getDefault()
+
+    override fun select(uri: URI?): List<Proxy> {
+        val host = uri?.host ?: return listOf(Proxy.NO_PROXY)
+        val literal = runCatching {
+            // Only literals: a hostname would trigger DNS on this thread.
+            if (host.matches(Regex("[0-9.]+")) || host.contains(":")) InetAddress.getByName(host) else null
+        }.getOrNull()
+        if (literal != null && (literal.isSiteLocalAddress || literal.isLoopbackAddress || literal.isLinkLocalAddress)) {
+            return listOf(Proxy.NO_PROXY)
+        }
+        return system?.select(uri) ?: listOf(Proxy.NO_PROXY)
+    }
+
+    override fun connectFailed(uri: URI?, address: SocketAddress?, failure: IOException?) {
+        system?.connectFailed(uri, address, failure)
+    }
+}
+
+/**
+ * The bridge declined to hand a message to a session blocked on a person.
+ *
+ * The message carries the bridge's own sentence about what is pending, so the
+ * composer can point at the approval or question instead of reporting a code.
+ */
+class AgentBlockedException(detail: String) : Exception(detail)
 
 class BridgeClient(
     baseUrl: String,
     private var token: String = "",
+    /**
+     * Sockets bound to a specific network, for a device whose default network
+     * cannot reach the bridge — the watch's default is the Bluetooth companion
+     * tunnel, and the bridge sits on the Wi-Fi beside it.
+     */
+    socketFactory: javax.net.SocketFactory? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val http = OkHttpClient.Builder()
+        .apply { socketFactory?.let { socketFactory(it) } }
+        .proxySelector(LanDirectProxySelector())
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
@@ -136,6 +189,20 @@ class BridgeClient(
         activeStreamCall = null
     }
 
+    /**
+     * Tells the bridge a person just looked at this session, so every other
+     * surface can drop its badge. Fire-and-forget at call sites: the local
+     * mark has already applied by the time this is sent, and a failure costs
+     * only the echo to the other surfaces.
+     */
+    suspend fun markSeen(agentId: String) = withContext(Dispatchers.IO) {
+        val body = ByteArray(0).toRequestBody("application/json".toMediaType())
+        val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/seen").post(body).build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("Seen returned ${response.code}")
+        }
+    }
+
     suspend fun analytics(range: String, project: String? = null): AnalyticsSnapshot = withContext(Dispatchers.IO) {
         val url = "$baseUrl/bridge/v1/analytics".toHttpUrl().newBuilder()
             .addQueryParameter("range", range)
@@ -162,11 +229,21 @@ class BridgeClient(
         }
     }
 
-    suspend fun control(agentId: String, action: String, value: String? = null, commandId: String? = null) = withContext(Dispatchers.IO) {
-        val body = json.encodeToString(ControlRequest(action, value, commandId))
+    suspend fun control(agentId: String, action: String, value: String? = null, commandId: String? = null, force: Boolean = false) = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(ControlRequest(action, value, commandId, force = if (force) true else null))
             .toRequestBody("application/json".toMediaType())
         val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/control").post(body).build()
         http.newCall(request).execute().use { response ->
+            // A blocked session is a refusal with a reason, not a failure: the
+            // bridge is saying "answer the pending request first, or say force".
+            // It gets its own exception so the composer can offer exactly that,
+            // while every other status keeps reading as the failure it is.
+            if (response.code == 409) {
+                val refusal = runCatching { json.decodeFromString<ControlRefusal>(response.body.string()) }.getOrNull()
+                if (refusal?.error == "agent_blocked") {
+                    throw AgentBlockedException(refusal.detail ?: "This agent is waiting on an approval or question.")
+                }
+            }
             if (!response.isSuccessful) error("Command failed (${response.code})")
         }
     }
@@ -186,6 +263,28 @@ class BridgeClient(
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("Receipt unavailable (${response.code})")
             json.decodeFromString<CommandReceipt>(response.body.string())
+        }
+    }
+
+    /** Which runtimes the bridge can host and run itself. */
+    suspend fun managedRuntimes(): List<ManagedRuntime> = withContext(Dispatchers.IO) {
+        val request = requestBuilder("$baseUrl/bridge/v1/managed/runtimes").get().build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("Managed runtimes unavailable (${response.code})")
+            json.decodeFromString<ManagedRuntimes>(response.body.string()).runtimes
+        }
+    }
+
+    /** Starts a bridge-hosted session. `cwd` must be absolute on the bridge's machine. */
+    suspend fun startManagedSession(request: ManagedSessionRequest): StartedManagedSession = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(request).toRequestBody("application/json".toMediaType())
+        val httpRequest = requestBuilder("$baseUrl/bridge/v1/managed/claude/sessions").post(body).build()
+        http.newCall(httpRequest).execute().use { response ->
+            if (!response.isSuccessful) {
+                val message = runCatching { response.body.string() }.getOrDefault("")
+                error("Could not start session (${response.code}): $message")
+            }
+            json.decodeFromString<StartedManagedSession>(response.body.string())
         }
     }
 
@@ -261,8 +360,8 @@ class AgentRepository(private val client: BridgeClient) {
             .onFailure { _state.value = BridgeState.Failed(it.message ?: "Bridge unavailable", previous) }
     }
 
-    suspend fun control(agentId: String, action: String, value: String? = null, commandId: String? = null) {
-        client.control(agentId, action, value, commandId)
+    suspend fun control(agentId: String, action: String, value: String? = null, commandId: String? = null, force: Boolean = false) {
+        client.control(agentId, action, value, commandId, force)
         refresh()
     }
 
@@ -276,6 +375,16 @@ class AgentRepository(private val client: BridgeClient) {
     suspend fun answerQuestion(agentId: String, requestId: String, question: String, answer: String) {
         client.answerQuestion(agentId, requestId, question, answer)
         refresh()
+    }
+
+    suspend fun managedRuntimes(): List<ManagedRuntime> = client.managedRuntimes()
+
+    suspend fun startManagedSession(request: ManagedSessionRequest): StartedManagedSession {
+        val session = client.startManagedSession(request)
+        // The new session arrives through the live stream like any other, but
+        // a refresh means the deck shows it now rather than on the next patch.
+        refresh()
+        return session
     }
 
     fun wake() {

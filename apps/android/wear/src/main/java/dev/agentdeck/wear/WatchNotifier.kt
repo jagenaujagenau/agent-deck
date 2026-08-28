@@ -59,8 +59,12 @@ internal object WatchNotifier {
 
     private fun build(context: Context, agent: Agent, attentionKey: String): Notification {
         val approval = agent.pendingApproval
+        val durable = agent.pendingQuestion
         val question = agent.events.maxByOrNull { it.createdAt }?.takeIf { it.kind == "question" }
-        val detail = approval?.detail ?: question?.detail ?: question?.summary ?: agent.task
+        val questionText = durable?.question?.takeIf { it.isNotBlank() } ?: question?.detail ?: question?.summary
+        val questionOptions = durable?.options.orEmpty().ifEmpty { question?.options.orEmpty() }
+        val questionId = durable?.id ?: question?.id
+        val detail = approval?.detail ?: questionText ?: agent.task
 
         val builder = Notification.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
@@ -78,12 +82,12 @@ internal object WatchNotifier {
         if (approval != null) {
             builder.addAction(action(context, agent, "reject", "Reject", attentionKey, 1))
             builder.addAction(action(context, agent, "approve", "Approve", attentionKey, 2))
-        } else if (question != null) {
+        } else if (questionId != null) {
             // Answering from the notification is the whole point on a wrist:
             // three taps deep into the app to press a button that could have
             // been on the buzz itself is the app failing at its one job.
-            question.options.take(3).forEachIndexed { index, option ->
-                builder.addAction(answer(context, agent, question.id, option, attentionKey, index + 3))
+            questionOptions.take(3).forEachIndexed { index, option ->
+                builder.addAction(answer(context, agent, questionId, option, attentionKey, index + 3))
             }
         }
         return builder.build()

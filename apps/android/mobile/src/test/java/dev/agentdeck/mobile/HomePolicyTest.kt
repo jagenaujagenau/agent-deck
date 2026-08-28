@@ -18,10 +18,11 @@ class HomePolicyTest {
         lastSeenAt: String = "2026-08-24T11:59:00Z",
         events: List<AgentEvent> = emptyList(),
         approval: PendingApproval? = null,
+        viewedAt: String? = null,
     ) = Agent(
         id = id, name = "Pi", project = project, model = "gpt-5",
         state = state, task = "Working", tokens = 0, costUsd = 0.0,
-        lastSeenAt = lastSeenAt, events = events, pendingApproval = approval,
+        lastSeenAt = lastSeenAt, viewedAt = viewedAt, events = events, pendingApproval = approval,
     )
 
     @Test
@@ -60,7 +61,49 @@ class HomePolicyTest {
             ),
             archivedKeys = emptySet(),
             now = now,
+            // The idle session has been read, so it asks for nothing and sorts last.
+            seenMarks = mapOf("done" to "2026-08-24T11:59:00Z"),
         )
         assertEquals(listOf("input", "run-a", "run-b", "done"), ordered.map { it.id })
+    }
+
+    @Test
+    fun finishedWhileYouWerentLookingOutranksRunning() {
+        // No seen mark at all: this phone has never shown the session.
+        assertEquals(
+            HomeAgentState.Done,
+            homeAgentState(agent("fresh", "idle"), now = now, seen = false),
+        )
+        // Unseen wins over the ten-minute decay into History.
+        assertEquals(
+            HomeAgentState.Done,
+            homeAgentState(agent("stale", "idle", lastSeenAt = "2026-08-24T10:00:00Z"), now = now, seen = false),
+        )
+        val ordered = homeAgentOrder(
+            listOf(agent("run", "running"), agent("fresh", "idle")),
+            archivedKeys = emptySet(),
+            now = now,
+        )
+        assertEquals(listOf("fresh", "run"), ordered.map { it.id })
+    }
+
+    @Test
+    fun aReadOnAnotherSurfaceClearsDoneHereToo() {
+        // No local mark at all - the bridge's viewedAt alone covers the session,
+        // so it sorts with the read, not above the running one.
+        val ordered = homeAgentOrder(
+            listOf(agent("run", "running"), agent("done", "idle", viewedAt = "2026-08-24T11:59:00Z")),
+            archivedKeys = emptySet(),
+            now = now,
+        )
+        assertEquals(listOf("run", "done"), ordered.map { it.id })
+        // But a session that worked on after the read is unseen again.
+        assertFalse(agentSeen(agent("done", "idle", viewedAt = "2026-08-24T11:58:00Z"), emptyMap()))
+    }
+
+    @Test
+    fun doneIsNotAnAttentionStateAndStaysOutOfNeedsYou() {
+        assertTrue(HomeFilter.Now.includes(HomeAgentState.Done))
+        assertFalse(HomeFilter.Attention.includes(HomeAgentState.Done))
     }
 }

@@ -3,10 +3,10 @@ package dev.agentdeck.shared
 /**
  * Which coding agent a session is running under.
  *
- * Derived rather than reported: the wire has no runtime field on an agent, and
- * adding one would mean a bridge change every adapter has to catch up with. The
- * id prefix is what the adapters already agree on, and every one of them builds
- * it the same way - runtime, then a hash of the runtime's own session id.
+ * Read from the wire's `runtime` field when the bridge sends one, because that
+ * is the adapter's own word for itself. The id-prefix and display-name reads
+ * below are the fallback for snapshots from an older bridge, which had no such
+ * field — and for Pi, whose id carries no prefix at all.
  */
 enum class Harness(val mark: String, val label: String, val icon: Int?) {
     /**
@@ -25,11 +25,19 @@ enum class Harness(val mark: String, val label: String, val icon: Int?) {
 }
 
 object Harnesses {
-    fun of(agentId: String, name: String): Harness = when {
+    fun of(agent: Agent): Harness = of(agent.id, agent.name, agent.runtime)
+
+    fun of(agentId: String, name: String, runtime: String? = null): Harness = when {
+        // A bridge-hosted session is still its runtime underneath, but it is
+        // the bridge's, and the deck says so — the id decides before the word.
+        agentId.startsWith("managed-") -> Harness.Managed
+        runtime == "claude" -> Harness.Claude
+        runtime == "codex" -> Harness.Codex
+        runtime == "opencode" -> Harness.OpenCode
+        runtime == "pi" -> Harness.Pi
         agentId.startsWith("claude-") -> Harness.Claude
         agentId.startsWith("codex-") -> Harness.Codex
         agentId.startsWith("opencode-") -> Harness.OpenCode
-        agentId.startsWith("managed-") -> Harness.Managed
         // Pi names its sessions from the runtime's own id, which carries no
         // prefix, so the display name is the only thing left to read.
         name.startsWith("Pi ") || name.startsWith("Pi·") -> Harness.Pi

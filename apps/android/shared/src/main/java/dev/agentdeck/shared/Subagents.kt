@@ -12,13 +12,24 @@ data class SubagentRun(
     val id: String,
     /** The runtime's own word for it - "general-purpose", "Explore". */
     val type: String,
+    /**
+     * What the run was asked to do - "Fix lint in apps/server". The spawn
+     * event carries it; sessions observed by an older adapter have none.
+     */
+    val name: String? = null,
     val startedAt: String,
     val lastAt: String,
     /** What it is doing, or the last thing it did. */
     val activity: String,
     val eventCount: Int,
     val finished: Boolean,
-)
+) {
+    /**
+     * What a row or lens header calls this run. Five parallel
+     * "general-purpose" runs are told apart by their errand, not their kind.
+     */
+    val title: String get() = name ?: type
+}
 
 /** The hook publishes a subagent's last breath under this summary. */
 private fun isCompletion(event: AgentEvent) =
@@ -44,6 +55,7 @@ fun subagentRuns(events: List<AgentEvent>): List<SubagentRun> {
             id = id,
             type = ordered.firstNotNullOfOrNull { it.subagentType }?.takeIf { it.isNotBlank() }
                 ?: "Subagent",
+            name = ordered.firstNotNullOfOrNull { it.subagentName?.takeIf(String::isNotBlank) },
             startedAt = ordered.first().createdAt,
             lastAt = last.createdAt,
             // A completion event's summary is "<type> subagent finished", which

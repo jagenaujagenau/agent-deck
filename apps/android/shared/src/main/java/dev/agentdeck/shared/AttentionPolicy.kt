@@ -25,6 +25,12 @@ object AttentionPolicy {
     private fun attentionKey(agent: Agent): String? {
         approvalKey(agent)?.let { return it }
         if (agent.state != "waiting") return null
+        // The durable request carries an expiry the event window never had.
+        agent.pendingQuestion?.let { question ->
+            val valid = runCatching { Instant.parse(question.expiresAt).isAfter(Instant.now()) }
+                .getOrDefault(true)
+            return if (valid) "${agent.id}:${question.id}" else null
+        }
         return agent.events.maxByOrNull { it.createdAt }?.takeIf { it.kind == "question" }?.let { "${agent.id}:${it.id}" }
     }
 

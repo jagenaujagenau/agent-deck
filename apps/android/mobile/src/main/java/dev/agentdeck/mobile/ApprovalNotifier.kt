@@ -74,7 +74,7 @@ internal object ApprovalNotifier {
         )
         val approval = agent.pendingApproval
         val question = agent.events.maxByOrNull { it.createdAt }?.takeIf { it.kind == "question" }
-        val detail = approval?.detail ?: question?.detail ?: agent.task
+        val detail = approval?.detail ?: agent.pendingQuestion?.question ?: question?.detail ?: agent.task
         val builder = Notification.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(if (approval != null) "${agent.name} needs approval" else "${agent.name} has a question")

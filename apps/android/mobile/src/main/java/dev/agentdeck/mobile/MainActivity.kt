@@ -162,7 +162,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        ForegroundSession.foreground = true
         deckViewModel.onForeground()
+    }
+
+    override fun onPause() {
+        // The completion notifier stays quiet for the session on screen; a
+        // backgrounded app has no session on screen, whatever was open in it.
+        ForegroundSession.foreground = false
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -178,6 +186,21 @@ class MainActivity : ComponentActivity() {
 
 /** Actions that carry words for the model, as opposed to a control decision. */
 private val MESSAGE_ACTIONS = setOf("prompt", "steer", "follow_up")
+
+/**
+ * A message the bridge refused because the session is blocked on a person.
+ *
+ * Holds everything a "Send anyway" needs to resend verbatim, plus the
+ * bridge's own sentence about what is pending. `at` exists so a second
+ * identical refusal still reads as a new event to the composer.
+ */
+internal data class BlockedCommand(
+    val agentId: String,
+    val action: String,
+    val value: String?,
+    val detail: String,
+    val at: Long = System.currentTimeMillis(),
+)
 
 class DeckViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("bridge", 0)
@@ -278,9 +301,15 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
     /** What became of the last message: set only when it did not simply go through. */
     val commandNotice = _commandNotice.asStateFlow()
 
-    fun control(agent: Agent, action: String, value: String? = null) = viewModelScope.launch {
+    private val _commandBlocked = MutableStateFlow<BlockedCommand?>(null)
+
+    /** The last message the bridge refused for a blocked session, until resolved or resent. */
+    internal val commandBlocked = _commandBlocked.asStateFlow()
+
+    fun control(agent: Agent, action: String, value: String? = null, force: Boolean = false) = viewModelScope.launch {
         _commandInFlight.value = agent.id
-        runCatching { repository.control(agent.id, action, value) }
+        _commandBlocked.value = null
+        runCatching { repository.control(agent.id, action, value, force = force) }
             .onSuccess {
                 _commandError.value = null
                 // The bridge accepting a message is not the session receiving
@@ -290,10 +319,42 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
                     if (action in MESSAGE_ACTIONS) deliveryNotice(agent.state) else null
             }
             .onFailure {
-                _commandError.value = it.message ?: "Command delivery failed"
+                // A blocked refusal keeps the words: the draft goes back into
+                // the composer with the bridge's reason beside it, instead of
+                // vanishing into a generic error line.
+                if (it is AgentBlockedException && action in MESSAGE_ACTIONS) {
+                    _commandBlocked.value = BlockedCommand(agent.id, action, value, it.message ?: "This agent is waiting on an approval or question.")
+                    _commandError.value = null
+                } else {
+                    _commandError.value = it.message ?: "Command delivery failed"
+                }
                 _commandNotice.value = null
             }
         _commandInFlight.value = null
+    }
+
+    /** Resends the refused message with `force`, the one explicit way past a blocked session. */
+    fun sendAnyway(agent: Agent) {
+        val blocked = _commandBlocked.value?.takeIf { it.agentId == agent.id } ?: return
+        control(agent, blocked.action, blocked.value, force = true)
+    }
+
+    private val seenStore = SeenStore(application)
+    private val _seenMarks = MutableStateFlow(seenStore.all())
+
+    /** This phone's own read marks; the watch keeps its own, and neither trusts the other's. */
+    val seenMarks = _seenMarks.asStateFlow()
+
+    /** Called only from an open session screen - opening the deck list marks nothing. */
+    fun markSeen(agent: Agent) {
+        val at = latestActivityAt(agent)
+        if (seenCovers(_seenMarks.value[agent.id], at)) return
+        seenStore.markSeen(agent.id, at)
+        _seenMarks.update { it + (agent.id to at) }
+        // Echo the read to the bridge, so the other surfaces drop their badges
+        // too. The local mark already applied; a bridge that cannot be reached
+        // costs only that echo, so the failure is swallowed.
+        viewModelScope.launch { runCatching { client.markSeen(agent.id) } }
     }
 
     private val _sessionChanges = MutableStateFlow<Map<String, List<AgentEvent>>>(emptyMap())
@@ -337,6 +398,61 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
         _commandInFlight.value = null
     }
 
+    // MARK: - Start a session
+
+    private val _managedRuntimes = MutableStateFlow<List<ManagedRuntime>>(emptyList())
+    val managedRuntimes = _managedRuntimes.asStateFlow()
+
+    private val _startingSession = MutableStateFlow(false)
+    val startingSession = _startingSession.asStateFlow()
+
+    private val _startError = MutableStateFlow<String?>(null)
+    val startError = _startError.asStateFlow()
+
+    /** Which runtimes the bridge can host, so the start sheet only shows what is real. */
+    fun loadManagedRuntimes() = viewModelScope.launch {
+        runCatching { repository.managedRuntimes() }
+            .onSuccess { _managedRuntimes.value = it }
+    }
+
+    /**
+     * Starts a bridge-hosted Claude session. The `cwd` is a path on the bridge's
+     * machine, so the caller offers only project roots the bridge has already
+     * served - the ones a running session proved it could reach.
+     */
+    fun startManagedSession(
+        cwd: String,
+        project: String,
+        objective: String,
+        prompt: String,
+        permissionMode: String?,
+        onResult: (Boolean, String?) -> Unit,
+    ) = viewModelScope.launch {
+        if (cwd.isBlank() || project.isBlank()) {
+            onResult(false, "A project and a working directory are required")
+            return@launch
+        }
+        _startingSession.value = true
+        _startError.value = null
+        runCatching {
+            repository.startManagedSession(
+                ManagedSessionRequest(
+                    project = project.trim(),
+                    cwd = cwd.trim(),
+                    objective = objective.trim().ifBlank { null },
+                    prompt = prompt.trim().ifBlank { null },
+                    permissionMode = permissionMode,
+                ),
+            )
+        }.onSuccess {
+            _startingSession.value = false
+            onResult(true, it.agentId)
+        }.onFailure {
+            _startingSession.value = false
+            _startError.value = it.message ?: "Could not start the session"
+            onResult(false, it.message ?: "Could not start the session")
+        }
+    }
 }
 
 @Composable
@@ -377,10 +493,13 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
     val busyAgent by vm.commandInFlight.collectAsStateWithLifecycle()
     val commandError by vm.commandError.collectAsStateWithLifecycle()
     val commandNotice by vm.commandNotice.collectAsStateWithLifecycle()
+    val commandBlocked by vm.commandBlocked.collectAsStateWithLifecycle()
     val analyticsState by vm.analyticsState.collectAsStateWithLifecycle()
     val archivedAgents by vm.archivedAgents.collectAsStateWithLifecycle()
+    val seenMarks by vm.seenMarks.collectAsStateWithLifecycle()
     var destination by rememberSaveable { mutableStateOf(DeckDestination.Agents) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var startOpen by remember { mutableStateOf(false) }
     var selectedAgent by remember { mutableStateOf<Agent?>(null) }
     var filter by rememberSaveable { mutableStateOf(HomeFilter.Now) }
 
@@ -400,12 +519,21 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
     val sessionHistory by vm.sessionHistory.collectAsStateWithLifecycle()
     val slashCommands by vm.slashCommands.collectAsStateWithLifecycle()
     val openAgent = selectedAgent?.let { selected -> snapshot?.agents?.firstOrNull { it.id == selected.id } }
+    // The completion notifier stays quiet only for the session actually on
+    // screen; the deck list on screen silences nothing.
+    LaunchedEffect(openAgent?.id) { ForegroundSession.openAgentId = openAgent?.id }
     if (openAgent != null) {
+        // Being on this screen is what "seen" means - and staying on it keeps
+        // the mark current as the session produces more. Nothing else marks:
+        // the deck list, the widget and the notifiers are machine reads.
+        LaunchedEffect(openAgent.id, latestActivityAt(openAgent)) { vm.markSeen(openAgent) }
         AgentSessionView(
             agent = openAgent,
             busy = busyAgent == openAgent.id,
             commandError = commandError,
             commandNotice = commandNotice,
+            commandBlocked = commandBlocked?.takeIf { it.agentId == openAgent.id },
+            onSendAnyway = { vm.sendAnyway(openAgent) },
             onDismiss = { selectedAgent = null },
             archived = agentArchiveKey(openAgent) in archivedAgents,
             onArchiveToggle = {
@@ -437,6 +565,10 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                 },
                 onSettings = { settingsOpen = true },
                 onRefresh = vm::refresh,
+                onStart = {
+                    vm.loadManagedRuntimes()
+                    startOpen = true
+                },
             )
         },
     ) { padding ->
@@ -457,9 +589,10 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                 val boardAgents = unarchivedAgents(data.agents, archivedAgents)
                 val homeNow = Instant.now()
                 val filtered = homeAgentOrder(
-                    data.agents.filter { agent -> filter.includes(homeAgentState(agent, agentArchiveKey(agent) in archivedAgents, homeNow)) },
+                    data.agents.filter { agent -> filter.includes(homeAgentState(agent, agentArchiveKey(agent) in archivedAgents, homeNow, agentSeen(agent, seenMarks))) },
                     archivedAgents,
                     homeNow,
+                    seenMarks,
                 )
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -493,7 +626,7 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                         item { OfflineBanner((state as BridgeState.Failed).message) }
                     }
                     HomeAgentState.entries.forEach { homeState ->
-                        val stateAgents = filtered.filter { homeAgentState(it, agentArchiveKey(it) in archivedAgents, homeNow) == homeState }
+                        val stateAgents = filtered.filter { homeAgentState(it, agentArchiveKey(it) in archivedAgents, homeNow, agentSeen(it, seenMarks)) == homeState }
                         if (stateAgents.isNotEmpty()) {
                             item(key = "state:${homeState.name}") { HomeStateHeader(homeState, stateAgents.size) }
                             stateAgents.groupBy { it.project }.entries.sortedBy { it.key.lowercase() }.forEach { (projectName, agents) ->
@@ -528,6 +661,24 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                 if (success) settingsOpen = false
             }
         }
+    }
+
+    if (startOpen) {
+        StartSessionSheet(
+            projects = snapshot?.agents?.map { it.project }?.filter { it.isNotBlank() }?.distinct() ?: emptyList(),
+            starting = vm.startingSession.collectAsStateWithLifecycle().value,
+            error = vm.startError.collectAsStateWithLifecycle().value,
+            onDismiss = { startOpen = false },
+            onStart = { cwd, project, objective, prompt, permission, onResult ->
+                vm.startManagedSession(cwd, project, objective, prompt, permission) { success, agentId ->
+                    onResult(success, agentId)
+                    if (success) {
+                        startOpen = false
+                        agentId?.let { id -> snapshot?.agents?.firstOrNull { it.id == id }?.let { selectedAgent = it } }
+                    }
+                }
+            },
+        )
     }
 }
 
@@ -889,7 +1040,7 @@ private fun formatMoney(value: Double): String = if (value < 0.01 && value > 0) 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DeckTopBar(connected: Boolean, bridgeName: String, onSettings: () -> Unit, onRefresh: () -> Unit) {
+private fun DeckTopBar(connected: Boolean, bridgeName: String, onSettings: () -> Unit, onRefresh: () -> Unit, onStart: () -> Unit) {
     TopAppBar(
         // The product's name, set like one. It used to be a 12sp all-caps
         // label with the bridge underneath, which read as a system tray rather
@@ -907,6 +1058,7 @@ private fun DeckTopBar(connected: Boolean, bridgeName: String, onSettings: () ->
             )
         },
         actions = {
+            IconButton(onClick = onStart) { Icon(Icons.Rounded.Add, "Start a session") }
             IconButton(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, "Refresh") }
             IconButton(onClick = onSettings) { Icon(Icons.Rounded.Tune, "Bridge settings") }
         },
@@ -954,6 +1106,8 @@ private fun HomeStateHeader(state: HomeAgentState, count: Int) {
         state == HomeAgentState.Failed -> Danger
         state.attention -> Amber
         state == HomeAgentState.Running -> Signal
+        // Done shares completion's blue: it is the same news, just unread.
+        state == HomeAgentState.Done -> Blue
         state == HomeAgentState.RecentlyCompleted -> Blue
         else -> Muted
     }
@@ -990,7 +1144,7 @@ private data class ProviderIdentity(val name: String, val model: String, val col
  * "Agent" on the phone while the widget named them correctly, because the
  * widget asked the shared derivation and this did not.
  */
-private fun harnessFor(agent: Agent) = when (Harnesses.of(agent.id, agent.name)) {
+private fun harnessFor(agent: Agent) = when (Harnesses.of(agent)) {
     Harness.Pi -> AgentHarness.Pi
     Harness.Claude -> AgentHarness.Claude
     Harness.Codex -> AgentHarness.Codex
@@ -1032,6 +1186,7 @@ private fun usefulTask(agent: Agent): String {
         // card's own corner already says which of the two this is, and the
         // prefix cost a third of the line that had the detail in it.
         agent.pendingApproval?.let { return it.detail }
+        agent.pendingQuestion?.let { return it.question.takeIf(String::isNotBlank) ?: "Agent has a question" }
         val latest = latestEvent(agent) { it.kind == "question" }
         if (latest != null) {
             // The summary is the question; the detail is the note explaining
@@ -1134,6 +1289,8 @@ private fun homeStateColor(state: HomeAgentState) = when {
     state == HomeAgentState.Failed -> Danger
     state.attention -> Amber
     state == HomeAgentState.Running -> Signal
+    // The "done" chip: completion's blue, on a full card, until it is read.
+    state == HomeAgentState.Done -> Blue
     state == HomeAgentState.RecentlyCompleted -> Blue
     else -> Muted
 }
@@ -1499,7 +1656,7 @@ private fun StatusLabel(state: String, color: Color) {
 private enum class AgentViewMode { Responses, Reasoning, Diff, Terminal }
 
 @Composable
-private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit) {
+private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit) {
     var mode by rememberSaveable(agent.id) { mutableStateOf(AgentViewMode.Responses) }
     // Opening a session is a request to read it, not to write to it. Focusing
     // the composer on arrival raised the keyboard over the lower half of the
@@ -1596,7 +1753,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                             Spacer(Modifier.width(9.dp))
                             Column(Modifier.weight(1f, fill = false)) {
                                 Text(
-                                    activeRun?.type ?: agent.project,
+                                    activeRun?.title ?: agent.project,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
@@ -1695,6 +1852,8 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                     pendingQuestion = pendingQuestion,
                     commandError = commandError,
                     commandNotice = commandNotice,
+                    commandBlocked = commandBlocked,
+                    onSendAnyway = onSendAnyway,
                     supports = supports,
                     slashCommands = slashCommands,
                     onControl = onControl,
@@ -1705,7 +1864,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                 )
                 AgentViewMode.Reasoning -> ReasoningView(viewedAgent, Modifier.weight(1f).navigationBarsPadding())
                 AgentViewMode.Diff -> DiffView(fileChanges, changesLoaded, Modifier.weight(1f).navigationBarsPadding())
-                AgentViewMode.Terminal -> TerminalView(viewedAgent, busy, commandError, commandNotice, supports, onControl, tabChosen, Modifier.weight(1f))
+                AgentViewMode.Terminal -> TerminalView(viewedAgent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, onControl, tabChosen, Modifier.weight(1f))
             }
         }
     }
@@ -1768,7 +1927,7 @@ private fun SubagentPicker(
             runs.forEach { run ->
                 Spacer(Modifier.height(8.dp))
                 SubagentRow(
-                    title = run.type,
+                    title = run.title,
                     subtitle = run.activity,
                     tint = Blue,
                     running = !run.finished,
@@ -1861,6 +2020,36 @@ private fun FloatingNotice(text: String, tint: Color) {
     }
 }
 
+/**
+ * The bridge's refusal to message a blocked session, in the session's own amber.
+ *
+ * It carries the bridge's sentence about what is pending, points at the
+ * approval or question card that owns the block, and offers the one explicit
+ * way past it. The refused words are already back in the field below.
+ */
+@Composable
+private fun BlockedSendNotice(detail: String, onSendAnyway: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = Amber.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, Amber.copy(alpha = 0.24f)),
+    ) {
+        Column(Modifier.padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 2.dp)) {
+            Text(detail, color = Amber, fontSize = 12.sp, lineHeight = 17.sp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Answer the pending card above first.",
+                    color = Muted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onSendAnyway) { Text("Send anyway", fontSize = 12.sp) }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SessionTabLabel(
     icon: ImageVector,
@@ -1899,6 +2088,8 @@ private fun ResponsesView(
     pendingQuestion: AgentEvent?,
     commandError: String?,
     commandNotice: String?,
+    commandBlocked: BlockedCommand?,
+    onSendAnyway: () -> Unit,
     supports: (String) -> Boolean,
     slashCommands: List<SlashCommand>,
     onControl: (String, String?) -> Unit,
@@ -2025,7 +2216,7 @@ private fun ResponsesView(
         // go to the session. Hiding the field said "you cannot reply" instead,
         // which is a bigger lie than the one it was avoiding; the placeholder
         // names where the message lands.
-        MessageComposer(agent, busy, commandError, commandNotice, supports, slashCommands, onControl, autoFocus, lensed)
+        MessageComposer(agent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, slashCommands, onControl, autoFocus, lensed)
     }
 }
 
@@ -2114,8 +2305,13 @@ private fun SlashCommandPicker(matches: List<SlashCommand>, onPick: (SlashComman
 }
 
 @Composable
-private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit, autoFocus: Boolean, lensed: Boolean = false) {
+private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit, autoFocus: Boolean, lensed: Boolean = false) {
     var message by rememberSaveable(agent.id) { mutableStateOf("") }
+    // A refused message is not a sent one: the words come back into the field
+    // so the draft survives the refusal, exactly as typed.
+    LaunchedEffect(commandBlocked) {
+        if (commandBlocked != null && message.isBlank()) message = commandBlocked.value.orEmpty()
+    }
     val composerFocus = remember { FocusRequester() }
     // Switching to a view that can be typed into means wanting to type into it.
     // Arriving at the session does not - so this waits for a deliberate tab
@@ -2140,8 +2336,9 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
                 Text("No commands reported by this runtime.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
             }
             // Over the conversation now, so each notice carries its own ground.
-            commandError?.let { FloatingNotice(it, Danger) }
-            if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
+            commandBlocked?.let { BlockedSendNotice(it.detail, onSendAnyway) }
+            if (commandBlocked == null) commandError?.let { FloatingNotice(it, Danger) }
+            if (commandBlocked == null && commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
@@ -2498,6 +2695,8 @@ private fun TerminalView(
     busy: Boolean,
     commandError: String?,
     commandNotice: String?,
+    commandBlocked: BlockedCommand?,
+    onSendAnyway: () -> Unit,
     supports: (String) -> Boolean,
     onControl: (String, String?) -> Unit,
     autoFocus: Boolean,
@@ -2679,7 +2878,7 @@ private fun TerminalView(
             ),
             modifier = Modifier.padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
         )
-        TerminalCommandComposer(agent, busy, commandError, commandNotice, supports, onControl, autoFocus)
+        TerminalCommandComposer(agent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, onControl, autoFocus)
     }
 }
 
@@ -2689,6 +2888,8 @@ private fun TerminalCommandComposer(
     busy: Boolean,
     commandError: String?,
     commandNotice: String?,
+    commandBlocked: BlockedCommand?,
+    onSendAnyway: () -> Unit,
     supports: (String) -> Boolean,
     onControl: (String, String?) -> Unit,
     autoFocus: Boolean,
@@ -2705,8 +2906,11 @@ private fun TerminalCommandComposer(
     // terminal window is a chat box wearing a monospace font.
     var focused by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
-        commandError?.let { FloatingNotice(it, Danger) }
-        if (commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
+        // The refused instruction rides in commandBlocked and "Send anyway"
+        // resends it verbatim, so the prompt line itself stays untouched.
+        commandBlocked?.let { BlockedSendNotice(it.detail, onSendAnyway) }
+        if (commandBlocked == null) commandError?.let { FloatingNotice(it, Danger) }
+        if (commandBlocked == null && commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2964,6 +3168,139 @@ private fun ConnectionDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         containerColor = SurfaceRaised,
     )
+}
+
+/**
+ * Start a bridge-hosted Claude session from the phone.
+ *
+ * The `cwd` is a path on the bridge's machine, not this one, so it is typed
+ * rather than browsed: a person knows their own project roots, and the bridge
+ * is the one that has to find the directory. The project names already on the
+ * deck are offered as completions, because they are the work this bridge runs.
+ */
+@Composable
+private fun StartSessionSheet(
+    projects: List<String>,
+    starting: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onStart: (cwd: String, project: String, objective: String, prompt: String, permissionMode: String?, (Boolean, String?) -> Unit) -> Unit,
+) {
+    var project by remember { mutableStateOf("") }
+    var cwd by remember { mutableStateOf("") }
+    var objective by remember { mutableStateOf("") }
+    var prompt by remember { mutableStateOf("") }
+    var permission by remember { mutableStateOf("default") }
+    var fieldError by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = { if (!starting) onDismiss() },
+        icon = { Icon(Icons.Rounded.PlayCircle, null, tint = Signal) },
+        title = { Text("Start a session") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("The bridge runs this session itself, so it stays on when no terminal is watching.", color = Muted)
+                OutlinedTextField(
+                    value = project,
+                    onValueChange = { project = it; fieldError = null },
+                    label = { Text("Project") },
+                    singleLine = true,
+                    enabled = !starting,
+                    shape = RoundedCornerShape(14.dp),
+                )
+                // The project names this bridge already serves, as quick fills.
+                if (projects.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        projects.take(8).forEach { name ->
+                            AssistChip(
+                                onClick = { if (!starting) project = name; fieldError = null },
+                                label = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                shape = CircleShape,
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = cwd,
+                    onValueChange = { cwd = it; fieldError = null },
+                    label = { Text("Working directory") },
+                    placeholder = { Text("/absolute/path/on/the/bridge", color = Muted.copy(alpha = 0.6f)) },
+                    singleLine = true,
+                    enabled = !starting,
+                    shape = RoundedCornerShape(14.dp),
+                    supportingText = { Text("An absolute path on the bridge's machine.") },
+                )
+                OutlinedTextField(
+                    value = objective,
+                    onValueChange = { objective = it },
+                    label = { Text("Objective") },
+                    placeholder = { Text("What this session is for", color = Muted.copy(alpha = 0.6f)) },
+                    singleLine = true,
+                    enabled = !starting,
+                    shape = RoundedCornerShape(14.dp),
+                )
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    label = { Text("First message") },
+                    placeholder = { Text("Sent the moment the session starts", color = Muted.copy(alpha = 0.6f)) },
+                    enabled = !starting,
+                    shape = RoundedCornerShape(14.dp),
+                    minLines = 1,
+                    maxLines = 4,
+                )
+                Text("Permission mode", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp, color = Muted)
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ManagedPermission.entries.forEach { mode ->
+                        FilterChip(
+                            selected = permission == mode.wire,
+                            onClick = { if (!starting) permission = mode.wire },
+                            shape = CircleShape,
+                            label = { Text(mode.label) },
+                        )
+                    }
+                }
+                if (fieldError != null || error != null) {
+                    Text(fieldError ?: error ?: "", color = Danger, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (project.isBlank() || cwd.isBlank()) {
+                        fieldError = "A project and a working directory are required"
+                        return@Button
+                    }
+                    if (!cwd.startsWith("/")) {
+                        fieldError = "The working directory must be an absolute path"
+                        return@Button
+                    }
+                    onStart(cwd, project, objective, prompt, permission) { success, message ->
+                        if (!success) fieldError = message
+                    }
+                },
+                enabled = !starting,
+            ) {
+                if (starting) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text("Start")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !starting) { Text("Cancel") } },
+        containerColor = SurfaceRaised,
+    )
+}
+
+private enum class ManagedPermission(val wire: String, val label: String) {
+    Default("default", "Ask"),
+    AcceptEdits("acceptEdits", "Auto-edit"),
+    Plan("plan", "Plan"),
+    Auto("auto", "Auto"),
 }
 
 @Composable

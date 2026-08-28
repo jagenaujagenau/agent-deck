@@ -70,8 +70,11 @@ class BridgeMonitorService : Service() {
                 WearBridgeRelay.publish(this@BridgeMonitorService, snapshot)
                 val waiting = visibleSnapshot.agents.filter { it.state == "waiting" }
                 val approvals = waiting.count { it.pendingApproval != null }
-                val questions = waiting.count { agent -> agent.events.maxByOrNull { it.createdAt }?.kind == "question" }
+                val questions = waiting.count { agent -> agent.pendingQuestion != null || agent.events.maxByOrNull { it.createdAt }?.kind == "question" }
                 ApprovalNotifier.reconcile(this@BridgeMonitorService, snapshot.agents)
+                // Archived sessions are already filtered out: finishing while
+                // archived is not news anyone asked to hear.
+                CompletionNotifier.reconcile(this@BridgeMonitorService, visibleSnapshot.agents, scope)
                 DeckWidgetUpdater.onSnapshot(this@BridgeMonitorService, snapshot)
                 val status = when {
                     approvals > 0 -> "$approvals approval${if (approvals == 1) "" else "s"} waiting"

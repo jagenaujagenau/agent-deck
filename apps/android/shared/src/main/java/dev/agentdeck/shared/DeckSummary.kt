@@ -89,7 +89,7 @@ object DeckSummaries {
                     agentId = agent.id,
                     project = agent.project.ifBlank { agent.name },
                     detail = detailFor(agent),
-                    harness = Harnesses.of(agent.id, agent.name),
+                    harness = Harnesses.of(agent),
                     needsYou = agent.state == "waiting",
                 )
             },

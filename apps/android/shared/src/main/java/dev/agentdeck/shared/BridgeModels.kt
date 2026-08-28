@@ -69,10 +69,15 @@ data class Agent(
     val processedTokens: Long? = null,
     val costUsd: Double,
     val lastSeenAt: String,
+    /** The last moment a person looked at this session on any surface, by the bridge's account. */
+    val viewedAt: String? = null,
+    /** The adapter's own word for its runtime — "claude", "codex", "opencode", "pi". */
+    val runtime: String? = null,
     val events: List<AgentEvent> = emptyList(),
     val capabilities: List<String>? = null,
     val rateLimits: List<RateLimitWindow> = emptyList(),
     val pendingApproval: PendingApproval? = null,
+    val pendingQuestion: PendingQuestion? = null,
 )
 
 @Serializable
@@ -96,10 +101,21 @@ data class AgentEvent(
      */
     val subagentId: String? = null,
     val subagentType: String? = null,
+    /** What the run was asked to do - the Task call's own wording. */
+    val subagentName: String? = null,
 )
 
 @Serializable
 data class PendingApproval(val id: String, val tool: String, val detail: String, val createdAt: String, val expiresAt: String)
+
+@Serializable
+data class PendingQuestion(
+    val id: String,
+    val question: String,
+    val options: List<String> = emptyList(),
+    val createdAt: String,
+    val expiresAt: String,
+)
 
 @Serializable
 data class RateLimitWindow(val id: String, val label: String, val usedPercent: Double, val resetsAt: String? = null, val account: String? = null, val runtime: String? = null)
@@ -147,7 +163,17 @@ sealed interface AnalyticsState {
 }
 
 @Serializable
-data class ControlRequest(val action: String, val value: String? = null, val commandId: String? = null)
+data class ControlRequest(
+    val action: String,
+    val value: String? = null,
+    val commandId: String? = null,
+    /** Overrides the bridge's refusal to message a session blocked on an approval or question. */
+    val force: Boolean? = null,
+)
+
+/** The body of a bridge refusal, such as the 409 for messaging a blocked session. */
+@Serializable
+data class ControlRefusal(val error: String? = null, val detail: String? = null)
 
 @Serializable
 data class ManagedResolutionRequest(val status: String, val value: Map<String, String>)
@@ -168,3 +194,39 @@ sealed interface BridgeState {
     data class Ready(val snapshot: BridgeSnapshot, val refreshedAt: Long = System.currentTimeMillis()) : BridgeState
     data class Failed(val message: String, val previous: BridgeSnapshot? = null) : BridgeState
 }
+
+/** One runtime the bridge can host and run itself, rather than only observe. */
+@Serializable
+data class ManagedRuntime(
+    val runtime: String,
+    val capabilities: List<String> = emptyList(),
+    val managed: Boolean = true,
+)
+
+@Serializable
+data class ManagedRuntimes(val runtimes: List<ManagedRuntime> = emptyList())
+
+/**
+ * Body for starting a bridge-hosted session. The `cwd` must be absolute and
+ * exist on the bridge's machine, so a surface offers only paths it already saw
+ * a session run in - the ones the bridge has proven it can reach.
+ */
+@Serializable
+data class ManagedSessionRequest(
+    val project: String,
+    val cwd: String,
+    val model: String? = null,
+    val objective: String? = null,
+    val prompt: String? = null,
+    val permissionMode: String? = null,
+)
+
+/** What a caller gets back once a hosted session is running. */
+@Serializable
+data class StartedManagedSession(
+    val agentId: String,
+    val providerSessionId: String? = null,
+    val project: String,
+    val model: String,
+    val permissionMode: String,
+)

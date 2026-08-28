@@ -13,6 +13,7 @@ class SubagentsTest {
         subagentId: String? = null,
         subagentType: String? = null,
         tool: String? = null,
+        subagentName: String? = null,
     ) = AgentEvent(
         id = id,
         kind = "output",
@@ -21,7 +22,21 @@ class SubagentsTest {
         tool = tool,
         subagentId = subagentId,
         subagentType = subagentType,
+        subagentName = subagentName,
     )
+
+    @Test
+    fun `a named run is titled by its errand, an unnamed one by its kind`() {
+        val events = listOf(
+            // The spawn event arrives from the daemon with the Task call's wording.
+            event("1", "Fix lint in apps/server", "2026-08-26T10:00:00Z", "aaa", subagentName = "Fix lint in apps/server", tool = "Task"),
+            event("2", "Using Read", "2026-08-26T10:00:10Z", "aaa", "general-purpose"),
+            // A session observed by an older adapter never gets a spawn event.
+            event("3", "Using Grep", "2026-08-26T10:00:20Z", "bbb", "Explore"),
+        )
+        val runs = subagentRuns(events)
+        assertEquals(listOf("Fix lint in apps/server", "Explore"), runs.map { it.title })
+    }
 
     @Test
     fun `the parent's own work belongs to no subagent`() {

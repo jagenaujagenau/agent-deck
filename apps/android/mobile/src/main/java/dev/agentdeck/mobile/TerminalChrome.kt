@@ -9,8 +9,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -204,7 +204,11 @@ internal fun PowerlineBar(
     modifier: Modifier = Modifier,
     arrow: Dp = 9.dp,
 ) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(-arrow),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         segments.forEachIndexed { index, cell ->
             PowerlineSegment(
                 text = cell.text,
@@ -212,10 +216,7 @@ internal fun PowerlineBar(
                 foreground = cell.foreground,
                 arrow = arrow,
                 onClick = cell.onClick,
-                modifier = Modifier
-                    .zIndex((segments.size - index).toFloat())
-                    .then(if (index == 0) Modifier else Modifier.padding(start = 0.dp))
-                    .absoluteOffset(x = if (index == 0) 0.dp else -arrow),
+                modifier = Modifier.zIndex((segments.size - index).toFloat()),
             )
         }
     }
