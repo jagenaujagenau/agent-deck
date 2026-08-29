@@ -3093,11 +3093,14 @@ private fun TerminalCommandComposer(
                     monospace = true,
                     focusRequester = composerFocus,
                 )
+                // The caret only stands in while the field is not focused; once
+                // it is, the text field draws a real one, and two cursors on a
+                // prompt is worse than none. It rests where an empty prompt's
+                // cursor rests — at the start, right after the $.
+                if (!focused && command.isEmpty()) {
+                    BlinkingCaret(Signal, Modifier.align(Alignment.CenterStart))
+                }
             }
-            // The caret only stands in while the field is not focused. Once it
-            // is, the text field draws a real one, and two cursors on a prompt
-            // is worse than none.
-            if (!focused && command.isEmpty()) BlinkingCaret(Signal)
             ComposerSendButton(
                 hasText = command.isNotBlank(),
                 busy = busy,

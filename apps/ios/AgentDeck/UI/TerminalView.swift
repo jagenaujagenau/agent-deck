@@ -233,12 +233,16 @@ struct TerminalView: View {
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .focused($promptFocused)
-                    // The caret only stands in while the field is not focused.
-                    // Once it is, the text field draws a real one, and two
-                    // cursors on a prompt is worse than none.
-                    if !promptFocused, command.isEmpty {
-                        BlinkingCaret(color: Palette.signal)
-                    }
+                        // The caret only stands in while the field is not
+                        // focused; once it is, the text field draws a real
+                        // one, and two cursors on a prompt is worse than none.
+                        // It rests where an empty prompt's cursor rests — at
+                        // the start, right after the $.
+                        .overlay(alignment: .leading) {
+                            if !promptFocused, command.isEmpty {
+                                BlinkingCaret(color: Palette.signal)
+                            }
+                        }
                     Button {
                         Task { await send(action: action) }
                     } label: {
