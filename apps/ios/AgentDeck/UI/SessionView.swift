@@ -867,18 +867,52 @@ private struct ConversationBubble: View {
             HStack(alignment: .top, spacing: 9) {
                 ProviderMark(model: model, harness: harness, diameter: 32)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(entry.content)
-                        .font(.system(size: 15))
-                        .lineSpacing(5)
-                        .foregroundStyle(Palette.text.opacity(0.92))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 11)
-                        .background(BubbleShape(tail: .leading).fill(Palette.surfaceRaised))
+                    VStack(alignment: .leading, spacing: 6) {
+                        // A report headline — a background task finishing, a
+                        // subagent's parting message — is machine-relayed, not
+                        // the agent freely speaking; the label says which.
+                        if let label = reportLabel {
+                            HStack(spacing: 5) {
+                                Image(systemName: "bolt.badge.clock")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Text(label)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(Palette.blue)
+                        }
+                        Text(markdown(entry.content))
+                            .font(.system(size: 15))
+                            .lineSpacing(5)
+                            .foregroundStyle(Palette.text.opacity(0.92))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        BubbleShape(tail: .leading)
+                            .fill(reportLabel == nil ? Palette.surfaceRaised : Palette.blue.opacity(0.08))
+                    )
                     timestamp
                 }
             }
         }
+    }
+
+    /// The headline of a relayed report, or nil for the agent freely speaking.
+    private var reportLabel: String? {
+        let summary = entry.event.summary
+        return summary == "Response" || summary == "Message" ? nil : summary
+    }
+
+    /// Inline markdown only: bold, italic, code, and links render; block
+    /// structure stays as written, and anything unparsable falls back to the
+    /// literal text rather than a blank bubble.
+    private func markdown(_ content: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: content,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(content)
     }
 
     private var timestamp: some View {

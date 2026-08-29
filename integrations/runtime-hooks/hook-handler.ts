@@ -51,6 +51,7 @@ import {
   type CommandQueue,
 } from "./remote-messages";
 import { parseHookPayload, type ToolArguments } from "./hook-input";
+import { parseTaskNotification } from "./task-notification";
 import {
   changedPaths,
   diffForPath,
@@ -733,9 +734,14 @@ async function handle(
         })
         .catch(() => {});
       break;
-    case "UserPromptSubmit":
+    case "UserPromptSubmit": {
       state.state = "running";
-      state.objective = clip(input.prompt ?? "Received instruction", 500);
+      // The harness injects background-task reports as user turns because that
+      // is the only shape it can inject one in. Nobody typed those: the raw
+      // XML must not become the card's headline or a chat bubble — the
+      // transcript tail publishes the parsed, agent-voiced form.
+      const notification = parseTaskNotification(input.prompt ?? "");
+      state.objective = clip(notification?.summary ?? input.prompt ?? "Received instruction", 500);
       state.task = state.objective;
       state.activeTurnId = crypto.randomUUID();
       await publishRuntime(
@@ -747,9 +753,11 @@ async function handle(
       // The transcript tail republishes the same turn under its transcript id a
       // moment later; the surfaces' close-in-time fold collapses the pair, the
       // same way it already collapsed the string-typed thought this replaces.
-      await publish("user", "Message", (input.prompt ?? state.task).trim(), {
-        id: `user:${agentId}:${state.activeTurnId}`,
-      }).catch(() => {});
+      if (notification === undefined) {
+        await publish("user", "Message", (input.prompt ?? state.task).trim(), {
+          id: `user:${agentId}:${state.activeTurnId}`,
+        }).catch(() => {});
+      }
       {
         // Anything queued from the app while this session sat idle has had no
         // delivery point - Stop fires at the end of a turn and an idle session
@@ -759,6 +767,7 @@ async function handle(
         if (queued.length > 0) emit(promptContext(queued));
       }
       break;
+    }
     case "PreToolUse": {
       // The file still holds its old contents here; snapshot it so PostToolUse can produce a real
       // diff instead of reporting the whole new file as additions.
