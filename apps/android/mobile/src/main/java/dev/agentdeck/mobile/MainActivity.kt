@@ -2353,12 +2353,29 @@ private fun ConversationBubble(entry: ConversationEntry, provider: ProviderIdent
             Text(formatMessageTime(entry.event.createdAt), color = Muted.copy(alpha = 0.78f), fontSize = 10.sp, modifier = Modifier.padding(start = 5.dp, end = 5.dp, top = 3.dp))
         }
     } else {
+        // A report headline — a background task finishing, a subagent's
+        // parting message — is machine-relayed, not the agent freely speaking;
+        // the label says which. The wire carries the distinction as a summary
+        // that is a real headline instead of "Response".
+        val reportLabel = entry.event.summary.takeIf { it != "Response" && it != "Message" }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             ProviderMark(provider, 32.dp)
             Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.Start) {
-                Surface(shape = bubbleShape, color = SurfaceRaised, modifier = Modifier.fillMaxWidth()) {
-                    Box(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) { MarkdownResponse(entry.content) }
+                Surface(
+                    shape = bubbleShape,
+                    color = if (reportLabel != null) Blue.copy(alpha = 0.08f) else SurfaceRaised,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (reportLabel != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Icon(Icons.Rounded.Bolt, null, tint = Blue, modifier = Modifier.size(13.dp))
+                                Text(reportLabel, color = Blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        MarkdownResponse(entry.content)
+                    }
                 }
                 Text(formatMessageTime(entry.event.createdAt), color = Muted.copy(alpha = 0.78f), fontSize = 10.sp, modifier = Modifier.padding(start = 5.dp, end = 5.dp, top = 3.dp))
             }
