@@ -1976,22 +1976,31 @@ private fun SubagentPicker(
                 lineHeight = 18.sp,
             )
             Spacer(Modifier.height(14.dp))
-            SubagentRow(
-                title = "Whole session",
-                subtitle = "Everything, including this session's own work",
-                tint = Signal,
-                running = false,
-                selected = selected == null,
-            ) { onPick(null) }
-            runs.forEach { run ->
-                Spacer(Modifier.height(8.dp))
-                SubagentRow(
-                    title = run.title,
-                    subtitle = run.activity,
-                    tint = Blue,
-                    running = !run.finished,
-                    selected = selected == run.id,
-                ) { onPick(run.id) }
+            // A busy session runs more lenses than a sheet is tall. The list
+            // scrolls under the fixed header; `fill = false` keeps a short
+            // list from stretching the sheet past its content.
+            LazyColumn(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item(key = "whole-session") {
+                    SubagentRow(
+                        title = "Whole session",
+                        subtitle = "Everything, including this session's own work",
+                        tint = Signal,
+                        running = false,
+                        selected = selected == null,
+                    ) { onPick(null) }
+                }
+                items(runs, key = { it.id }) { run ->
+                    SubagentRow(
+                        title = run.title,
+                        subtitle = run.activity,
+                        tint = Blue,
+                        running = !run.finished,
+                        selected = selected == run.id,
+                    ) { onPick(run.id) }
+                }
             }
         }
     }
