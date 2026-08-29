@@ -113,3 +113,19 @@ class AgentConversationTest {
         )
     }
 }
+
+class TaskNotificationPlumbingTest {
+    @org.junit.Test
+    fun `a raw task-notification never renders as the person speaking`() {
+        val entries = dev.agentdeck.shared.conversationEntries(
+            listOf(
+                dev.agentdeck.shared.AgentEvent(
+                    id = "n", kind = "user", summary = "Message",
+                    detail = "<task-notification>\n<task-id>x</task-id>\n</task-notification>",
+                    createdAt = "2026-08-29T10:00:00Z",
+                ),
+            ),
+        )
+        org.junit.Assert.assertTrue(entries.isEmpty())
+    }
+}

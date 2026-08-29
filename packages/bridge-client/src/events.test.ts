@@ -75,6 +75,18 @@ describe("conversationEntries", () => {
     expect(entries[0]?.role).toBe("agent");
   });
 
+  test("a raw task-notification never renders as the person speaking", () => {
+    const entries = conversationEntries([
+      event({
+        id: "n",
+        kind: "user",
+        summary: "Message",
+        detail: "<task-notification>\n<task-id>x</task-id>\n</task-notification>",
+      }),
+    ]);
+    expect(entries).toHaveLength(0);
+  });
+
   test("tool chatter stays out of the chat", () => {
     const entries = conversationEntries([
       event({ id: "t", kind: "tool", summary: "Bash", command: "ls" }),

@@ -79,6 +79,9 @@ export function conversationEntries(events: ReadonlyArray<AgentEvent>): Conversa
       // Back-compat: history written before user events were first-class.
       (event.kind === "thought" && event.summary === "Received instruction");
     const detail = (event.detail ?? "").trim();
+    // A raw task-notification is harness plumbing an older adapter published
+    // as the person speaking; the parsed, agent-voiced copy exists alongside.
+    if (userMessage && detail.startsWith("<task-notification>")) continue;
     let entry: ConversationEntry | undefined;
     if (userMessage && detail) {
       entry = { event, role: "user", content: detail };

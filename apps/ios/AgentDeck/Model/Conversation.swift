@@ -18,6 +18,9 @@ func conversationEntries(_ events: [AgentEvent]) -> [ConversationEntry] {
             || event.kind == "user"
             || (event.kind == "thought" && event.summary == "Received instruction")
         if userMessage, let detail = event.detail, !detail.trimmed.isEmpty {
+            // A raw task-notification is harness plumbing an older adapter
+            // published as the person speaking; the parsed copy exists alongside.
+            if detail.trimmed.hasPrefix("<task-notification>") { return nil }
             return ConversationEntry(event: event, role: .user, content: detail.trimmed)
         }
         guard isAgentResponse(event) else { return nil }

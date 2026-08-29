@@ -25,7 +25,11 @@ fun conversationEntries(events: List<AgentEvent>): List<ConversationEntry> {
         val userMessage = event.summary.startsWith("Remote command:") || event.kind == "user" ||
             (event.kind == "thought" && event.summary == "Received instruction")
         val agentResponse = isAgentResponse(event)
+        // A raw task-notification is harness plumbing an older adapter
+        // published as the person speaking; the parsed copy exists alongside.
+        val plumbing = userMessage && event.detail.orEmpty().trimStart().startsWith("<task-notification>")
         when {
+            plumbing -> null
             userMessage && !event.detail.isNullOrBlank() -> ConversationEntry(event, ConversationRole.User, event.detail.orEmpty().trim())
             agentResponse -> (event.detail ?: event.summary).trim().takeIf { it.isNotBlank() }
                 ?.let { ConversationEntry(event, ConversationRole.Agent, it) }
