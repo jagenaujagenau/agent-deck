@@ -95,6 +95,13 @@ type HookState = {
   tokens?: number;
   processedTokens?: number;
   activeTurnId?: string;
+  /**
+   * Subagents whose ids a tool hook has carried. Claude Code also runs
+   * internal utility sidechains — the prompt suggester, the away summarizer —
+   * and they fire SubagentStop like any subagent; never having worked is what
+   * tells them apart from a run worth reporting.
+   */
+  workedSubagents?: string[];
   transcriptPath?: string;
   transcriptOffset?: number;
   /** What the working tree looked like after the last shell command. */
@@ -286,6 +293,17 @@ async function handle(
   }
   state.project ??= detectedProject;
   state.cwd = cwd;
+  // Any event fired from inside a subagent proves that subagent really works;
+  // SubagentStop is excluded because Claude Code's internal utility sidechains
+  // (the prompt suggester, the away summarizer) fire only that. Written
+  // through immediately: the stop can arrive on the other serving path.
+  if (input.agentId && event !== "SubagentStop") {
+    const worked = state.workedSubagents ?? [];
+    if (!worked.includes(input.agentId)) {
+      state.workedSubagents = [...worked, input.agentId].slice(-50);
+      writeFileSync(statePath, JSON.stringify(state));
+    }
+  }
   state.name = `${runtimeTitle} · ${state.project} · ${sessionKey.slice(0, 4)}`;
   state.ownerPid = runtimeOwnerPid();
   state.capabilities = ["approve", "reject", "steer", "prompt", "follow_up"];
@@ -864,6 +882,12 @@ async function handle(
       // itself ending - so the state is deliberately left alone. Marking the
       // session idle here would report the parent as done while it is still
       // collecting results, which is the whole reason this event was worth adding.
+      // A sidechain that never produced a tool event is one of Claude Code's
+      // internal utilities — its "last words" are a prompt suggestion or an
+      // away summary, and publishing them painted machine text as the agent
+      // speaking in every chat. A real run's parting message still arrives
+      // via the parent transcript's Task result even when this is skipped.
+      if (!input.agentId || !(state.workedSubagents ?? []).includes(input.agentId)) break;
       const kind = input.agentType ?? "Subagent";
       state.task = clip(`${kind} subagent finished`, 180);
       // Claude Code hands us the parent's session id and the subagent's own id as
