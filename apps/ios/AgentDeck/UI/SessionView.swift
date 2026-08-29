@@ -203,12 +203,13 @@ struct SessionView: View {
         case .changes:
             DiffView(files: fileChanges, loaded: store.changesLoaded(agentId: agentId))
         case .terminal:
+            // The terminal is scrollback first: the keyboard rises only when
+            // the prompt itself is tapped, never on opening the tab.
             TerminalView(
                 agent: lensedAgent(agent),
                 events: shell(for: agent),
                 busy: $busy,
-                failure: $failure,
-                autoFocus: tabChosen
+                failure: $failure
             )
         }
     }

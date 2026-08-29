@@ -12,7 +12,6 @@ struct TerminalView: View {
     var events: [AgentEvent]
     @Binding var busy: Bool
     @Binding var failure: String?
-    var autoFocus: Bool
 
     @AppStorage("terminal.speed") private var speedRaw = TerminalTypeSpeed.normal.rawValue
     @State private var command = ""
@@ -63,7 +62,6 @@ struct TerminalView: View {
             guard !opened else { return }
             opened = true
             scrollback = Set(events.map(\.id))
-            if autoFocus { promptFocused = true }
         }
     }
 
@@ -192,8 +190,9 @@ struct TerminalView: View {
     /// rather than behind a menu.
     private var statusLine: some View {
         PowerlineBar(segments: [
-            PowerlineCell(text: String(agent.project.prefix(18)), background: Palette.signal, foreground: Palette.ink),
-            PowerlineCell(text: agent.state.uppercased(), background: Palette.surfaceRaised, foreground: sessionStateColor(agent.state)),
+            // The session's own header already names the project; the status
+            // line leads with the one fact that changes.
+            PowerlineCell(text: agent.state.uppercased(), background: Palette.signal, foreground: Palette.ink),
             PowerlineCell(text: "\(events.count) CMD", background: Palette.surface, foreground: Palette.muted),
             PowerlineCell(
                 text: "TYPE \(speed.label)",

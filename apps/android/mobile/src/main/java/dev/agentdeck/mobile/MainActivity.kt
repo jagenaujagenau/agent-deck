@@ -71,7 +71,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -1923,7 +1927,9 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                 )
                 AgentViewMode.Reasoning -> ReasoningView(viewedAgent, Modifier.weight(1f).navigationBarsPadding())
                 AgentViewMode.Diff -> DiffView(fileChanges, changesLoaded, Modifier.weight(1f).navigationBarsPadding())
-                AgentViewMode.Terminal -> TerminalView(viewedAgent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, onControl, tabChosen, Modifier.weight(1f))
+                // The terminal is scrollback first: the keyboard rises only
+                // when the prompt itself is tapped, never on opening the tab.
+                AgentViewMode.Terminal -> TerminalView(viewedAgent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, onControl, Modifier.weight(1f))
             }
         }
     }
@@ -2833,7 +2839,6 @@ private fun TerminalView(
     onSendAnyway: () -> Unit,
     supports: (String) -> Boolean,
     onControl: (String, String?) -> Unit,
-    autoFocus: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val events = remember(agent.events) { terminalEvents(agent.events) }
@@ -2960,25 +2965,27 @@ private fun TerminalView(
                                         // the whole block reflowing on every
                                         // frame like a paragraph being written.
                                         output.lines.forEachIndexed { index, text ->
-                                            Row {
-                                                Text(
-                                                    text,
-                                                    color = Text.copy(alpha = 0.92f),
-                                                    fontFamily = FontFamily.Monospace,
-                                                    fontSize = 14.sp,
-                                                    lineHeight = 21.sp,
-                                                    modifier = Modifier.weight(1f, fill = false),
-                                                )
-                                                // The caret sits on the line
-                                                // being written, and leaves
-                                                // when the command is whole -
-                                                // which is how a terminal shows
-                                                // the difference between
-                                                // working and finished.
-                                                if (output.typing && index == output.lines.lastIndex) {
-                                                    BlinkingCaret(Signal, width = 8.dp, height = 16.dp)
-                                                }
-                                            }
+                                            // The caret is a character in the
+                                            // line, not a widget beside it, so
+                                            // it sits exactly after what has
+                                            // printed even when the line wraps.
+                                            // Solid while printing; blinking is
+                                            // for waiting.
+                                            val caretHere = output.typing && index == output.lines.lastIndex
+                                            Text(
+                                                if (caretHere) {
+                                                    buildAnnotatedString {
+                                                        append(text)
+                                                        withStyle(SpanStyle(color = Signal)) { append("\u258A") }
+                                                    }
+                                                } else {
+                                                    AnnotatedString(text)
+                                                },
+                                                color = Text.copy(alpha = 0.92f),
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 14.sp,
+                                                lineHeight = 21.sp,
+                                            )
                                         }
                                         // What the command was fed, counted
                                         // rather than printed.
@@ -3022,10 +3029,11 @@ private fun TerminalView(
         // under the scrollback, above the prompt. The speed segment is the
         // control for the typing above - a terminal puts its settings in its
         // status line rather than in a menu.
+        // The session's own header already names the project; the status line
+        // leads with the one fact that changes — what the agent is doing.
         PowerlineBar(
             segments = listOfNotNull(
-                PowerlineCell(agent.project.take(18), Signal, Ink),
-                PowerlineCell(agent.state.uppercase(), SurfaceRaised, statusColor(agent.state)),
+                PowerlineCell(agent.state.uppercase(), Signal, Ink),
                 PowerlineCell("${events.size} CMD", Surface, Muted),
                 PowerlineCell("TYPE ${speed.label}", Surface, if (speed == TerminalTypeSpeed.Off) Muted else Blue) {
                     speed = speed.next()
@@ -3033,7 +3041,7 @@ private fun TerminalView(
             ),
             modifier = Modifier.padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
         )
-        TerminalCommandComposer(agent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, onControl, autoFocus)
+        TerminalCommandComposer(agent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, onControl)
     }
 }
 
@@ -3047,14 +3055,10 @@ private fun TerminalCommandComposer(
     onSendAnyway: () -> Unit,
     supports: (String) -> Boolean,
     onControl: (String, String?) -> Unit,
-    autoFocus: Boolean,
 ) {
     val action = remoteMessageAction(agent.state, supports) ?: return
     var command by rememberSaveable(agent.id) { mutableStateOf("") }
     val composerFocus = remember { FocusRequester() }
-    // As in the chat composer: a deliberate switch to this tab arms the focus,
-    // merely opening the session does not.
-    LaunchedEffect(Unit) { if (autoFocus) runCatching { composerFocus.requestFocus() } }
 
     // Not a pill. A terminal's prompt is a line at the bottom of the window,
     // flush with the scrollback above it - a floating rounded field inside a
