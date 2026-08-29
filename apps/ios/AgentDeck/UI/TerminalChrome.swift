@@ -144,16 +144,30 @@ private struct TypedCommandBody: View, Animatable {
 
     var body: some View {
         let shown = String(command.prefix(Int((Double(command.count) * progress).rounded())))
-        HStack(alignment: .top, spacing: 0) {
-            Text(shown)
-                .font(.system(size: 14, design: .monospaced))
-                .lineSpacing(4)
-                .foregroundStyle(Palette.text.opacity(0.92))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if shown.count < command.count {
-                BlinkingCaret(color: Palette.signal, width: 8, height: 16)
+        // The whole command reserves its height invisibly and the typing fills
+        // it in: the item never grows mid-animation, so the scroll that landed
+        // on this command's arrival is already looking at the caret. A solid
+        // block while printing is what a real terminal shows; blinking is for
+        // waiting.
+        Text(command)
+            .font(.system(size: 14, design: .monospaced))
+            .lineSpacing(4)
+            .opacity(0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .topLeading) {
+                Text(typedLine(shown, caret: shown.count < command.count))
+                    .font(.system(size: 14, design: .monospaced))
+                    .lineSpacing(4)
             }
-        }
+    }
+
+    private func typedLine(_ shown: String, caret: Bool) -> AttributedString {
+        var line = AttributedString(shown)
+        line.foregroundColor = Palette.text.opacity(0.92)
+        guard caret else { return line }
+        var block = AttributedString("\u{258A}")
+        block.foregroundColor = Palette.signal
+        return line + block
     }
 }
 

@@ -2845,17 +2845,31 @@ private fun TerminalView(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = events.lastIndex.coerceAtLeast(0))
     val scope = rememberCoroutineScope()
     var followNewest by remember(agent.id) { mutableStateOf(true) }
+    var userDragging by remember(agent.id) { mutableStateOf(false) }
     var initialPositionApplied by remember(agent.id) { mutableStateOf(false) }
     var newCommandsWaiting by remember(agent.id) { mutableStateOf(false) }
     LaunchedEffect(listState) {
         listState.interactionSource.interactions.collect { interaction ->
             when (interaction) {
-                is DragInteraction.Start -> followNewest = false
+                is DragInteraction.Start -> {
+                    userDragging = true
+                    followNewest = false
+                }
                 is DragInteraction.Stop, is DragInteraction.Cancel -> {
+                    userDragging = false
                     followNewest = !listState.canScrollForward
                     if (followNewest) newCommandsWaiting = false
                 }
             }
+        }
+    }
+    // Typing grows the last item a line at a time; without this correction the
+    // caret writes below the fold and the animation plays to nobody. Same rule
+    // the chat uses for streaming responses.
+    LaunchedEffect(listState, events.size) {
+        snapshotFlow { listState.canScrollForward }.distinctUntilChanged().collect { canScrollForward ->
+            if (!ResponseScrollPolicy.shouldCorrectLayoutGrowth(initialPositionApplied, followNewest, userDragging, canScrollForward)) return@collect
+            if (events.isNotEmpty()) listState.scrollToEnd(events.lastIndex)
         }
     }
     val newestKey = events.lastOrNull()?.let { listOf(it.id, it.command.hashCode(), events.size) }
@@ -2933,7 +2947,14 @@ private fun TerminalView(
                                 when (val line = remember(event.id, event.command) { terminalLine(event.command.orEmpty()) }) {
                                     is TerminalLine.FileWrite -> FileWriteLine(line, Modifier.weight(1f))
                                     is TerminalLine.Shell -> Column(Modifier.weight(1f)) {
-                                        val output = typedOutput(line.text, animate = event.id !in scrollback, speed = speed)
+                                        // Only the newest command types; a
+                                        // burst arriving together should not
+                                        // put three carets on screen at once.
+                                        val output = typedOutput(
+                                            line.text,
+                                            animate = event.id !in scrollback && event.id == events.lastOrNull()?.id,
+                                            speed = speed,
+                                        )
                                         // One Text per source line, so output
                                         // arrives a line at a time instead of
                                         // the whole block reflowing on every

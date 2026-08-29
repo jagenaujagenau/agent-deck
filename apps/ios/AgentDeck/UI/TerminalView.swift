@@ -139,9 +139,12 @@ struct TerminalView: View {
                             case .fileWrite(let verb, _):
                                 FileWriteLine(verb: verb, line: terminalLine(event.command ?? ""))
                             case .shell(let text):
+                                // Only the newest command types; a burst
+                                // arriving together should not put three
+                                // carets on screen at once.
                                 TypedCommand(
                                     command: text,
-                                    animate: !scrollback.contains(event.id),
+                                    animate: !scrollback.contains(event.id) && event.id == events.last?.id,
                                     speed: speed
                                 )
                             }
