@@ -68,6 +68,39 @@ fun subagentRuns(events: List<AgentEvent>): List<SubagentRun> {
     }.sortedBy { it.startedAt }
 }
 
+/** What the picker can narrow the run list to. */
+enum class SubagentFilter { All, Running, Done }
+
+/**
+ * Where the picker opens: on the running work when there is any, on everything
+ * otherwise. Mid-flight the reason to open the sheet is almost always a live
+ * lens; once everything has finished, it is review.
+ */
+fun defaultSubagentFilter(runs: List<SubagentRun>): SubagentFilter =
+    if (runs.any { !it.finished }) SubagentFilter.Running else SubagentFilter.All
+
+/**
+ * The runs a filter shows, grouped but never reshuffled: running above done,
+ * each group in the stable started order `subagentRuns` promises — a row only
+ * moves when its status actually changes. The selected run is always shown,
+ * whatever the filter: a picker must not hide the thing it has a check on.
+ */
+fun filteredSubagentRuns(
+    runs: List<SubagentRun>,
+    filter: SubagentFilter,
+    selectedId: String? = null,
+): List<SubagentRun> {
+    val visible = runs.filter { run ->
+        run.id == selectedId ||
+            when (filter) {
+                SubagentFilter.All -> true
+                SubagentFilter.Running -> !run.finished
+                SubagentFilter.Done -> run.finished
+            }
+    }
+    return visible.filter { !it.finished } + visible.filter { it.finished }
+}
+
 /**
  * The session as one subagent saw it.
  *

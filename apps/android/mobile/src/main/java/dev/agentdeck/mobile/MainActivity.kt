@@ -1965,6 +1965,12 @@ private fun SubagentPicker(
     onPick: (String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // Chosen once per opening: the sheet lands on the running work when there
+    // is any, and the person takes it from there.
+    var filter by remember { mutableStateOf(defaultSubagentFilter(runs)) }
+    val running = runs.count { !it.finished }
+    val done = runs.size - running
+    val shown = filteredSubagentRuns(runs, filter, selected)
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface) {
         Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp)) {
             Text("Subagents", style = MaterialTheme.typography.titleMedium)
@@ -1975,7 +1981,31 @@ private fun SubagentPicker(
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
+            SubagentRow(
+                title = "Whole session",
+                subtitle = "Everything, including this session's own work",
+                tint = Signal,
+                running = false,
+                selected = selected == null,
+            ) { onPick(null) }
+            // The chips carry counts so filtering is informed before a tap;
+            // they only appear once both statuses exist to filter between.
+            if (running > 0 && done > 0) {
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SubagentFilterChip("Running $running", filter == SubagentFilter.Running) {
+                        filter = SubagentFilter.Running
+                    }
+                    SubagentFilterChip("Done $done", filter == SubagentFilter.Done) {
+                        filter = SubagentFilter.Done
+                    }
+                    SubagentFilterChip("All ${runs.size}", filter == SubagentFilter.All) {
+                        filter = SubagentFilter.All
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
             // A busy session runs more lenses than a sheet is tall. The list
             // scrolls under the fixed header; `fill = false` keeps a short
             // list from stretching the sheet past its content.
@@ -1983,16 +2013,7 @@ private fun SubagentPicker(
                 modifier = Modifier.weight(1f, fill = false),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                item(key = "whole-session") {
-                    SubagentRow(
-                        title = "Whole session",
-                        subtitle = "Everything, including this session's own work",
-                        tint = Signal,
-                        running = false,
-                        selected = selected == null,
-                    ) { onPick(null) }
-                }
-                items(runs, key = { it.id }) { run ->
+                items(shown, key = { it.id }) { run ->
                     SubagentRow(
                         title = run.title,
                         subtitle = run.activity,
@@ -2003,6 +2024,24 @@ private fun SubagentPicker(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SubagentFilterChip(label: String, active: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(99.dp),
+        color = if (active) Blue.copy(alpha = 0.15f) else SurfaceRaised,
+        border = BorderStroke(1.dp, if (active) Blue.copy(alpha = 0.45f) else Line),
+    ) {
+        Text(
+            label,
+            color = if (active) Text else Muted,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
     }
 }
 

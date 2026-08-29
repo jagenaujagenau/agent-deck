@@ -151,3 +151,53 @@ class SubagentMessageTest {
         assertEquals(emptyList<ConversationEntry>(), conversationEntries(listOf(tool)))
     }
 }
+
+class SubagentFilterTest {
+    private fun run(id: String, finished: Boolean, startedAt: String) = SubagentRun(
+        id = id, type = "general-purpose", startedAt = startedAt, lastAt = startedAt,
+        activity = "working", eventCount = 1, finished = finished,
+    )
+
+    @org.junit.Test
+    fun `opens on running work when any is in flight, on everything otherwise`() {
+        org.junit.Assert.assertEquals(
+            SubagentFilter.Running,
+            defaultSubagentFilter(listOf(run("a", finished = false, "1"))),
+        )
+        org.junit.Assert.assertEquals(
+            SubagentFilter.All,
+            defaultSubagentFilter(listOf(run("a", finished = true, "1"))),
+        )
+    }
+
+    @org.junit.Test
+    fun `filters narrow, and running sits above done without reshuffling groups`() {
+        val runs = listOf(
+            run("done-early", finished = true, "1"),
+            run("live-1", finished = false, "2"),
+            run("done-late", finished = true, "3"),
+            run("live-2", finished = false, "4"),
+        )
+        org.junit.Assert.assertEquals(
+            listOf("live-1", "live-2", "done-early", "done-late"),
+            filteredSubagentRuns(runs, SubagentFilter.All).map { it.id },
+        )
+        org.junit.Assert.assertEquals(
+            listOf("live-1", "live-2"),
+            filteredSubagentRuns(runs, SubagentFilter.Running).map { it.id },
+        )
+        org.junit.Assert.assertEquals(
+            listOf("done-early", "done-late"),
+            filteredSubagentRuns(runs, SubagentFilter.Done).map { it.id },
+        )
+    }
+
+    @org.junit.Test
+    fun `the selected run is never hidden by a filter`() {
+        val runs = listOf(run("live", finished = false, "1"), run("read", finished = true, "2"))
+        org.junit.Assert.assertEquals(
+            listOf("live", "read"),
+            filteredSubagentRuns(runs, SubagentFilter.Running, selectedId = "read").map { it.id },
+        )
+    }
+}
