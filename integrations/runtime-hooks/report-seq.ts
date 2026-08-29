@@ -4,10 +4,11 @@ import { isJsonNumber, isJsonObject, parseJson } from "./json-value";
 /**
  * The per-session report counter both publishers share.
  *
- * Two processes report the same session: each hook invocation and the
- * long-lived daemon. Either can load the state file, lose the CPU while the
- * other advances the session, and then publish a state report the bridge has
- * no way to order. One counter in the shared state file gives the session a
+ * Two publishers report the same session: the event handler — run by the
+ * daemon's socket server, or by a hook process that fell back to local
+ * handling — and the daemon's own heartbeat loop. Either can load the state
+ * file, lose its turn while the other advances the session, and then publish
+ * a state report the bridge has no way to order. One counter in the shared state file gives the session a
  * single total order, and the bridge drops whichever report arrives carrying
  * a number it has already accepted.
  */

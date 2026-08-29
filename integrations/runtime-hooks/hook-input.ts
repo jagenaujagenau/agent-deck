@@ -6,10 +6,11 @@
  * once, and the rest of the process works with a named type instead of probing
  * an untyped bag key by key.
  *
- * Deliberately hand-written rather than schema-driven. A hook runs on every
- * tool call, and its dependency graph already costs 120-290ms to load;
- * measured against that, pulling in a schema library doubled it. The trade is
- * wrong for a process on that path.
+ * Deliberately hand-written rather than schema-driven. This graph cost
+ * 120-290ms to load when every hook paid it — the reason events now go to the
+ * daemon over its socket — and a hook that falls back still pays it; measured
+ * against that, pulling in a schema library doubled it. The trade is wrong
+ * for a process on that path.
  */
 
 import { asString, isJsonObject, parseJson } from "./json-value";

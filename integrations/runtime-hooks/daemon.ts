@@ -6,6 +6,8 @@ import {
   type AgentState,
   type ControlAction,
 } from "../../packages/agent-adapter/src/index";
+import { handleHookEvent } from "./hook-handler";
+import { serveHookSocket, type SocketHookResponse } from "./hook-socket";
 import { countQueuedMessages, queuedMessageNotice } from "./remote-messages";
 import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 import {
@@ -56,6 +58,7 @@ const agentId = requiredArgument(2);
 const statePath = requiredArgument(3);
 const project = requiredArgument(4);
 const pidPath = `${statePath}.pid`;
+const socketPath = `${statePath}.sock`;
 // The agentId prefix is the keying convention for which runtime owns this session,
 // and therefore which line grammar its transcript is read with.
 const runtime = agentId.startsWith("claude-")
@@ -205,11 +208,13 @@ async function heartbeat() {
     .digest("hex")
     .slice(0, 20);
   if (stateFingerprint !== lastStateFingerprint) {
-    // This daemon and the hook race on the same session: a heartbeat that
-    // loaded the state file, then lost the CPU while a hook advanced it, would
-    // otherwise publish that older state over the newer one. The shared
-    // counter is what lets the bridge drop this report when the hook already
-    // spoke past it. Persisted before the wire, same as the hook.
+    // Two writers still share this session's state file: this heartbeat loop
+    // and the event handler — usually in this same process via the socket,
+    // but a hook that fell back runs it in its own. A heartbeat that loaded
+    // the file, then yielded while an event advanced it, would otherwise
+    // publish that older state over the newer one. The shared counter is what
+    // lets the bridge drop this report when the handler already spoke past
+    // it. Persisted before the wire, same as the handler.
     const seq = nextReportSeq(statePath, state);
     writeFileSync(statePath, JSON.stringify(state));
     await client
@@ -251,6 +256,23 @@ async function heartbeat() {
 }
 
 writeFileSync(pidPath, String(process.pid));
+// The fast path: hook shims hand their events here instead of loading the
+// module graph themselves. serveHookSocket serialises requests, and the
+// handler reloads the state file per event, so a served stream reads exactly
+// like the one-process-per-hook sequence it replaces.
+const socketServer = serveHookSocket(socketPath, async (request) => {
+  const result = await handleHookEvent({
+    runtime:
+      request.runtime === "codex" ? "codex" : request.runtime === "gemini" ? "gemini" : "claude",
+    expectedEvent: request.expectedEvent,
+    payloadText: request.payload,
+    hookCwd: request.cwd,
+    hookPpid: request.ppid,
+  });
+  const response: SocketHookResponse = { exitCode: 0 };
+  if (result.stdout !== undefined) response.stdout = result.stdout;
+  return response;
+});
 const shutdown = () => {
   stopped = true;
 };
@@ -276,6 +298,7 @@ try {
   }
   await heartbeat();
 } finally {
+  socketServer.close();
   try {
     unlinkSync(pidPath);
   } catch {
