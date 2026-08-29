@@ -66,6 +66,40 @@ func subagentRuns(_ events: [AgentEvent]) -> [SubagentRun] {
     .sorted { $0.startedAt < $1.startedAt }
 }
 
+/// What the picker can narrow the run list to.
+enum SubagentFilter {
+    case all, running, done
+}
+
+/// Where the picker opens: on the running work when there is any, on everything
+/// otherwise. Mid-flight the reason to open the sheet is almost always a live
+/// lens; once everything has finished, it is review.
+/// Mirrored from `Subagents.kt` `defaultSubagentFilter`.
+func defaultSubagentFilter(_ runs: [SubagentRun]) -> SubagentFilter {
+    runs.contains { !$0.finished } ? .running : .all
+}
+
+/// The runs a filter shows, grouped but never reshuffled: running above done,
+/// each group in the stable started order `subagentRuns` promises — a row only
+/// moves when its status actually changes. The selected run is always shown,
+/// whatever the filter: a picker must not hide the thing it has a check on.
+/// Mirrored from `Subagents.kt` `filteredSubagentRuns`.
+func filteredSubagentRuns(
+    _ runs: [SubagentRun],
+    filter: SubagentFilter,
+    selectedId: String? = nil
+) -> [SubagentRun] {
+    let visible = runs.filter { run in
+        if run.id == selectedId { return true }
+        switch filter {
+        case .all: return true
+        case .running: return !run.finished
+        case .done: return run.finished
+        }
+    }
+    return visible.filter { !$0.finished } + visible.filter { $0.finished }
+}
+
 /// The session as one subagent saw it.
 ///
 /// Its own events only — not the parent's, and not a sibling's. Passing the

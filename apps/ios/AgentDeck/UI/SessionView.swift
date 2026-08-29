@@ -711,6 +711,11 @@ private struct SubagentPicker: View {
     var runs: [SubagentRun]
     @Binding var selected: String?
     @Environment(\.dismiss) private var dismiss
+    // Chosen once per opening; nil means the attention-first default.
+    @State private var filter: SubagentFilter?
+
+    private var activeFilter: SubagentFilter { filter ?? defaultSubagentFilter(runs) }
+    private var runningCount: Int { runs.filter { !$0.finished }.count }
 
     var body: some View {
         NavigationStack {
@@ -729,7 +734,18 @@ private struct SubagentPicker: View {
                         selected: selected == nil
                     ) { selected = nil; dismiss() }
 
-                    ForEach(runs) { run in
+                    // Counts make filtering informed before a tap; the chips
+                    // only appear once both statuses exist to choose between.
+                    if runningCount > 0 && runningCount < runs.count {
+                        HStack(spacing: 8) {
+                            SubagentFilterChip(label: "Running \(runningCount)", active: activeFilter == .running) { filter = .running }
+                            SubagentFilterChip(label: "Done \(runs.count - runningCount)", active: activeFilter == .done) { filter = .done }
+                            SubagentFilterChip(label: "All \(runs.count)", active: activeFilter == .all) { filter = .all }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    ForEach(filteredSubagentRuns(runs, filter: activeFilter, selectedId: selected)) { run in
                         SubagentRow(
                             title: run.title,
                             subtitle: run.activity,
@@ -748,6 +764,25 @@ private struct SubagentPicker: View {
         }
         .presentationDetents([.medium, .large])
         .preferredColorScheme(.dark)
+    }
+}
+
+private struct SubagentFilterChip: View {
+    var label: String
+    var active: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(active ? Palette.text : Palette.muted)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(active ? Palette.blue.opacity(0.15) : Palette.surfaceRaised))
+                .overlay(Capsule().stroke(active ? Palette.blue.opacity(0.45) : Palette.line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 
