@@ -1,15 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { deckAgentId, stateFromStatus, SubagentSessions } from "./session";
+import { agentIdFor } from "../../packages/agent-adapter/src/agent-identity";
+import { stateFromStatus, SubagentSessions } from "./session";
 
-describe("deckAgentId", () => {
+describe("agentIdFor", () => {
   test("is stable and namespaced to the runtime", () => {
-    const id = deckAgentId("ses_fcd220dd4ffe7AzXEf5iM5Gms3");
+    const id = agentIdFor("opencode", "ses_fcd220dd4ffe7AzXEf5iM5Gms3");
     expect(id).toStartWith("opencode-");
-    expect(id).toBe(deckAgentId("ses_fcd220dd4ffe7AzXEf5iM5Gms3"));
+    expect(id).toBe(agentIdFor("opencode", "ses_fcd220dd4ffe7AzXEf5iM5Gms3"));
   });
 
   test("distinct sessions never collide", () => {
-    expect(deckAgentId("a")).not.toBe(deckAgentId("b"));
+    expect(agentIdFor("opencode", "a")).not.toBe(agentIdFor("opencode", "b"));
   });
 });
 

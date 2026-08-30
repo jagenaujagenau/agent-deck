@@ -1,10 +1,10 @@
 import { Option, Schema } from "effect";
-import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
+import { agentIdFor } from "@agent-control-dashboard/agent-adapter";
 
 export type TranscriptUsageRow = {
   agent_id: string;
@@ -87,7 +87,7 @@ export function parseClaudeUsageLine(line: string): TranscriptUsageRow | undefin
   const priced = row.costUSD !== undefined && Number.isFinite(row.costUSD);
   return {
     agent_id: sessionId
-      ? `claude-${createHash("sha256").update(sessionId).digest("hex").slice(0, 24)}`
+      ? agentIdFor("claude", sessionId)
       : `claude:${messageId ?? requestId ?? row.timestamp}`,
     project: cwd ? basename(cwd) : "claude",
     runtime: "claude",
@@ -267,9 +267,7 @@ export function parseCodexUsageLine(
   const tokens = uncached + cached + cacheWrite + output;
   if (!tokens) return undefined;
   return {
-    agent_id: state.sessionId
-      ? `codex-${createHash("sha256").update(state.sessionId).digest("hex").slice(0, 24)}`
-      : `codex:${row.timestamp}`,
+    agent_id: state.sessionId ? agentIdFor("codex", state.sessionId) : `codex:${row.timestamp}`,
     project: state.project,
     runtime: "codex",
     model: state.model,

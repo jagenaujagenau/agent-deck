@@ -68,6 +68,10 @@ import {
   discoverGeminiSlashCommands,
   discoverSlashCommands,
 } from "./slash-commands";
+import {
+  agentIdFor,
+  sessionKey as deckSessionKey,
+} from "../../packages/agent-adapter/src/agent-identity";
 import { processStart } from "./process-identity";
 import { approvalClaim, claimWindow } from "./state-claim";
 import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
@@ -247,8 +251,8 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
   const event = canonicalLifecycleEvent(input.eventName ?? request.expectedEvent);
   const cwd = input.cwd ?? request.hookCwd;
   const sessionSeed = input.sessionId ?? `${cwd}:${input.transcriptPath ?? hookPpid}`;
-  const sessionKey = createHash("sha256").update(String(sessionSeed)).digest("hex").slice(0, 24);
-  const agentId = `${runtime}-${sessionKey}`;
+  const sessionKey = deckSessionKey(sessionSeed);
+  const agentId = agentIdFor(runtime, sessionSeed);
   // Overridable because homedir() answers from process start, which is what
   // lets a test point the whole handler at a scratch directory instead of
   // writing session state into the real deck's.

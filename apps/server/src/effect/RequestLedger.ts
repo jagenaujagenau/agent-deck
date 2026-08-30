@@ -1,8 +1,9 @@
 import { Effect, Option, Schema } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
-import type {
-  CanonicalRuntimeEvent,
-  RuntimeRequestStatus,
+import {
+  parseUserInputRequest,
+  type CanonicalRuntimeEvent,
+  type RuntimeRequestStatus,
 } from "@agent-control-dashboard/agent-adapter";
 import type { JsonObject, JsonValue, PendingApproval } from "./Domain";
 
@@ -76,34 +77,11 @@ const toPendingApproval = (
 };
 
 /**
- * A question option reduced to the text a card renders. Runtimes phrase an
- * option either as a plain string or as the SDK's labelled object; `decodeString`
- * tells the two apart and `.label` is read off the object form.
- */
-const optionList = (value: JsonValue | undefined): string[] => {
-  if (!Array.isArray(value)) return [];
-  const out: string[] = [];
-  for (const option of value) {
-    const direct = Option.getOrUndefined(decodeString(option));
-    if (direct) {
-      out.push(direct);
-      continue;
-    }
-    // SAFETY: a non-string option is the SDK's labelled object; `.label` read
-    // off a primitive is undefined, which `decodeString` turns into None.
-    const label = Option.getOrUndefined(decodeString((option as JsonObject).label));
-    if (label) out.push(label);
-  }
-  return out;
-};
-
-/**
  * A pending user-input request, reduced to what a card renders.
  *
- * Two runtimes phrase a question differently: the hooks and Pi publish a flat
- * `{ question, options }`, while the hosted Claude SDK publishes the tool's
- * `questions` array. Both reduce to the same card shape, and the decode reads
- * whichever arrived rather than knowing the runtime in advance.
+ * The phrasing decode — flat `{ question, options }` from the hooks and Pi,
+ * the SDK's `questions` array from the hosted runtime — lives in
+ * `parseUserInputRequest`, shared with everything else that reads one.
  */
 export const toPendingQuestion = (
   requestId: string,
@@ -117,26 +95,15 @@ export const toPendingQuestion = (
   } catch {
     return undefined;
   }
-  let question = Option.getOrUndefined(decodeString(data.question));
-  let options = optionList(data.options);
-  if (Array.isArray(data.questions) && data.questions.length > 0) {
-    // SAFETY: the hosted SDK phrases a question as a `questions` array whose
-    // first entry carries `question` (or `prompt`) and labelled `options`;
-    // `Array.isArray` above told that shape apart from the flat fields, so
-    // this entry is an object by construction.
-    const first = data.questions[0] as JsonObject;
-    question =
-      question ??
-      Option.getOrUndefined(decodeString(first.question)) ??
-      Option.getOrUndefined(decodeString(first.prompt));
-    const sdkOptions = optionList(first.options);
-    if (sdkOptions.length > 0) options = sdkOptions;
-  }
-  if (!question) return undefined;
+  const parsed = parseUserInputRequest(data);
+  if (parsed === undefined) return undefined;
   return {
     id: requestId,
-    question,
-    options,
+    question: parsed.question,
+    // Only a single-answer question maps onto a device's option list: a
+    // multi-select offered as one-tap buttons records a choice nobody could
+    // make. The question still shows; the answer belongs on the host.
+    options: parsed.multiSelect ? [] : parsed.options,
     createdAt: Option.getOrElse(decodeString(data.createdAt), () => created_at),
     expiresAt: Option.getOrElse(
       decodeString(data.expiresAt),

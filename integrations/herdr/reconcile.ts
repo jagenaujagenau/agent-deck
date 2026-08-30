@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 /**
  * Reconciling what Herdr can see with what the deck believes.
  *
@@ -37,17 +35,6 @@ export interface HerdrAgent {
  * than published under an id nothing else uses.
  */
 const DECK_RUNTIMES = new Set(["claude", "codex", "opencode"]);
-
-/**
- * The deck's id for a session, derived exactly as the hooks derive it.
- *
- * Both sides hash the runtime's own session id, so the two agree without either
- * having to publish a mapping - the correlation is a consequence of the scheme
- * rather than a thing to keep in sync.
- */
-export function deckAgentId(kind: string, sessionId: string): string {
-  return `${kind}-${createHash("sha256").update(sessionId).digest("hex").slice(0, 24)}`;
-}
 
 export function isDeckRuntime(kind: string): boolean {
   return DECK_RUNTIMES.has(kind);

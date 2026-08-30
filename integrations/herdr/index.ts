@@ -5,10 +5,10 @@ import type { RuntimeEventPayload } from "../../packages/agent-adapter/src/runti
 import { drainRemoteMessages, promptContext } from "../runtime-hooks/remote-messages";
 import { listAgents, promptAgent, readPane, sendKeys } from "./herdr-cli";
 import { liveChoice, parsePrompt, type TerminalPrompt } from "./prompt";
+import { agentIdFor } from "../../packages/agent-adapter/src/agent-identity";
 import {
   acceptsPrompt,
   correctionFor,
-  deckAgentId,
   isDeckRuntime,
   TERMINAL_PROMPT_TASK,
   type HerdrAgent,
@@ -118,7 +118,7 @@ async function awaitAnswer(agentId: string, requestId: string, prompt: TerminalP
   // only against the same question, at its live numbering.
   const live = (await listAgents().catch((): ReadonlyArray<HerdrAgent> => [])).find(
     (candidate) =>
-      isDeckRuntime(candidate.kind) && deckAgentId(candidate.kind, candidate.sessionId) === agentId,
+      isDeckRuntime(candidate.kind) && agentIdFor(candidate.kind, candidate.sessionId) === agentId,
   );
   const screen =
     live === undefined ? undefined : parsePrompt(await readPane(live.target).catch(() => ""));
@@ -224,7 +224,7 @@ async function pass() {
 
   for (const agent of agents) {
     if (!isDeckRuntime(agent.kind)) continue;
-    const agentId = deckAgentId(agent.kind, agent.sessionId);
+    const agentId = agentIdFor(agent.kind, agent.sessionId);
     const deck = known.get(agentId);
     // A terminal the deck has never seen is not part of the deck.
     if (deck === undefined) continue;

@@ -5,9 +5,11 @@
  * this re-exports the managed Claude runtime too, which brings the Claude Agent
  * SDK with it.
  */
+export * from "./agent-identity";
 export * from "./runtime-events";
 export * from "./runtime-projector";
 export * from "./runtime-publisher";
+export * from "./user-input";
 export * from "./managed-runtime";
 export * from "./claude-sdk-runtime";
 export * from "./client";

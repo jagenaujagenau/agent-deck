@@ -18,7 +18,8 @@ import type { RuntimeEventType } from "../../packages/agent-adapter/src/runtime-
 import { mutatesFile, readFileForDiff } from "../../packages/agent-adapter/src/file-snapshot";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
 import { asObject, asString, isJsonObject, type JsonObject, type JsonValue } from "./payload";
-import { deckAgentId, stateFromStatus, SubagentSessions } from "./session";
+import { agentIdFor } from "../../packages/agent-adapter/src/agent-identity";
+import { stateFromStatus, SubagentSessions } from "./session";
 import { coarseDiff, fileTarget, shellCommand } from "./toolcall";
 
 /**
@@ -126,7 +127,7 @@ export const AgentDeckPlugin = async (input: {
   /** Assistant messages whose usage is already counted; updates repeat, spend does not. */
   const accountedMessageIds = new Set<string>();
 
-  const agentId = () => (sessionId ? deckAgentId(sessionId) : undefined);
+  const agentId = () => (sessionId ? agentIdFor("opencode", sessionId) : undefined);
 
   const heartbeat = async () => {
     const id = agentId();

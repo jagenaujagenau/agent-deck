@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { Context, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
 import {
   ClaudeSdkManagedRuntimeAdapter,
+  parseUserInputRequest,
   type CanonicalRuntimeEvent,
   type ManagedRequestStore,
   type ManagedRuntimeCapabilities,
@@ -170,27 +171,14 @@ export class ManagedRuntime extends Context.Service<
             hosted.agent.processedTokens = (hosted.agent.processedTokens ?? 0) + turnTokens;
           }
           if (event.type === "user-input.requested") {
-            // SAFETY: the adapter publishes `questions` as the SDK's question
-            // list; the fields a card renders are read leniently below.
-            const questions = Array.isArray(event.payload.questions)
-              ? (event.payload.questions as Array<JsonObject>)
-              : [];
-            const first = questions[0];
-            const firstOptions = first?.options;
-            // Only a single-answer question maps onto the device's option list.
-            // SAFETY: the SDK's options are labelled objects; a label that is
-            // not there anyway falls back to an empty string and is dropped.
-            const options =
-              questions.length === 1 && first?.multiSelect !== true && Array.isArray(firstOptions)
-                ? (firstOptions as Array<JsonObject>)
-                    .map((option) => String(option.label ?? ""))
-                    .filter(Boolean)
-                : [];
+            // The phrasing decode is shared with every other reader; only a
+            // single-answer question maps onto the device's option list.
+            const parsed = parseUserInputRequest(event.payload);
             yield* state.addEvent(agentId, {
               id: event.requestId ?? event.id,
               kind: "question",
-              summary: String(questions[0]?.question ?? "Claude needs your input"),
-              options,
+              summary: parsed?.question ?? "Claude needs your input",
+              options: parsed !== undefined && !parsed.multiSelect ? parsed.options : [],
             });
           }
           if (

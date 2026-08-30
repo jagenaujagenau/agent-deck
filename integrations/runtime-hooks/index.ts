@@ -11,9 +11,9 @@
  * path never pays for it.
  */
 
-import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { agentIdFor } from "../../packages/agent-adapter/src/agent-identity";
 import { callHookSocket } from "./hook-socket";
 import { asString, isJsonObject, parseJson } from "../../packages/agent-adapter/src/json-value";
 import type { JsonValue } from "../../packages/agent-adapter/src/json-value";
@@ -35,13 +35,12 @@ try {
 const field = (key: string) => (isJsonObject(payload) ? asString(payload[key]) : undefined);
 const cwd = field("cwd") ?? process.cwd();
 const sessionSeed = field("session_id") ?? `${cwd}:${field("transcript_path") ?? process.ppid}`;
-const sessionKey = createHash("sha256").update(sessionSeed).digest("hex").slice(0, 24);
 const statePath = join(
   homedir(),
   ".cache",
   "agent-deck",
   "runtime-hooks",
-  `${runtime}-${sessionKey}.json`,
+  `${agentIdFor(runtime, sessionSeed)}.json`,
 );
 
 const reply = await callHookSocket(`${statePath}.sock`, {

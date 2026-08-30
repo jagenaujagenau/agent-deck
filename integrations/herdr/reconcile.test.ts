@@ -1,23 +1,18 @@
+import { agentIdFor } from "../../packages/agent-adapter/src/agent-identity";
 import { describe, expect, test } from "bun:test";
-import {
-  acceptsPrompt,
-  correctionFor,
-  deckAgentId,
-  isDeckRuntime,
-  type StoredSession,
-} from "./reconcile";
+import { acceptsPrompt, correctionFor, isDeckRuntime, type StoredSession } from "./reconcile";
 
-describe("deckAgentId", () => {
+describe("agentIdFor", () => {
   test("derives the id the hooks derive", () => {
     // Taken from a live pairing: this Herdr session id is the one the deck is
     // holding under this agent id, verified against the bridge's own store.
-    expect(deckAgentId("claude", "ba940710-4089-4c6f-a44e-8b716f49095f")).toBe(
+    expect(agentIdFor("claude", "ba940710-4089-4c6f-a44e-8b716f49095f")).toBe(
       "claude-fb319498039a87a4232f2512",
     );
   });
 
   test("a different session is a different agent", () => {
-    expect(deckAgentId("claude", "a")).not.toBe(deckAgentId("claude", "b"));
+    expect(agentIdFor("claude", "a")).not.toBe(agentIdFor("claude", "b"));
   });
 });
 

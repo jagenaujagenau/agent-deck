@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { asString, isJsonObject, type JsonValue } from "./payload";
 
 /**
@@ -10,11 +9,6 @@ import { asString, isJsonObject, type JsonValue } from "./payload";
  * and an id derived differently from the way the bridge derives it produces a
  * session nothing else can find.
  */
-
-/** The deck's id for a session, derived the way every other adapter derives it. */
-export function deckAgentId(sessionId: string): string {
-  return `opencode-${createHash("sha256").update(sessionId).digest("hex").slice(0, 24)}`;
-}
 
 /**
  * Tracks which sessions belong to subagents, so their events can be threaded
