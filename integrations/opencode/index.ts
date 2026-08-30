@@ -171,6 +171,23 @@ export const AgentDeckPlugin = async (input: {
     await publisher(id, type, payload, refs).catch(() => {});
   };
 
+  /**
+   * Moves the session and says so on the canonical stream.
+   *
+   * This adapter declares canonical-v1, so the deck believes the projection
+   * and discards the heartbeat's state — a transition that only rode the
+   * heartbeat never arrived: a remote pause or stop was invisible, and a
+   * failed remote command could not show as an error. Most transitions
+   * already travel as lifecycle events (turns, items, requests); this is for
+   * the ones that have no event of their own.
+   */
+  const reportState = async (nextState: AgentState, nextTask?: string) => {
+    const moved = nextState !== state || (nextTask !== undefined && nextTask !== task);
+    state = nextState;
+    if (nextTask !== undefined) task = nextTask;
+    if (moved) await publishRuntime("session.state.changed", { state, task });
+  };
+
   const publish = async (
     kind: EventKind,
     summary: string,
@@ -262,9 +279,8 @@ export const AgentDeckPlugin = async (input: {
         case "steer":
         case "follow_up": {
           if (!command.value?.trim()) throw new Error("Remote prompt was empty");
-          task = clip(command.value);
           objective = clip(command.value, 500);
-          state = "running";
+          await reportState("running", clip(command.value));
           await opencode?.prompt({
             path: { id: sessionId! },
             body: { parts: [{ type: "text", text: command.value }] },
@@ -274,14 +290,12 @@ export const AgentDeckPlugin = async (input: {
         case "pause":
           settleApproval(false);
           await opencode?.abort({ path: { id: sessionId! } });
-          state = "paused";
-          task = "Paused remotely";
+          await reportState("paused", "Paused remotely");
           break;
         case "stop":
           settleApproval(false);
           await opencode?.abort({ path: { id: sessionId! } });
-          state = "idle";
-          task = "Stopped remotely";
+          await reportState("idle", "Stopped remotely");
           break;
         case "approve":
           settleApproval(true);
@@ -292,7 +306,7 @@ export const AgentDeckPlugin = async (input: {
       }
       void publish("output", `Remote command: ${command.action}`, command.value);
     } catch (error) {
-      state = "error";
+      await reportState("error");
       void publish(
         "error",
         `Remote command failed: ${command.action}`,
@@ -554,7 +568,7 @@ export const AgentDeckPlugin = async (input: {
       const name = params.model?.id;
       if (name)
         model = `${params.provider?.info?.id ?? params.model?.providerID ?? "opencode"}/${name}`;
-      state = "running";
+      await reportState("running");
       await heartbeat();
     },
 
@@ -671,8 +685,11 @@ export const AgentDeckPlugin = async (input: {
           break;
         case "session.status": {
           if (route.fromChild) break;
+          // The tested half of this pair used to be the only half: the
+          // function ran, its result was written to a variable the bridge
+          // discarded, and the status never reached the deck.
           const next = stateFromStatus(properties.status);
-          if (next && state !== "waiting") state = next;
+          if (next && state !== "waiting") await reportState(next);
           break;
         }
         default:
