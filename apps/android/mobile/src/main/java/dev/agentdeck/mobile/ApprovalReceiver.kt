@@ -28,6 +28,7 @@ class ApprovalReceiver : BroadcastReceiver() {
                 val current = client.snapshot().agents.firstOrNull { it.id == agentId }
                 if (current != null && AttentionPolicy.approvalKey(current) == approvalKey) {
                     client.control(agentId, action)
+                    ApprovalNotifier.rearm(appContext, agentId)
                 }
                 appContext.getSystemService(NotificationManager::class.java).cancel(agentId.hashCode())
             } finally {

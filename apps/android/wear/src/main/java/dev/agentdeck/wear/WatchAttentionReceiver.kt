@@ -46,6 +46,7 @@ class WatchAttentionReceiver : BroadcastReceiver() {
                     }.isSuccess
                     if (sent) {
                         addresses.remember(candidate)
+                        WatchNotifier.rearm(context, agentId)
                         break
                     }
                 }

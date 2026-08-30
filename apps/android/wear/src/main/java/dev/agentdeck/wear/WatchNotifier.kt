@@ -7,7 +7,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import dev.agentdeck.shared.Agent
+import dev.agentdeck.shared.AlertArming
 import dev.agentdeck.shared.AttentionPolicy
+import dev.agentdeck.shared.SeenStore
 
 /**
  * Buzzes the wrist when a session is waiting on a person.
@@ -21,6 +23,10 @@ import dev.agentdeck.shared.AttentionPolicy
  */
 internal object WatchNotifier {
     private const val CHANNEL = "agent_attention"
+    // Repeats while the first buzz sits unviewed land here, silently — a
+    // wrist that buzzes for every flap of the same stuck session teaches the
+    // person to ignore the wrist. See AlertArming.
+    private const val QUIET_CHANNEL = "agent_attention_quiet"
     private const val PREFERENCES = "watch_notifications"
 
     fun reconcile(context: Context, agents: List<Agent>) {
@@ -28,6 +34,10 @@ internal object WatchNotifier {
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Agents needing you", NotificationManager.IMPORTANCE_HIGH),
         )
+        manager.createNotificationChannel(
+            NotificationChannel(QUIET_CHANNEL, "Agents needing you (repeats)", NotificationManager.IMPORTANCE_LOW),
+        )
+        val seenStore = SeenStore(context)
         val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
         for (agent in agents) {
             val decision = AttentionPolicy.decide(
@@ -41,23 +51,36 @@ internal object WatchNotifier {
             ) {
                 continue
             }
+            val alertedKey = "alerted:${agent.id}"
+            val armed = decision.action == AttentionPolicy.Action.Notify &&
+                AlertArming.armed(agent, seenStore.seenAt(agent.id), preferences.getString(alertedKey, null))
             val editor = preferences.edit()
                 .putString("observed:${agent.id}", decision.observedAt)
                 .putBoolean("resolved:${agent.id}", decision.resolved)
             decision.approvalKey?.let { editor.putString("notified:${agent.id}", it) }
+            if (armed) editor.putString(alertedKey, decision.observedAt)
             // Written before posting, so two snapshots arriving together cannot
             // both decide to buzz for the same thing.
             if (!editor.commit()) continue
             when (decision.action) {
                 AttentionPolicy.Action.Cancel -> manager.cancel(agent.id.hashCode())
                 AttentionPolicy.Action.Notify ->
-                    manager.notify(agent.id.hashCode(), build(context, agent, decision.approvalKey!!))
+                    manager.notify(
+                        agent.id.hashCode(),
+                        build(context, agent, decision.approvalKey!!, if (armed) CHANNEL else QUIET_CHANNEL),
+                    )
                 AttentionPolicy.Action.Ignore -> Unit
             }
         }
     }
 
-    private fun build(context: Context, agent: Agent, attentionKey: String): Notification {
+    /** An answer from the buzz itself is engagement, not a view — but it re-arms all the same. */
+    fun rearm(context: Context, agentId: String) {
+        context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+            .edit().remove("alerted:$agentId").apply()
+    }
+
+    private fun build(context: Context, agent: Agent, attentionKey: String, channel: String): Notification {
         val approval = agent.pendingApproval
         val durable = agent.pendingQuestion
         val question = agent.events.maxByOrNull { it.createdAt }?.takeIf { it.kind == "question" }
@@ -66,7 +89,7 @@ internal object WatchNotifier {
         val questionId = durable?.id ?: question?.id
         val detail = approval?.detail ?: questionText ?: agent.task
 
-        val builder = Notification.Builder(context, CHANNEL)
+        val builder = Notification.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(
                 if (approval != null) "${agentLabel(agent.name, agent.project)} needs approval"
