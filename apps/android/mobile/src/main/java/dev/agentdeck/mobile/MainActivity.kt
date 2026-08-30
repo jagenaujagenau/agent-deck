@@ -621,26 +621,21 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
             } else {
                 // Dismissed sessions vanish now; the stream's `removed` makes it real.
                 val deckAgents = data.agents.filterNot { it.id in dismissedAgents }
-                val boardAgents = unarchivedAgents(deckAgents, archivedAgents)
                 val homeNow = Instant.now()
-                val filtered = homeAgentOrder(
-                    deckAgents.filter { agent -> filter.includes(homeAgentState(agent, agentArchiveKey(agent) in archivedAgents, homeNow, agentSeen(agent, seenMarks))) },
-                    archivedAgents,
-                    homeNow,
-                    seenMarks,
-                )
+                val deck = homeDeck(deckAgents, archivedAgents, seenMarks, homeNow)
+                val sections = deck.sections(filter)
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = DeckNavSpace),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    item { AgentsHeader(boardAgents, homeNow, connected = state is BridgeState.Ready, bridgeName = data.bridge.name) }
+                    item { AgentsHeader(deck, connected = state is BridgeState.Ready, bridgeName = data.bridge.name) }
                     item {
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            val attention = boardAgents.count { homeAgentState(it, now = homeNow).attention }
+                            val attention = deck.attention
                             HomeFilter.entries.forEach { item ->
                                 FilterChip(
                                     selected = filter == item,
@@ -664,13 +659,14 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                     dismissError?.let { message ->
                         item { Text("Dismiss failed · $message", color = Danger, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                     }
-                    HomeAgentState.entries.forEach { homeState ->
-                        val stateAgents = filtered.filter { homeAgentState(it, agentArchiveKey(it) in archivedAgents, homeNow, agentSeen(it, seenMarks)) == homeState }
-                        if (stateAgents.isNotEmpty()) {
-                            item(key = "state:${homeState.name}") { HomeStateHeader(homeState, stateAgents.size) }
-                            stateAgents.groupBy { it.project }.entries.sortedBy { it.key.lowercase() }.forEach { (projectName, agents) ->
-                                item(key = "${homeState.name}:project:$projectName") { ProjectGroupHeader(projectName, agents, showAttention = false) }
-                                items(agents, key = { "${homeState.name}:${it.id}" }) { agent ->
+                    sections.forEach { section ->
+                        val homeState = section.state
+                        run {
+                            item(key = "state:${homeState.name}") { HomeStateHeader(homeState, section.count) }
+                            section.projects.forEach { group ->
+                                item(key = "${homeState.name}:project:${group.project}") { ProjectGroupHeader(group.project, group.cards.map { it.agent }, showAttention = false) }
+                                items(group.cards, key = { "${homeState.name}:${it.agent.id}" }) { card ->
+                                    val agent = card.agent
                                     ArchivableAgentCard(
                                         agent = agent,
                                         homeState = homeState,
@@ -684,7 +680,7 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                             }
                         }
                     }
-                    if (filtered.isEmpty()) {
+                    if (sections.isEmpty()) {
                         item { Text("No agents in this view", color = Muted, modifier = Modifier.padding(vertical = 32.dp)) }
                     }
                 }
@@ -1109,9 +1105,9 @@ private fun DeckTopBar(connected: Boolean, bridgeName: String, onSettings: () ->
 }
 
 @Composable
-private fun AgentsHeader(agents: List<Agent>, now: Instant, connected: Boolean, bridgeName: String) {
-    val attention = agents.count { homeAgentState(it, now = now).attention }
-    val running = agents.count { homeAgentState(it, now = now) == HomeAgentState.Running }
+private fun AgentsHeader(deck: HomeDeck, connected: Boolean, bridgeName: String) {
+    val attention = deck.attention
+    val running = deck.running
     // No "Agents" heading: it named the screen the bottom bar already names,
     // directly above a list of agents. The row it cost now carries the two
     // things that were worth reading - which bridge, and what it is doing.

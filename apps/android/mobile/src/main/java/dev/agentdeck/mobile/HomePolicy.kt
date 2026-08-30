@@ -1,7 +1,6 @@
 package dev.agentdeck.mobile
 
 import dev.agentdeck.shared.Agent
-import dev.agentdeck.shared.attentionPriority
 import dev.agentdeck.shared.sessionSeen
 import java.time.Duration
 import java.time.Instant
@@ -67,19 +66,3 @@ internal fun HomeFilter.includes(state: HomeAgentState) = when (this) {
 /** Whether anyone has shown everything the session has done - this phone, or any surface via the bridge. */
 internal fun agentSeen(agent: Agent, seenMarks: Map<String, String>): Boolean =
     sessionSeen(agent, seenMarks[agent.id])
-
-/** Mutable heartbeats and activity text never affect ordering within a presentation state. */
-internal fun homeAgentOrder(
-    agents: List<Agent>,
-    archivedKeys: Set<String>,
-    now: Instant = Instant.now(),
-    seenMarks: Map<String, String> = emptyMap(),
-): List<Agent> = agents.sortedWith(
-    compareBy<Agent> { homeAgentState(it, agentArchiveKey(it) in archivedKeys, now, agentSeen(it, seenMarks)).ordinal }
-        // Sections carry the coarse order; within one, the shared ranking
-        // breaks whatever ties the sections leave (unseen-done over seen-idle
-        // when a section mixes them, as History can).
-        .thenByDescending { attentionPriority(it.state, it.state == "waiting", agentSeen(it, seenMarks)) }
-        .thenBy { it.project.lowercase() }
-        .thenBy { it.id },
-)
