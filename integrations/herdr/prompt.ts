@@ -107,6 +107,27 @@ export function parsePrompt(screen: string): TerminalPrompt | undefined {
 const RULE = /^[\s─━│┌┐└┘├┤┬┴┼╭╮╯╰=_-]+$/;
 
 /**
+ * The option to actually press, for a choice made against an earlier reading
+ * of this screen.
+ *
+ * An answer can arrive minutes after the prompt was read, and keys know
+ * nothing about what they land on: the pane may hold a different session by
+ * now, or the same session may be asking a different question — pressing "2"
+ * against either picks something nobody chose. The choice is honoured only
+ * when the live screen still asks the same question and still offers the
+ * chosen label, and the number pressed is the live one, because a menu that
+ * kept its labels may still have renumbered them.
+ */
+export function liveChoice(
+  expected: TerminalPrompt,
+  live: TerminalPrompt | undefined,
+  label: string,
+): PromptOption | undefined {
+  if (live === undefined || live.question !== expected.question) return undefined;
+  return live.options.find((option) => option.label === label);
+}
+
+/**
  * The line that is actually being asked, from the prose above a menu.
  *
  * Not simply the nearest one. Runtimes put a footnote or a link immediately

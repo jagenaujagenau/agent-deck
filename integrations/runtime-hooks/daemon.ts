@@ -9,6 +9,7 @@ import {
 import { handleHookEvent } from "./hook-handler";
 import { serveHookSocket, type SocketHookResponse } from "./hook-socket";
 import { countQueuedMessages, queuedMessageNotice } from "./remote-messages";
+import { ownerAlive } from "./process-identity";
 import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 import {
   readConversationBacklog,
@@ -28,6 +29,8 @@ type DaemonState = {
   tokens?: number;
   processedTokens?: number;
   ownerPid?: number;
+  /** When the owner started — what makes the pid mean one process, not a slot. */
+  ownerStart?: string;
   capabilities?: ControlAction[];
   transcriptPath?: string;
   transcriptOffset?: number;
@@ -88,16 +91,6 @@ function loadState(): DaemonState | undefined {
     return JSON.parse(readFileSync(statePath, "utf8")) as DaemonState;
   } catch {
     return undefined;
-  }
-}
-
-function ownerIsAlive(pid?: number) {
-  if (!pid || pid === process.pid) return true;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
   }
 }
 
@@ -189,7 +182,7 @@ async function heartbeat() {
     }
     writeFileSync(statePath, JSON.stringify(state));
   }
-  if (!ownerIsAlive(state.ownerPid) && state.state !== "offline") {
+  if (!ownerAlive(state.ownerPid, state.ownerStart) && state.state !== "offline") {
     state.state = "offline";
     state.task = "Runtime process ended";
     writeFileSync(statePath, JSON.stringify(state));

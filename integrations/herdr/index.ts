@@ -4,7 +4,7 @@ import type { RuntimeEventType } from "../../packages/agent-adapter/src/runtime-
 import type { RuntimeEventPayload } from "../../packages/agent-adapter/src/runtime-publisher";
 import { drainRemoteMessages, promptContext } from "../runtime-hooks/remote-messages";
 import { listAgents, promptAgent, readPane, sendKeys } from "./herdr-cli";
-import { parsePrompt, type TerminalPrompt } from "./prompt";
+import { liveChoice, parsePrompt, type TerminalPrompt } from "./prompt";
 import {
   acceptsPrompt,
   correctionFor,
@@ -86,14 +86,11 @@ const publish = (agentId: string, type: RuntimeEventType, payload: RuntimeEventP
  *
  * Keys rather than text: Herdr refuses to submit a prompt to a blocked agent,
  * and blocked is the only state this ever runs in. The number is typed and
- * confirmed exactly as a person sitting there would.
+ * confirmed exactly as a person sitting there would — after checking, exactly
+ * as a person would, that the screen still shows the question the answer was
+ * given to.
  */
-async function awaitAnswer(
-  agentId: string,
-  requestId: string,
-  target: string,
-  prompt: TerminalPrompt,
-) {
+async function awaitAnswer(agentId: string, requestId: string, prompt: TerminalPrompt) {
   const answer = await client
     .waitForAnswer(agentId, requestId, { timeoutMs: ANSWER_TIMEOUT_MS })
     .catch(() => undefined);
@@ -115,7 +112,23 @@ async function awaitAnswer(
     return;
   }
 
-  const pressed = await sendKeys(target, [String(chosen.number), "enter"]).catch(() => false);
+  // The answer is minutes old and keys land on whatever the pane holds now.
+  // Re-resolve which pane this session lives in — the one it was read from
+  // may have been recycled — and re-read the screen; the keys are pressed
+  // only against the same question, at its live numbering.
+  const live = (await listAgents().catch((): ReadonlyArray<HerdrAgent> => [])).find(
+    (candidate) =>
+      isDeckRuntime(candidate.kind) && deckAgentId(candidate.kind, candidate.sessionId) === agentId,
+  );
+  const screen =
+    live === undefined ? undefined : parsePrompt(await readPane(live.target).catch(() => ""));
+  const press = liveChoice(prompt, screen, chosen.label);
+  if (live === undefined || press === undefined) {
+    await publish(agentId, "user-input.resolved", { status: "unavailable", value: chosen.label });
+    return;
+  }
+
+  const pressed = await sendKeys(live.target, [String(press.number), "enter"]).catch(() => false);
   await publish(agentId, "user-input.resolved", {
     status: pressed ? "answered" : "unavailable",
     value: chosen.label,
@@ -179,7 +192,7 @@ async function claimBlocked(agent: HerdrAgent, agentId: string) {
     { id: `terminal-prompt:${requestId}`, requestId },
   ).catch(() => openRequests.delete(agentId));
 
-  void awaitAnswer(agentId, requestId, agent.target, prompt);
+  void awaitAnswer(agentId, requestId, prompt);
 }
 
 /** Hands a session's queued messages to Herdr, which types them into its pane. */

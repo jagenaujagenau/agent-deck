@@ -62,6 +62,7 @@ import {
   discoverGeminiSlashCommands,
   discoverSlashCommands,
 } from "./slash-commands";
+import { processStart } from "./process-identity";
 import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 
 export type HookRuntime = "claude" | "codex" | "gemini";
@@ -109,6 +110,8 @@ type HookState = {
   /** The report counter shared with the daemon; every runtime event advances it. */
   reportSeq?: number;
   ownerPid?: number;
+  /** When the owner started — what makes the pid mean one process, not a slot. */
+  ownerStart?: string;
   capabilities?: ControlAction[];
   rateLimits?: Array<{
     id: string;
@@ -302,7 +305,13 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
     }
   }
   state.name = `${runtimeTitle} · ${state.project} · ${sessionKey.slice(0, 4)}`;
-  state.ownerPid = runtimeOwnerPid();
+  const owner = runtimeOwnerPid();
+  // Re-read the start marker only when the pid changes: it is one `ps` per
+  // owner, not one per hook event.
+  if (owner !== state.ownerPid || state.ownerStart === undefined) {
+    state.ownerStart = processStart(owner);
+  }
+  state.ownerPid = owner;
   state.capabilities = ["approve", "reject", "steer", "prompt", "follow_up"];
   // The daemon tails this for reasoning between hook invocations, so it has to know where it is.
   if (input.transcriptPath !== undefined) state.transcriptPath = input.transcriptPath;
@@ -687,7 +696,8 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
         task: "Ready for an instruction",
         name: displayName,
         project: detectedProject,
-        ownerPid: runtimeOwnerPid(),
+        ownerPid: owner,
+        ownerStart: state.ownerStart,
         capabilities: ["approve", "reject", "steer", "prompt", "follow_up"],
       };
       // Identity as an event, not only as a heartbeat field. The heartbeat was

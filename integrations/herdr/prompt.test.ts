@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parsePrompt } from "./prompt";
+import { liveChoice, parsePrompt } from "./prompt";
 
 describe("parsePrompt", () => {
   /**
@@ -204,5 +204,42 @@ Pick one:
 
   test("a menu that skips a number is refused", () => {
     expect(parsePrompt("Pick:\n❯ 1. One\n  3. Three\n")).toBeUndefined();
+  });
+});
+
+describe("liveChoice", () => {
+  const prompt = (question: string, labels: ReadonlyArray<string>, firstNumber = 1) => ({
+    question,
+    options: labels.map((label, index) => ({
+      number: firstNumber + index,
+      label,
+      selected: index === 0,
+    })),
+  });
+
+  test("presses the choice when the screen still asks the same question", () => {
+    const expected = prompt("Resume from summary?", ["Yes", "No"]);
+    expect(liveChoice(expected, prompt("Resume from summary?", ["Yes", "No"]), "No")?.number).toBe(
+      2,
+    );
+  });
+
+  test("a renumbered menu is pressed at its live number, not the remembered one", () => {
+    const expected = prompt("Resume from summary?", ["Yes", "No"]);
+    const renumbered = prompt("Resume from summary?", ["Always", "Yes", "No"]);
+    expect(liveChoice(expected, renumbered, "No")?.number).toBe(3);
+  });
+
+  test("a different question refuses the keys", () => {
+    // The session moved on while the answer travelled; "2" against the new
+    // menu picks something nobody chose.
+    const expected = prompt("Resume from summary?", ["Yes", "No"]);
+    expect(liveChoice(expected, prompt("Delete the branch?", ["Yes", "No"]), "No")).toBeUndefined();
+  });
+
+  test("no readable prompt, or a menu without the label, refuses the keys", () => {
+    const expected = prompt("Resume from summary?", ["Yes", "No"]);
+    expect(liveChoice(expected, undefined, "No")).toBeUndefined();
+    expect(liveChoice(expected, prompt("Resume from summary?", ["Yes"]), "No")).toBeUndefined();
   });
 });
