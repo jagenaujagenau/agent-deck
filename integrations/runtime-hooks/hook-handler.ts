@@ -244,7 +244,11 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
   const sessionSeed = input.sessionId ?? `${cwd}:${input.transcriptPath ?? hookPpid}`;
   const sessionKey = createHash("sha256").update(String(sessionSeed)).digest("hex").slice(0, 24);
   const agentId = `${runtime}-${sessionKey}`;
-  const stateDirectory = join(homedir(), ".cache", "agent-deck", "runtime-hooks");
+  // Overridable because homedir() answers from process start, which is what
+  // lets a test point the whole handler at a scratch directory instead of
+  // writing session state into the real deck's.
+  const stateDirectory =
+    process.env.AGENT_DECK_STATE_DIR ?? join(homedir(), ".cache", "agent-deck", "runtime-hooks");
   const snapshotDirectory = join(stateDirectory, "snapshots");
   const statePath = join(stateDirectory, `${agentId}.json`);
   const client = new AgentDeckClient();
