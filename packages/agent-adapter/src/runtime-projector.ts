@@ -169,8 +169,8 @@ export function projectRuntimeEvent(
           }
         : next;
     case "request.resolved":
-    case "user-input.resolved":
-      return {
+    case "user-input.resolved": {
+      const resolved = {
         ...next,
         // A settled request means the question is answered, not that the
         // session went back to work. Usually it did - the blocked call resumes -
@@ -183,6 +183,14 @@ export function projectRuntimeEvent(
             : current.state,
         pendingRequest: undefined,
       };
+      // The holder resolving its request is the release: the claimed window
+      // existed for that request, and holding on past it would suppress the
+      // next publisher with something true to say.
+      if (current.stateAuthority?.source === event.origin?.source) {
+        delete resolved.stateAuthority;
+      }
+      return resolved;
+    }
     case "item.started":
     case "item.updated":
       return {

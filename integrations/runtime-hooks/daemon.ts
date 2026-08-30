@@ -10,6 +10,7 @@ import { handleHookEvent } from "./hook-handler";
 import { serveHookSocket, type SocketHookResponse } from "./hook-socket";
 import { countQueuedMessages, queuedMessageNotice } from "./remote-messages";
 import { ownerAlive } from "./process-identity";
+import { approvalClaim } from "./state-claim";
 import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 import {
   readConversationBacklog,
@@ -213,7 +214,10 @@ async function heartbeat() {
     await publisher(
       agentId,
       "session.state.changed",
-      { state: state.state, task: displayTask },
+      // Waiting on a live approval carries its claim, so a terminal
+      // observer's delayed report cannot erase a session that is really
+      // blocked on something a device can answer (ADR-0002).
+      { state: state.state, task: displayTask, claim: approvalClaim(state, Date.now()) },
       { id: `daemon-state:${agentId}:${stateFingerprint}`, seq },
     )
       .then(() => {

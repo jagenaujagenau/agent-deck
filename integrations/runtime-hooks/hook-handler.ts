@@ -20,6 +20,7 @@ import {
   type AgentEventInput,
   type AgentState,
   type ControlAction,
+  type RuntimeEventPayload,
   type RuntimeEventType,
 } from "../../packages/agent-adapter/src/index";
 import { readGeminiConversation } from "./gemini-conversation";
@@ -63,6 +64,7 @@ import {
   discoverSlashCommands,
 } from "./slash-commands";
 import { processStart } from "./process-identity";
+import { approvalClaim, claimWindow } from "./state-claim";
 import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 
 export type HookRuntime = "claude" | "codex" | "gemini";
@@ -219,7 +221,7 @@ function parseCodexUsageLine(line: string): CodexUsageLine | undefined {
 }
 
 /** Everything a runtime event of this adapter's ever says about itself. */
-type RuntimePayload = Record<string, string | number | boolean | string[] | undefined>;
+type RuntimePayload = RuntimeEventPayload;
 
 export async function handleHookEvent(request: HookEventRequest): Promise<HookEventResult> {
   const out: string[] = [];
@@ -544,6 +546,13 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
             turnId: state.activeTurnId,
           },
         );
+        // Same claim as an approval: the question is deck-answerable for
+        // exactly this window, and only the hooks know that.
+        await publishRuntime("session.state.changed", {
+          state: "waiting",
+          task: state.task,
+          claim: claimWindow(expiresAt, Date.now()),
+        }).catch(() => {});
         await publish("question", "Question", question, {
           id: questionId,
           tool: toolName,
@@ -638,6 +647,14 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
         },
         { id: `request-opened:${approvalId}`, requestId: approvalId, turnId: state.activeTurnId },
       );
+      // The claim lands with the request rather than waiting for the daemon's
+      // next beat: from this moment a terminal observer's delayed report must
+      // not erase a session blocked on something a device can answer.
+      await publishRuntime("session.state.changed", {
+        state: "waiting",
+        task: state.task,
+        claim: approvalClaim(state, Date.now()),
+      }).catch(() => {});
       await publish("warning", `Approval required: ${toolName}`, detail, {
         id: approvalId,
         tool: toolName,
@@ -885,9 +902,14 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
       }
       state.state = "waiting";
       state.task = message;
-      await publishRuntime("session.state.changed", { state: "waiting", task: state.task }).catch(
-        () => {},
-      );
+      // Claimed only while a live approval is held: a notification about
+      // something on the terminal itself is the observer's to describe, and a
+      // claim here would suppress the better report.
+      await publishRuntime("session.state.changed", {
+        state: "waiting",
+        task: state.task,
+        claim: approvalClaim(state, Date.now()),
+      }).catch(() => {});
       await publish("warning", "Needs attention", state.task).catch(() => {});
       break;
     }

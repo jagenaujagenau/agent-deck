@@ -24,8 +24,9 @@ Projection folds it into a State Authority lease `{source, expiresAt}`:
 - While the lease is live, a state report from any other source advances the
   fold's cursor but does not move state or task — including a competing
   claim, which is suppressed rather than a takeover.
-- The holder's next report **without** a claim is the release; a stranger's
-  report after expiry sweeps a dead lease out. TTLs are capped at 24 hours.
+- The holder's next report **without** a claim is the release, and so is the
+  holder resolving the request its claim existed for; a stranger's report
+  after expiry sweeps a dead lease out. TTLs are capped at 24 hours.
 - Only state reports are guarded. Lifecycle events (turn, item, request)
   are positive evidence that something real happened and always apply.
 - A claim without an `origin` is no claim: authority must be attributable.
@@ -35,7 +36,11 @@ replayable and tested through the Runtime Projection interface (ADR-0001).
 The snapshot exposes a live `stateAuthority` per agent as provenance.
 
 herdr claims with the answer window (10 minutes) when it blocks a session;
-its clear pass and answered-prompt report release by construction.
+its clear pass and answered-prompt report release by construction. The hooks
+claim symmetrically while a deck-answerable Request is open — an approval or
+question, for exactly that request's window — and deliberately not for a
+waiting state only the terminal can see, where the observer reading the
+screen is the better describer.
 
 ## Consequences
 

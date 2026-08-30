@@ -7,6 +7,7 @@
  */
 export * from "./runtime-events";
 export * from "./runtime-projector";
+export * from "./runtime-publisher";
 export * from "./managed-runtime";
 export * from "./claude-sdk-runtime";
 export * from "./client";

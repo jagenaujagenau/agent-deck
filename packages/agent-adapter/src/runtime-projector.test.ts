@@ -435,3 +435,52 @@ describe("state authority", () => {
     expect(projection.state).toBe("waiting");
   });
 });
+
+describe("state authority release on resolution", () => {
+  const at = (
+    type: CanonicalRuntimeEvent["type"],
+    payload: CanonicalRuntimeEvent["payload"],
+    seq: number,
+    source = "claude-hooks",
+  ): CanonicalRuntimeEvent => ({
+    id: `e${seq}`,
+    agentId: "a",
+    type,
+    createdAt: new Date(seq * 1000).toISOString(),
+    origin: { source, seq },
+    payload,
+  });
+
+  const fold = (events: ReadonlyArray<CanonicalRuntimeEvent>) =>
+    events.reduce(
+      (projection, entry, index) => projectRuntimeEvent(projection, entry, index + 1),
+      emptyRuntimeProjection("a"),
+    );
+
+  test("the holder resolving its request releases the claim", () => {
+    const projection = fold([
+      at("request.opened", { kind: "approval", tool: "Bash" }, 1),
+      at(
+        "session.state.changed",
+        { state: "waiting", task: "Approval: Bash", claim: { ttlMs: 600_000 } },
+        2,
+      ),
+      at("request.resolved", { status: "approved" }, 3),
+    ]);
+    expect(projection.state).toBe("running");
+    expect(projection.stateAuthority).toBeUndefined();
+  });
+
+  test("a stranger's resolution leaves the claim standing", () => {
+    const projection = fold([
+      at(
+        "session.state.changed",
+        { state: "waiting", task: "Prompt", claim: { ttlMs: 600_000 } },
+        1,
+        "herdr",
+      ),
+      at("user-input.resolved", { status: "expired" }, 2, "someone-else"),
+    ]);
+    expect(projection.stateAuthority?.source).toBe("herdr");
+  });
+});
