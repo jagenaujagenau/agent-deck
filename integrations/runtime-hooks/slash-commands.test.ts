@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverCodexSlashCommands, discoverGeminiSlashCommands, discoverSlashCommands } from "./slash-commands";
+import {
+  discoverCodexSlashCommands,
+  discoverGeminiSlashCommands,
+  discoverSlashCommands,
+} from "./slash-commands";
 
 function scratch() {
   const root = mkdtempSync(join(tmpdir(), "agent-deck-commands-"));
@@ -186,6 +190,8 @@ describe("discoverGeminiSlashCommands", () => {
   });
 
   test("no skills anywhere is an empty catalog, not an error", () => {
-    expect(discoverGeminiSlashCommands(mkdtempSync(join(tmpdir(), "agent-deck-gem-empty-")))).toEqual([]);
+    expect(
+      discoverGeminiSlashCommands(mkdtempSync(join(tmpdir(), "agent-deck-gem-empty-"))),
+    ).toEqual([]);
   });
 });

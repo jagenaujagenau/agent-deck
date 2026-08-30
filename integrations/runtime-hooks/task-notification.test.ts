@@ -35,7 +35,7 @@ describe("parseTaskNotification", () => {
 
   test("an agent that reported nothing still says which agent finished", () => {
     const parsed = parseTaskNotification(
-      "<task-notification><status>failed</status><summary>Agent \"Probe\" finished</summary></task-notification>",
+      '<task-notification><status>failed</status><summary>Agent "Probe" finished</summary></task-notification>',
     );
 
     expect(parsed).toEqual({
@@ -57,9 +57,7 @@ describe("parseTaskNotification", () => {
   });
 
   test("a message that merely quotes a notification is still the person's message", () => {
-    expect(
-      parseTaskNotification(`Why does this render badly?\n\n${notification}`),
-    ).toBeUndefined();
+    expect(parseTaskNotification(`Why does this render badly?\n\n${notification}`)).toBeUndefined();
   });
 
   test("a notification carrying only plumbing is dropped", () => {

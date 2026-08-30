@@ -38,7 +38,7 @@ describe("changedPaths", () => {
 describe("fingerprinting a real repository", () => {
   /** A throwaway repository with one committed file, standing in for a session's workspace. */
   function repo() {
-    const cwd = mkdtempSync(join(tmpdir(), "pi-workspace-"));
+    const cwd = mkdtempSync(join(tmpdir(), "workspace-"));
     const git = (...args: string[]) => execFileSync("git", args, { cwd });
     git("init", "-q");
     git("config", "user.email", "test@example.invalid");

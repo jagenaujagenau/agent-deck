@@ -1,7 +1,12 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { parseCodexTranscriptLine } from "./codex-transcript";
-import { asString, isJsonObject, isJsonString, parseJson } from "./json-value";
-import type { JsonValue } from "./json-value";
+import {
+  asString,
+  isJsonObject,
+  isJsonString,
+  parseJson,
+} from "../../packages/agent-adapter/src/json-value";
+import type { JsonValue } from "../../packages/agent-adapter/src/json-value";
 import { parseTaskNotification } from "./task-notification";
 
 /** Never flood the bridge's bounded event history from one pass. */
@@ -211,8 +216,7 @@ export function readNewTranscript(
     const lineStart = consumed;
     consumed += Buffer.byteLength(line, "utf8") + 1;
     if (!line.trim()) continue;
-    const entry =
-      runtime === "codex" ? parseCodexTranscriptLine(line) : parseTranscriptLine(line);
+    const entry = runtime === "codex" ? parseCodexTranscriptLine(line) : parseTranscriptLine(line);
     if (entry.kind === "other") continue;
     // Claude lines always carry a uuid; Codex rollout items mostly don't, so a
     // keyless one is named by where its bytes start, which re-reads reproduce.

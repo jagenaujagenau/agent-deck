@@ -13,8 +13,8 @@
  * for a process on that path.
  */
 
-import { asString, isJsonObject, parseJson } from "./json-value";
-import type { JsonObject, JsonValue } from "./json-value";
+import { asString, isJsonObject, parseJson } from "../../packages/agent-adapter/src/json-value";
+import type { JsonObject, JsonValue } from "../../packages/agent-adapter/src/json-value";
 
 /** One AskUserQuestion entry, narrowed to what the hooks put in front of a person. */
 export interface ToolQuestion {

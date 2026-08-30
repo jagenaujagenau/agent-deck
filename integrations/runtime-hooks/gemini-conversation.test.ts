@@ -9,7 +9,12 @@ const conversation = {
   sessionId: "g-1",
   lastUpdated: "2026-08-29T10:00:02.000Z",
   messages: [
-    { id: "m1", timestamp: "2026-08-29T10:00:00.000Z", type: "user", content: "add a health endpoint" },
+    {
+      id: "m1",
+      timestamp: "2026-08-29T10:00:00.000Z",
+      type: "user",
+      content: "add a health endpoint",
+    },
     {
       id: "m2",
       timestamp: "2026-08-29T10:00:01.000Z",
@@ -17,10 +22,26 @@ const conversation = {
       content: "On it.",
       model: "gemini-2.5-pro",
       thoughts: [
-        { subject: "Plan", description: "Add a route, then a test.", timestamp: "2026-08-29T10:00:00.500Z" },
-        { subject: "", description: "The router lives in app.ts.", timestamp: "2026-08-29T10:00:00.700Z" },
+        {
+          subject: "Plan",
+          description: "Add a route, then a test.",
+          timestamp: "2026-08-29T10:00:00.500Z",
+        },
+        {
+          subject: "",
+          description: "The router lives in app.ts.",
+          timestamp: "2026-08-29T10:00:00.700Z",
+        },
       ],
-      tokens: { input: 0, prompt: 1200, candidates: 300, total: 1500, cached: 400, thoughts: 80, tool: 0 },
+      tokens: {
+        input: 0,
+        prompt: 1200,
+        candidates: 300,
+        total: 1500,
+        cached: 400,
+        thoughts: 80,
+        tool: 0,
+      },
     },
     {
       id: "m3",
@@ -28,7 +49,15 @@ const conversation = {
       type: "gemini",
       content: "Done.",
       model: "gemini-2.5-pro",
-      tokens: { input: 0, prompt: 2100, candidates: 150, total: 2250, cached: 900, thoughts: 0, tool: 0 },
+      tokens: {
+        input: 0,
+        prompt: 2100,
+        candidates: 150,
+        total: 2250,
+        cached: 900,
+        thoughts: 0,
+        tool: 0,
+      },
     },
   ],
 };

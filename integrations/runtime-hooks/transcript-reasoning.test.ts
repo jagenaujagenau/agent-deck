@@ -262,6 +262,8 @@ describe("conversation sync", () => {
       },
       { type: "user", uuid: "u1", message: { role: "user", content: "real message" } },
     );
-    expect(readConversationBacklog(path, "s").messages.map((m) => m.text)).toEqual(["real message"]);
+    expect(readConversationBacklog(path, "s").messages.map((m) => m.text)).toEqual([
+      "real message",
+    ]);
   });
 });

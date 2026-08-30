@@ -15,8 +15,8 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { callHookSocket } from "./hook-socket";
-import { asString, isJsonObject, parseJson } from "./json-value";
-import type { JsonValue } from "./json-value";
+import { asString, isJsonObject, parseJson } from "../../packages/agent-adapter/src/json-value";
+import type { JsonValue } from "../../packages/agent-adapter/src/json-value";
 
 const runtime =
   process.argv[2] === "codex" ? "codex" : process.argv[2] === "gemini" ? "gemini" : "claude";

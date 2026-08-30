@@ -2,7 +2,7 @@ import {
   requiresApproval,
   type ApprovalMode,
 } from "../../packages/agent-adapter/src/approval-policy";
-import type { JsonObject } from "./json-value";
+import type { JsonObject } from "../../packages/agent-adapter/src/json-value";
 
 const lifecycleNames = new Map([
   ["sessionstart", "SessionStart"],

@@ -1,20 +1,7 @@
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { AgentEvent, JsonValue } from "./Domain";
 
-/**
- * Reading a persisted row is a boundary: the JSON blob in `bridge_agents` was
- * written by an older build, and a field that has since changed shape should
- * surface here rather than as a confusing failure three layers up.
- */
-export class StoredAgentError extends Schema.TaggedError<StoredAgentError>()("StoredAgentError", {
-  agentId: Schema.String,
-  cause: Schema.Defect(),
-}) {}
-
-/** Snapshot events are trimmed to what a card renders; see SNAPSHOT_* below. */
-const SNAPSHOT_EVENT_LIMIT = 24;
-const SNAPSHOT_DETAIL_LIMIT = 400;
 // A command cut mid-line is unreadable, which is the whole point of the terminal view. Measured
 // over a full window: at 600 this cut 42% of commands, at 3000 it cuts 3%, for ~220KB more on a
 // fetch that is throttled and per-session. The cap stays only to bound a pathological heredoc.
@@ -22,20 +9,6 @@ const HISTORY_COMMAND_LIMIT = 3000;
 
 const clip = (value: string, limit: number) =>
   value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
-
-/**
- * A snapshot feeds live cards and is re-sent on every change, so it carries
- * only what a card can show: whole histories and diff bodies are served per
- * session instead.
- */
-const cardEvent = (event: AgentEvent): AgentEvent => {
-  const { diff: _diff, command: _command, ...rest } = event;
-  return {
-    ...rest,
-    // A runtime may send detail as null rather than omitting it; both mean absent.
-    detail: rest.detail == null ? undefined : clip(rest.detail, SNAPSHOT_DETAIL_LIMIT),
-  };
-};
 
 /**
  * Trims a fetched history to `limit`, keeping both streams alive.
@@ -73,22 +46,9 @@ const parseOptions = (value: string | null): ReadonlyArray<string> | undefined =
   }
 };
 
-/**
- * A stored agent blob as `agents` serves it: whichever fields the build that
- * wrote the row put there, with the live window replaced by trimmed card
- * events. The open shape is deliberate - the snapshot passes a stored agent
- * through rather than deciding which of an older build's fields to drop.
- */
-export interface StoredAgentSnapshot {
-  [key: string]: JsonValue | ReadonlyArray<AgentEvent> | undefined;
-}
-
 export class BridgeStore extends Context.Service<
   BridgeStore,
   {
-    /** Every agent the bridge knows, as the snapshot renders them. */
-    readonly agents: Effect.Effect<ReadonlyArray<StoredAgentSnapshot>, StoredAgentError>;
-    /** A session's retained history: whole conversation plus recent activity. */
     /**
      * A session's retained history. `limit` trims it to the most recent
      * exchanges for a caller that cannot use the whole thing - a watch reading
@@ -103,36 +63,12 @@ export class BridgeStore extends Context.Service<
     readonly fileChanges: (agentId: string) => Effect.Effect<ReadonlyArray<AgentEvent>>;
     /** What a session can be asked to run by name. */
     readonly slashCommands: (agentId: string) => Effect.Effect<ReadonlyArray<JsonValue>>;
-    /** Historical token and cost totals shown in the snapshot summary. */
-    readonly usageTotals: Effect.Effect<{ tokens: number; costUsd: number }>;
   }
 >()("agent-deck/server/BridgeStore") {
   static readonly layer = Layer.effect(
     BridgeStore,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-
-      const agents = Effect.gen(function* () {
-        const rows = yield* sql<{
-          id: string;
-          data: string;
-        }>`SELECT id, data FROM bridge_agents`.pipe(Effect.orDie);
-        const decoded: Array<StoredAgentSnapshot> = [];
-        for (const row of rows) {
-          const agent = yield* Effect.try({
-            try: (): StoredAgentSnapshot => JSON.parse(row.data),
-            catch: (cause) => new StoredAgentError({ agentId: row.id, cause }),
-          });
-          // SAFETY: the row was written by persistAgent from an AgentRecord, so
-          // an `events` value that is an array holds AgentEvent documents.
-          const events = Array.isArray(agent.events) ? (agent.events as Array<AgentEvent>) : [];
-          decoded.push({
-            ...agent,
-            events: events.slice(-SNAPSHOT_EVENT_LIMIT).reverse().map(cardEvent),
-          });
-        }
-        return decoded;
-      });
 
       const rowsToEvents = (
         rows: ReadonlyArray<{
@@ -249,15 +185,7 @@ export class BridgeStore extends Context.Service<
         }).pipe(Effect.orElseSucceed((): ReadonlyArray<JsonValue> => []));
       }, Effect.orDie);
 
-      const usageTotals = Effect.gen(function* () {
-        const rows = yield* sql<{ tokens: number; cost_usd: number }>`
-          SELECT COALESCE(SUM(tokens), 0) AS tokens, COALESCE(SUM(cost_usd), 0) AS cost_usd
-          FROM bridge_usage_deltas`;
-        const row = rows[0];
-        return { tokens: row?.tokens ?? 0, costUsd: row?.cost_usd ?? 0 };
-      }).pipe(Effect.orDie);
-
-      return BridgeStore.of({ agents, history, fileChanges, slashCommands, usageTotals });
+      return BridgeStore.of({ history, fileChanges, slashCommands });
     }),
   );
 }

@@ -17,7 +17,12 @@
 
 import { unlinkSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
-import { asString, isJsonNumber, isJsonObject, parseJson } from "./json-value";
+import {
+  asString,
+  isJsonNumber,
+  isJsonObject,
+  parseJson,
+} from "../../packages/agent-adapter/src/json-value";
 
 export type SocketHookRequest = {
   runtime: string;

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { isJsonNumber, isJsonObject, parseJson } from "./json-value";
+import { isJsonNumber, isJsonObject, parseJson } from "../../packages/agent-adapter/src/json-value";
 
 /**
  * The per-session report counter both publishers share.

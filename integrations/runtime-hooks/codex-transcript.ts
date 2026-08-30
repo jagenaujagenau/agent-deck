@@ -1,5 +1,10 @@
-import { asString, isJsonObject, isJsonString, parseJson } from "./json-value";
-import type { JsonValue } from "./json-value";
+import {
+  asString,
+  isJsonObject,
+  isJsonString,
+  parseJson,
+} from "../../packages/agent-adapter/src/json-value";
+import type { JsonValue } from "../../packages/agent-adapter/src/json-value";
 import type { AssistantPart, TranscriptLine } from "./transcript-reasoning";
 
 /**

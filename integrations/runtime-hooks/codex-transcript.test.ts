@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { JsonValue } from "./json-value";
+import type { JsonValue } from "../../packages/agent-adapter/src/json-value";
 import { readConversationBacklog, readNewTranscript } from "./transcript-reasoning";
 
 function rollout(...entries: unknown[]) {
@@ -89,7 +89,12 @@ describe("codex conversation", () => {
       item({
         type: "message",
         role: "developer",
-        content: [{ type: "input_text", text: "<permissions instructions>\nsandboxed\n</permissions instructions>" }],
+        content: [
+          {
+            type: "input_text",
+            text: "<permissions instructions>\nsandboxed\n</permissions instructions>",
+          },
+        ],
       }),
       userItem("<environment_context>\n  <cwd>/home/dev/example</cwd>\n</environment_context>"),
       userItem("<turn_aborted> The user interrupted the turn."),

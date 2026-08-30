@@ -24,8 +24,13 @@ import {
   type RuntimeEventType,
 } from "../../packages/agent-adapter/src/index";
 import { readGeminiConversation } from "./gemini-conversation";
-import { asString, isJsonNumber, isJsonObject, parseJson } from "./json-value";
-import type { JsonValue } from "./json-value";
+import {
+  asString,
+  isJsonNumber,
+  isJsonObject,
+  parseJson,
+} from "../../packages/agent-adapter/src/json-value";
+import type { JsonValue } from "../../packages/agent-adapter/src/json-value";
 import {
   describeToolCall,
   type ApprovalMode,
@@ -57,7 +62,7 @@ import {
   diffForPath,
   fingerprintWorkspace,
   type WorkspaceFingerprint,
-} from "./workspace-changes";
+} from "../../packages/agent-adapter/src/workspace-changes";
 import {
   discoverCodexSlashCommands,
   discoverGeminiSlashCommands,

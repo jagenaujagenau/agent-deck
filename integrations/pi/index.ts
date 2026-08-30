@@ -13,7 +13,7 @@ import {
   requiresApproval,
   usesRemoteApproval,
   type ApprovalMode,
-} from "./approval-policy";
+} from "../../packages/agent-adapter/src/approval-policy";
 import { mutatesFile, readFileForDiff } from "../../packages/agent-adapter/src/file-snapshot";
 import type {
   CanonicalRuntimeEvent,
@@ -28,7 +28,7 @@ import {
   diffForPath,
   fingerprintWorkspace,
   type WorkspaceFingerprint,
-} from "./workspace-changes";
+} from "../../packages/agent-adapter/src/workspace-changes";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 const COMMAND_INTERVAL_MS = 2_000;

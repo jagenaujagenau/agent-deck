@@ -113,14 +113,17 @@ describe("hook socket", () => {
       return { stdout: '{"decision":"block"}', exitCode: 0 };
     });
     const payload = JSON.stringify({ session_id: "shim-session", hook_event_name: "Stop" });
-    const shim = Bun.spawn([process.execPath, join(import.meta.dir, "index.ts"), "claude", "Stop"], {
-      // The dead bridge URL is a tripwire: if the shim ever misses the socket
-      // and falls back, its publishes go nowhere instead of to a real deck.
-      env: { ...process.env, HOME: directory, AGENT_DECK_URL: "http://127.0.0.1:9" },
-      stdin: new TextEncoder().encode(payload),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const shim = Bun.spawn(
+      [process.execPath, join(import.meta.dir, "index.ts"), "claude", "Stop"],
+      {
+        // The dead bridge URL is a tripwire: if the shim ever misses the socket
+        // and falls back, its publishes go nowhere instead of to a real deck.
+        env: { ...process.env, HOME: directory, AGENT_DECK_URL: "http://127.0.0.1:9" },
+        stdin: new TextEncoder().encode(payload),
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
     const stdout = await new Response(shim.stdout).text();
     expect(await shim.exited).toBe(0);
     expect(stdout.trim()).toBe('{"decision":"block"}');

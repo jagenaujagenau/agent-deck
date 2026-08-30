@@ -2,8 +2,8 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { isJsonObject, parseJson } from "./json-value";
-import type { JsonObject } from "./json-value";
+import { isJsonObject, parseJson } from "../../packages/agent-adapter/src/json-value";
+import type { JsonObject } from "../../packages/agent-adapter/src/json-value";
 
 const target = process.argv[2] ?? "all";
 const hook = resolve(import.meta.dir, "index.ts");

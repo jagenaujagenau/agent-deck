@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { asString, isJsonObject, parseJson } from "./json-value";
-import type { JsonObject, JsonValue } from "./json-value";
+import { asString, isJsonObject, parseJson } from "../../packages/agent-adapter/src/json-value";
+import type { JsonObject, JsonValue } from "../../packages/agent-adapter/src/json-value";
 
 /**
  * Gemini CLI's conversation file, read for the facts its hooks never send.

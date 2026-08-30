@@ -12,6 +12,14 @@
 export type JsonValue = string | number | boolean | null | ReadonlyArray<JsonValue> | JsonObject;
 export type JsonObject = { [key: string]: JsonValue };
 
+/** JSON.parse, but returning what it actually produces. Throws exactly as JSON.parse does. */
+export function parseJson(text: string): JsonValue {
+  // SAFETY: JSON.parse can only ever produce the JSON grammar — a string,
+  // number, boolean, null, array, or object of the same — which is exactly the
+  // shape JsonValue names.
+  return JSON.parse(text) as JsonValue;
+}
+
 /** `String` hands a string back unchanged, and everything else a different value. */
 export function isJsonString(value: JsonValue | undefined): value is string {
   return String(value) === value;
