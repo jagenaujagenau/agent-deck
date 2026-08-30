@@ -133,16 +133,28 @@ async function awaitAnswer(
  * when the deck cannot say what it wants.
  */
 async function claimBlocked(agent: HerdrAgent, agentId: string) {
+  // The claim keeps the hooks' delayed state reports from overwriting what
+  // the terminal plainly shows: hooks fire on tool calls and questions, never
+  // on the runtime's own UI, so while a prompt sits on screen their view of
+  // the session is structurally behind this one. Released by publishing
+  // without a claim (the clear pass, the answered prompt), or by the clock if
+  // this process dies holding it.
+  const claim = { ttlMs: ANSWER_TIMEOUT_MS };
   const prompt = parsePrompt(await readPane(agent.target).catch(() => ""));
   if (prompt === undefined) {
     await publish(agentId, "session.state.changed", {
       state: "waiting",
       task: TERMINAL_PROMPT_TASK,
+      claim,
     });
     return;
   }
 
-  await publish(agentId, "session.state.changed", { state: "waiting", task: prompt.question });
+  await publish(agentId, "session.state.changed", {
+    state: "waiting",
+    task: prompt.question,
+    claim,
+  });
   if (openRequests.has(agentId)) return;
 
   // Derived from the session and the question rather than random, so the same

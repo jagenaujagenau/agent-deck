@@ -200,9 +200,9 @@ describe("the wire contract, executed", () => {
 
     const attempt = master.control("codex-contract-blocked", "prompt", "keep going");
     await expect(attempt).rejects.toBeInstanceOf(AgentBlockedError);
-    await expect(
-      master.control("codex-contract-blocked", "prompt", "keep going"),
-    ).rejects.toThrow("waiting for approval to run Bash");
+    await expect(master.control("codex-contract-blocked", "prompt", "keep going")).rejects.toThrow(
+      "waiting for approval to run Bash",
+    );
 
     const forced = await master.control("codex-contract-blocked", "prompt", "keep going", {
       force: true,
@@ -233,6 +233,38 @@ describe("the wire contract, executed", () => {
     const stale = await report(1, "running");
     expect(stale.status).toBe(201);
     expect(stale.body).toEqual({ accepted: false, reason: "stale" });
+  });
+
+  test("a state authority claim holds against another publisher, then releases", async () => {
+    await heartbeat("codex-contract-lease", { runtimeProtocol: "canonical-v1" });
+    const report = (seq: number, source: string, payload: WirePayload) =>
+      publish("/agents/codex-contract-lease/runtime-events", {
+        id: `contract-lease-${source}-${seq}`,
+        agentId: "codex-contract-lease",
+        type: "session.state.changed",
+        createdAt: new Date().toISOString(),
+        origin: { source, seq },
+        payload,
+      });
+
+    await report(1, "herdr-suite", {
+      state: "waiting",
+      task: "Prompt on screen",
+      claim: { ttlMs: 60_000 },
+    });
+    // A delayed report from the other publisher: logged, but it must not move
+    // the session while the claim is live.
+    await report(1, "hooks-suite", { state: "idle", task: "Ready" });
+    const held = await master.agent("codex-contract-lease");
+    expect(held?.state).toBe("waiting");
+    expect(held?.task).toBe("Prompt on screen");
+    expect(held?.stateAuthority?.source).toBe("herdr-suite");
+
+    // The holder reporting without a claim is the release.
+    await report(2, "herdr-suite", { state: "idle", task: "Ready for an instruction" });
+    const released = await master.agent("codex-contract-lease");
+    expect(released?.state).toBe("idle");
+    expect(released?.stateAuthority).toBeUndefined();
   });
 
   test("marking seen is shared state, and unknown sessions are 404", async () => {

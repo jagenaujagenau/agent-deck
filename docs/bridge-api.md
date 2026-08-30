@@ -182,7 +182,10 @@ An adapter is anything that can speak three routes:
   `origin: {source, seq}`; the bridge drops reports whose sequence is not
   newer than the last accepted from that source, answering
   `201 {"accepted": false, "reason": "stale"}` — so a delayed delivery can
-  never resurrect a dead state.
+  never resurrect a dead state. A state report may also carry
+  `claim: {ttlMs}` to take a State Authority lease for its origin source
+  (ADR-0002): while live, other sources' state reports are logged but do not
+  move the projection, and the holder releases by reporting without a claim.
 - `POST /agents/:id/slash-commands` — publish the session's runnable catalog
   (project and user prompts, skills, plugins; capped at 400).
 - `GET /agents/:id/commands` + `POST /agents/:id/commands/:commandId/ack` —

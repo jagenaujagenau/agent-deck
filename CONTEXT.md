@@ -18,6 +18,9 @@ A durable interaction opened by a runtime and resolved exactly once. Approval an
 ## Permission Authority
 The component entitled to decide whether a tool may run. In ask-capable modes, Agent Deck may open a durable approval Request. In runtime-owned `auto`, `bypassPermissions`, and `dontAsk` modes, the runtime remains the sole Permission Authority and Agent Deck observes without opening a redundant Request.
 
+## State Authority
+A time-boxed exclusive claim over a session's state reports, held by one publisher (an origin source) and folded into the Runtime Projection. A state report carrying `claim: {ttlMs}` takes or refreshes the lease; the holder's next report without one releases it, and the clock releases a holder that died. While live, state reports from other sources advance the event log but not the projected state. Lifecycle events (turns, items, Requests) are never suppressed — a claim guards opinions, not facts.
+
 ## Command
 An idempotent request from phone or watch to change an Agent. A Command has a durable receipt and delivery status.
 

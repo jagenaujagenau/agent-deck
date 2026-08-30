@@ -23,7 +23,7 @@ This migration is intentionally additive so active externally launched agents re
 
 ## Compatibility phase
 
-Pi and runtime hooks now publish canonical lifecycle events. Snapshots use canonical projections per session only when heartbeat/projection parity is proven; a mismatched or pre-migration session automatically falls back to its compatibility heartbeat so an approval can never be hidden. The two current live Claude sessions have reached parity and are projection-backed.
+Pi and runtime hooks now publish canonical lifecycle events. For a session declaring `runtimeProtocol: "canonical-v1"`, the snapshot believes the projection outright — the parity gate that discarded a mismatched projection was removed (it made corrections impossible and threw away the better usage numbers; see the comment at the snapshot site in `State.ts`). `projectionParity` is retained on the snapshot as a migration signal only. The heartbeat still supplies identity and liveness for runtimes that have not registered themselves. Cross-publisher disagreements over state are handled by State Authority leases (ADR-0002), not by falling back to the heartbeat.
 
 ## Remaining cutover work
 

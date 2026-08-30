@@ -13,12 +13,11 @@ import { createHash } from "node:crypto";
  * a hook cannot: hooks only run when the runtime calls them, and an idle session
  * calls nothing.
  *
- * Corrections are written to the hook state file rather than published as
- * runtime events. The bridge treats a heartbeat as authoritative and uses a
- * projection only where the two already agree, so an event on its own cannot
- * move a session's state - it is checked against the heartbeat, not merged into
- * it. The state file is what the heartbeat is built from, which makes it the
- * only place a correction actually lands.
+ * Corrections are published as canonical runtime events (see index.ts). An
+ * earlier version wrote them into the hooks' private state files, back when
+ * the bridge discarded any projection that disagreed with a heartbeat; that
+ * gate is gone (ADR-0001), and a blocked claim now carries a State Authority
+ * lease so the hooks' delayed reports cannot overwrite it (ADR-0002).
  */
 
 /** Herdr's own lifecycle vocabulary, which is richer than the deck's. */

@@ -98,6 +98,12 @@ export interface Agent {
   rateLimits?: ReadonlyArray<RateLimitWindow>;
   pendingApproval?: PendingApproval;
   pendingQuestion?: PendingQuestion;
+  /**
+   * Who currently owns this session's state reports, when a State Authority
+   * claim is live (ADR-0002). Provenance for a derived state: a surface can
+   * say whose claim the deck is honouring.
+   */
+  stateAuthority?: { source: string; expiresAt: string };
 }
 
 export interface BridgeInfo {

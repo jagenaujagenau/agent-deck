@@ -7,6 +7,7 @@ import {
   type CanonicalRuntimeEvent,
   type RuntimeProjection,
   type RuntimeRequestStatus,
+  type StateAuthority,
 } from "@agent-control-dashboard/agent-adapter";
 import { mergeRecentEvents } from "../bridgeEvents";
 import { scanClaudeUsage, scanCodexUsage, type TranscriptUsageRow } from "../transcriptUsage";
@@ -337,6 +338,8 @@ export interface SnapshotAgent extends Omit<AgentRecord, "capabilities" | "event
   capabilities?: ReadonlyArray<string>;
   projectionSequence?: number;
   projectionParity?: boolean;
+  /** Who currently owns this session's state reports, when a claim is live. */
+  stateAuthority?: StateAuthority;
   pendingQuestion?: PendingQuestion;
   events: Array<AgentEvent>;
 }
@@ -874,6 +877,15 @@ export class BridgeState extends Context.Service<
             // agree, rather than deciding whether to listen.
             item.projectionParity = activeProjection.state === agent.state;
             item.task = activeProjection.task;
+            // Provenance for a derived state: a surface (or a person
+            // debugging one) can see whose claim the deck is honouring
+            // instead of guessing why a report did not land.
+            if (
+              activeProjection.stateAuthority &&
+              Date.parse(activeProjection.stateAuthority.expiresAt) > timestamp
+            ) {
+              item.stateAuthority = activeProjection.stateAuthority;
+            }
           }
           if (activeProjection?.identity) {
             item.name = activeProjection.identity.name;

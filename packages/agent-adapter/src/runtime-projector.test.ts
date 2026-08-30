@@ -203,10 +203,7 @@ describe("late item completions", () => {
 });
 
 describe("rate-limits.updated", () => {
-  const at = (
-    payload: CanonicalRuntimeEvent["payload"],
-    seq: number,
-  ): CanonicalRuntimeEvent => ({
+  const at = (payload: CanonicalRuntimeEvent["payload"], seq: number): CanonicalRuntimeEvent => ({
     id: `e${seq}`,
     agentId: "a",
     type: "rate-limits.updated",
@@ -322,5 +319,119 @@ describe("settled requests", () => {
       at("user-input.resolved", { status: "expired" }, 2),
     ]);
     expect(projection.pendingRequest).toBeUndefined();
+  });
+});
+
+describe("state authority", () => {
+  const report = (
+    seq: number,
+    source: string,
+    payload: CanonicalRuntimeEvent["payload"],
+    atMs = seq * 1000,
+  ): CanonicalRuntimeEvent => ({
+    id: `e${seq}`,
+    agentId: "a",
+    type: "session.state.changed",
+    createdAt: new Date(atMs).toISOString(),
+    origin: { source, seq },
+    payload,
+  });
+
+  const fold = (events: ReadonlyArray<CanonicalRuntimeEvent>) =>
+    events.reduce(
+      (projection, entry, index) => projectRuntimeEvent(projection, entry, index + 1),
+      emptyRuntimeProjection("a"),
+    );
+
+  test("a live claim keeps another publisher's state report from landing", () => {
+    // The herdr-vs-hooks race: the terminal observer claims waiting at a
+    // prompt the hooks cannot see, then a delayed hook report says idle.
+    const projection = fold([
+      report(1, "herdr", {
+        state: "waiting",
+        task: "Resume from summary?",
+        claim: { ttlMs: 60_000 },
+      }),
+      report(2, "claude-hooks", { state: "idle", task: "Ready" }),
+    ]);
+    expect(projection.state).toBe("waiting");
+    expect(projection.task).toBe("Resume from summary?");
+    expect(projection.stateAuthority?.source).toBe("herdr");
+    // The suppressed report still advanced the fold's cursor.
+    expect(projection.sequence).toBe(2);
+  });
+
+  test("the holder releases by reporting without a claim", () => {
+    const projection = fold([
+      report(1, "herdr", { state: "waiting", task: "Prompt", claim: { ttlMs: 60_000 } }),
+      report(2, "herdr", { state: "idle", task: "Ready for an instruction" }),
+      report(3, "claude-hooks", { state: "running", task: "Working" }),
+    ]);
+    expect(projection.state).toBe("running");
+    expect(projection.stateAuthority).toBeUndefined();
+  });
+
+  test("an expired claim decays, and the next stranger sweeps it out", () => {
+    const projection = fold([
+      report(1, "herdr", { state: "waiting", task: "Prompt", claim: { ttlMs: 5_000 } }),
+      // 7s later: past the 5s lease.
+      report(2, "claude-hooks", { state: "idle", task: "Ready" }, 8_000),
+    ]);
+    expect(projection.state).toBe("idle");
+    expect(projection.stateAuthority).toBeUndefined();
+  });
+
+  test("a competing claim while one is live is suppressed, not a takeover", () => {
+    const projection = fold([
+      report(1, "herdr", { state: "waiting", task: "Prompt", claim: { ttlMs: 60_000 } }),
+      report(2, "another-observer", { state: "error", task: "Broken", claim: { ttlMs: 60_000 } }),
+    ]);
+    expect(projection.state).toBe("waiting");
+    expect(projection.stateAuthority?.source).toBe("herdr");
+  });
+
+  test("lifecycle events are positive evidence and pass through a claim", () => {
+    // A turn starting means the prompt was answered in the terminal itself;
+    // the claim guards opinions, not facts.
+    const projection = fold([
+      report(1, "herdr", { state: "waiting", task: "Prompt", claim: { ttlMs: 60_000 } }),
+      {
+        id: "e2",
+        agentId: "a",
+        type: "turn.started",
+        createdAt: new Date(2_000).toISOString(),
+        origin: { source: "claude-hooks", seq: 9 },
+        payload: { objective: "Fix the bug" },
+      },
+    ]);
+    expect(projection.state).toBe("running");
+  });
+
+  test("a claim without an origin, or with an unreadable ttl, is no claim", () => {
+    const unattributed = fold([
+      {
+        id: "e1",
+        agentId: "a",
+        type: "session.state.changed",
+        createdAt: new Date(1_000).toISOString(),
+        payload: { state: "waiting", task: "Prompt", claim: { ttlMs: 60_000 } },
+      },
+    ]);
+    expect(unattributed.state).toBe("waiting");
+    expect(unattributed.stateAuthority).toBeUndefined();
+    const malformed = fold([
+      report(1, "herdr", { state: "waiting", task: "Prompt", claim: { ttlMs: -5 } }),
+    ]);
+    expect(malformed.stateAuthority).toBeUndefined();
+  });
+
+  test("the holder refreshing its claim extends the lease", () => {
+    const projection = fold([
+      report(1, "herdr", { state: "waiting", task: "Prompt", claim: { ttlMs: 5_000 } }),
+      report(2, "herdr", { state: "waiting", task: "Prompt", claim: { ttlMs: 5_000 } }, 4_000),
+      // 8s: past the first lease's 6s expiry, inside the refreshed 9s one.
+      report(3, "claude-hooks", { state: "idle", task: "Ready" }, 8_000),
+    ]);
+    expect(projection.state).toBe("waiting");
   });
 });

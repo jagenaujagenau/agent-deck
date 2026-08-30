@@ -49,8 +49,26 @@ export type RuntimeProjection = {
   usageKnown: boolean;
   /** Absent until a `rate-limits.updated` event arrives; then the latest report. */
   rateLimits?: ReadonlyArray<ProjectedRateLimit>;
+  /**
+   * The one publisher whose state reports currently move this session, and
+   * until when. Held by a state report carrying `claim: {ttlMs}`; released by
+   * the holder's next report without one, or by the clock. While live, a
+   * `session.state.changed` from any other source advances the fold's cursor
+   * but not the state — the claim exists precisely because that other
+   * publisher may be repeating something it read before the world changed.
+   */
+  stateAuthority?: StateAuthority;
   updatedAt: string;
 };
+
+export type StateAuthority = { source: string; expiresAt: string };
+
+/**
+ * A claim is honest only if it expires: a claimant that crashed must decay
+ * back to whoever else can still see the session. Capped a day out so a
+ * malformed ttl cannot park a session behind a dead claimant forever.
+ */
+const MAX_STATE_AUTHORITY_TTL_MS = 24 * 60 * 60_000;
 
 export function emptyRuntimeProjection(agentId: string): RuntimeProjection {
   return {
@@ -93,12 +111,34 @@ export function projectRuntimeEvent(
         state: current.sequence === 0 ? next.state : current.state,
         task: current.sequence === 0 ? next.task : current.task,
       };
-    case "session.state.changed":
-      return {
+    case "session.state.changed": {
+      // Only state *reports* are guarded by a claim. Lifecycle events —
+      // turns, items, requests — are positive evidence that something real
+      // happened and always apply; a report is a publisher's opinion of where
+      // the session stands, and opinions are what go stale.
+      const source = event.origin?.source;
+      const lease = current.stateAuthority;
+      const leaseLive =
+        lease !== undefined && Date.parse(lease.expiresAt) > Date.parse(event.createdAt);
+      if (leaseLive && source !== lease.source) return next;
+      const applied = {
         ...next,
         state: state(event.payload.state),
         task: text(event.payload.task) ?? current.task,
       };
+      const ttlMs = claimTtlMs(event.payload.claim);
+      if (ttlMs !== undefined && source !== undefined) {
+        applied.stateAuthority = {
+          source,
+          expiresAt: new Date(Date.parse(event.createdAt) + ttlMs).toISOString(),
+        };
+      } else {
+        // The holder reporting without a claim is the release; a stranger
+        // landing after expiry sweeps the dead lease out with it.
+        delete applied.stateAuthority;
+      }
+      return applied;
+    }
     case "turn.started":
       return {
         ...next,
@@ -213,6 +253,17 @@ function rateLimitWindows(
     windows.push(window);
   }
   return windows;
+}
+
+/**
+ * Reads a state report's `claim: {ttlMs}`, with the same boundary tolerance
+ * every other payload field gets: a claim that cannot be read is no claim.
+ */
+function claimTtlMs(value: JsonValue | undefined): number | undefined {
+  if (!isJsonObject(value)) return undefined;
+  const ttl = value.ttlMs;
+  if (!isJsonNumber(ttl) || !Number.isFinite(ttl) || ttl <= 0) return undefined;
+  return Math.min(Math.trunc(ttl), MAX_STATE_AUTHORITY_TTL_MS);
 }
 
 function text(value: JsonValue | undefined) {
