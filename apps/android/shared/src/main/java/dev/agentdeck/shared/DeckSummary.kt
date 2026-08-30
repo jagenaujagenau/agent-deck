@@ -73,16 +73,27 @@ object DeckSummaries {
      */
     const val MAX_LINES: Int = 8
 
+    /** Rank 4 and above is a person's problem: an error, or a session blocked on one. */
+    private fun needsYou(agent: Agent): Boolean =
+        attentionPriority(agent.state, blocked = agent.state == "waiting", seen = true) >= 4
+
     fun of(agents: List<Agent>, observedAt: Long): DeckSummary {
         val live = agents.filter { it.state != "offline" }
-        val waiting = live.filter { it.state == "waiting" }
+        val needing = live.filter { needsYou(it) }
         val running = live.filter { it.state == "running" }
-        val resting = live.filter { it.state != "waiting" && it.state != "running" }
 
-        // Waiting first, and oldest first within it: the session that has been
-        // waiting longest is the one most likely to have stopped making
-        // progress. Then what is working, then what is not.
-        val ordered = waiting.sortedBy { it.lastSeenAt } + running + resting
+        // Attention Priority, the same ranking every scrollable surface sorts
+        // by — the stuck one is always first, on every screen, including the
+        // glanceable ones. Seen is held neutral: this summary is stored and
+        // relayed verbatim from the phone to the watch, and Done is a
+        // per-surface state — one surface's read must not decide what the
+        // other's tile leads with. Within a rank, the oldest first: the
+        // session stuck longest is the one most likely to stay stuck.
+        val ordered = live.sortedWith(
+            compareByDescending<Agent> {
+                attentionPriority(it.state, blocked = it.state == "waiting", seen = true)
+            }.thenBy { it.lastSeenAt },
+        )
         return DeckSummary(
             lines = ordered.take(MAX_LINES).map { agent ->
                 DeckLine(
@@ -90,12 +101,12 @@ object DeckSummaries {
                     project = agent.project.ifBlank { agent.name },
                     detail = detailFor(agent),
                     harness = Harnesses.of(agent),
-                    needsYou = agent.state == "waiting",
+                    needsYou = needsYou(agent),
                 )
             },
-            attention = waiting.size,
+            attention = needing.size,
             running = running.size,
-            idle = resting.size,
+            idle = live.size - needing.size - running.size,
             observedAt = observedAt,
             reachedBridge = true,
         )

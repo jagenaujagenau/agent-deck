@@ -49,7 +49,7 @@ This person has viewed this Agent's latest activity. Only a human act (opening t
 A derived, per-surface state: an Agent that went idle while unseen. "Finished while you weren't looking" outranks "running" in every surface's attention ordering, and decays to plain idle the moment the session is viewed.
 
 ## Attention Priority
-One shared ranking every surface sorts by: error, then blocked (waiting), then done, then running, then idle-seen, then offline. The stuck one is always first, on every screen, by construction.
+One shared ranking every surface sorts by: error, then blocked (waiting), then done, then running, then idle-seen, then offline. The stuck one is always first, on every screen, by construction — including the glanceable ones (widget, tile), which rank with seen held neutral because a summary shared across surfaces cannot carry one surface's eyes. Parity of the three implementations (Kotlin, Swift, TypeScript) is enforced by `packages/bridge-client/fixtures/attention-parity.json`, which all three run as tests; extend the corpus, never one implementation.
 
 ## Blocked Refusal
 A prompt, steer, or follow-up aimed at an Agent that is waiting on an approval or question is refused by the bridge with `agent_blocked` rather than silently queued — answering the block is the real next action. A device may deliberately queue anyway by forcing the command.

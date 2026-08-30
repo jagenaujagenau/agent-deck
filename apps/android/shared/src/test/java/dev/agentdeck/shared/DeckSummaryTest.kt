@@ -25,15 +25,31 @@ class DeckSummaryTest {
     )
 
     @Test
-    fun `only waiting sessions are counted as needing you`() {
+    fun `errored and waiting sessions are the ones needing you`() {
         val summary = DeckSummaries.of(
             listOf(agent("a", "waiting"), agent("b", "running"), agent("c", "idle"), agent("d", "error")),
             observedAt = 1L,
         )
-        assertEquals(1, summary.attention)
+        // The stuck one is a person's problem: an error cannot move without
+        // one, exactly like a session blocked on an approval.
+        assertEquals(2, summary.attention)
         assertEquals(1, summary.running)
-        // An errored session is not asking for you; it is counted, not surfaced.
-        assertEquals(2, summary.idle)
+        assertEquals(1, summary.idle)
+    }
+
+    @Test
+    fun `the glanceable surfaces sort by the same attention priority as every list`() {
+        val summary = DeckSummaries.of(
+            listOf(
+                agent("idle1", "idle"),
+                agent("run1", "running"),
+                agent("wait1", "waiting"),
+                agent("err1", "error"),
+            ),
+            observedAt = 1L,
+        )
+        assertEquals(listOf("err1", "wait1", "run1", "idle1"), summary.lines.map { it.agentId })
+        assertTrue(summary.lines.first().needsYou)
     }
 
     @Test

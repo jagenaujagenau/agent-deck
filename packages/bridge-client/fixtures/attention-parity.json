@@ -1,0 +1,75 @@
+{
+  "comment": "The Attention Priority and Seen contracts, as data. Three implementations answer for every case here — attention.ts (bun test), AttentionRank.kt (JVM test), AttentionPolicy.swift + SeenPolicy.swift (swift test) — so the 'kept in step' comments are a build failure instead of a code-review hope. Extend this file, never one implementation.",
+  "rank": [
+    { "case": "the stuck one is always first", "state": "error", "blocked": false, "seen": true, "expect": 5 },
+    { "case": "error while blocked is still first as an error", "state": "error", "blocked": true, "seen": false, "expect": 5 },
+    { "case": "blocked on a person", "state": "waiting", "blocked": true, "seen": false, "expect": 4 },
+    { "case": "blocked stays blocked however often it was read", "state": "waiting", "blocked": true, "seen": true, "expect": 4 },
+    { "case": "finished while you weren't looking outranks running", "state": "idle", "blocked": false, "seen": false, "expect": 3 },
+    { "case": "running minds its own business", "state": "running", "blocked": false, "seen": false, "expect": 2 },
+    { "case": "running is running whether or not it was read", "state": "running", "blocked": false, "seen": true, "expect": 2 },
+    { "case": "idle and read asks for almost nothing", "state": "idle", "blocked": false, "seen": true, "expect": 1 },
+    { "case": "offline asks for nothing", "state": "offline", "blocked": false, "seen": false, "expect": 0 },
+    { "case": "paused asks for nothing", "state": "paused", "blocked": false, "seen": false, "expect": 0 },
+    { "case": "a state nobody recognises asks for nothing", "state": "someday-state", "blocked": false, "seen": false, "expect": 0 },
+    { "case": "waiting is only blocked when the caller says so", "state": "waiting", "blocked": false, "seen": true, "expect": 0 }
+  ],
+  "seen": [
+    {
+      "case": "never viewed anywhere is unseen",
+      "lastSeenAt": "2026-08-30T10:00:00.000Z",
+      "eventAts": [],
+      "viewedAt": null,
+      "localSeenAt": null,
+      "expect": false
+    },
+    {
+      "case": "this device's own mark covers",
+      "lastSeenAt": "2026-08-30T10:00:00.000Z",
+      "eventAts": ["2026-08-30T10:05:00.000Z"],
+      "viewedAt": null,
+      "localSeenAt": "2026-08-30T10:05:00.000Z",
+      "expect": true
+    },
+    {
+      "case": "a view anywhere counts, through the bridge's mark",
+      "lastSeenAt": "2026-08-30T10:00:00.000Z",
+      "eventAts": ["2026-08-30T10:05:00.000Z"],
+      "viewedAt": "2026-08-30T10:06:00.000Z",
+      "localSeenAt": null,
+      "expect": true
+    },
+    {
+      "case": "newer activity re-badges, no matter which surface looked",
+      "lastSeenAt": "2026-08-30T10:00:00.000Z",
+      "eventAts": ["2026-08-30T10:09:00.000Z"],
+      "viewedAt": "2026-08-30T10:06:00.000Z",
+      "localSeenAt": "2026-08-30T10:07:00.000Z",
+      "expect": false
+    },
+    {
+      "case": "an event newer than the heartbeat is activity too",
+      "lastSeenAt": "2026-08-30T10:00:00.000Z",
+      "eventAts": ["2026-08-30T10:08:00.000Z"],
+      "viewedAt": "2026-08-30T10:01:00.000Z",
+      "localSeenAt": null,
+      "expect": false
+    },
+    {
+      "case": "a heartbeat newer than every event is the activity",
+      "lastSeenAt": "2026-08-30T10:08:00.000Z",
+      "eventAts": ["2026-08-30T10:02:00.000Z"],
+      "viewedAt": "2026-08-30T10:08:00.000Z",
+      "localSeenAt": null,
+      "expect": true
+    },
+    {
+      "case": "a mark at exactly the latest activity covers it",
+      "lastSeenAt": "2026-08-30T10:03:00.000Z",
+      "eventAts": [],
+      "viewedAt": null,
+      "localSeenAt": "2026-08-30T10:03:00.000Z",
+      "expect": true
+    }
+  ]
+}

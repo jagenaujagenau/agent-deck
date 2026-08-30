@@ -9,7 +9,9 @@ import type { Agent } from "./types";
  * is holding a result nobody has collected; a running session is doing fine by
  * itself; and one that finished and was read asks for nothing at all.
  *
- * Kept in step with AttentionRank.kt and AttentionPolicy.swift.
+ * Parity with AttentionRank.kt and AttentionPolicy.swift is enforced by
+ * fixtures/attention-parity.json — all three run the same corpus. Extend the
+ * corpus, never one implementation.
  */
 export function attentionPriority(state: string, blocked: boolean, seen: boolean): number {
   if (state === "error") return 5;

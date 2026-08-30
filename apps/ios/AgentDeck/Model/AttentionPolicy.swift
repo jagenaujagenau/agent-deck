@@ -14,7 +14,9 @@ import Foundation
 /// record of whether the session has been looked at since it last did anything
 /// (`SeenPolicy`). Kept equivalent with the Android app's ranking of the same
 /// name — two surfaces disagreeing about what matters most is worse than
-/// either ordering alone.
+/// either ordering alone. Parity with AttentionRank.kt and attention.ts is
+/// enforced by `packages/bridge-client/fixtures/attention-parity.json`, run
+/// here by `apps/ios/PolicyTests` (`swift test`).
 func attentionPriority(state: String, blocked: Bool, seen: Bool) -> Int {
     if state == "error" { return 5 }
     if blocked { return 4 }

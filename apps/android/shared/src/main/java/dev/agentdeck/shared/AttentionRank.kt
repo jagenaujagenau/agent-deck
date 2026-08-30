@@ -16,8 +16,9 @@ import android.content.Context
  * the same deck can rank differently on the phone and the watch, which is the
  * point: each wrist and pocket owes attention only to what *it* has not shown.
  *
- * The iOS app shares this same ranking (`AttentionPolicy.swift`); keep the
- * two in step when the numbers change.
+ * The iOS app and the TypeScript client share this same ranking; parity is
+ * enforced by `packages/bridge-client/fixtures/attention-parity.json`, which
+ * all three run as tests. Extend the corpus, never one implementation.
  */
 fun attentionPriority(state: String, blocked: Boolean, seen: Boolean): Int = when {
     state == "error" -> 5
