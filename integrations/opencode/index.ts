@@ -160,6 +160,7 @@ export const AgentDeckPlugin = async (input: {
       .catch(() => {});
   };
 
+  const publisher = client.publisher("opencode-plugin");
   const publishRuntime = async (
     type: RuntimeEventType,
     payload: Record<string, string | number | boolean | string[] | undefined>,
@@ -167,22 +168,7 @@ export const AgentDeckPlugin = async (input: {
   ) => {
     const id = agentId();
     if (!id) return;
-    // Absent facts are omitted rather than sent as nulls; the wire type only
-    // speaks JSON.
-    const body: Record<string, string | number | boolean | string[]> = {};
-    for (const [key, value] of Object.entries(payload)) {
-      if (value !== undefined) body[key] = value;
-    }
-    await client
-      .runtimeEvent({
-        id: refs.id ?? crypto.randomUUID(),
-        agentId: id,
-        type,
-        createdAt: new Date().toISOString(),
-        payload: body,
-        ...refs,
-      })
-      .catch(() => {});
+    await publisher(id, type, payload, refs).catch(() => {});
   };
 
   const publish = async (

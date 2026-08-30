@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { isJsonObject, isJsonString } from "./json-value";
 import type { JsonValue } from "./json-value";
 import type { CanonicalRuntimeEvent } from "./runtime-events";
+import { createRuntimePublisher } from "./runtime-publisher";
+import type { RuntimePublisher } from "./runtime-publisher";
 
 /**
  * The client every adapter talks to the bridge through, and the wire types it
@@ -171,6 +173,16 @@ export class AgentDeckClient {
     return this.request(`/agents/${encodeURIComponent(event.agentId)}/runtime-events`, {
       method: "POST",
       body: JSON.stringify(event),
+    });
+  }
+
+  /** A Runtime Event publisher speaking as `source`, delivering through this client. */
+  publisher(source: string): RuntimePublisher {
+    return createRuntimePublisher({
+      source,
+      send: async (event) => {
+        await this.runtimeEvent(event);
+      },
     });
   }
 

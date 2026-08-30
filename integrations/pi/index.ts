@@ -19,6 +19,7 @@ import type {
   CanonicalRuntimeEvent,
   RuntimeEventType,
 } from "../../packages/agent-adapter/src/runtime-events";
+import { createRuntimePublisher } from "../../packages/agent-adapter/src/runtime-publisher";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
 import { asObject, asString, type JsonValue } from "./payload";
 import { askedQuestion, isAskUserQuestionTool } from "./questions";
@@ -221,26 +222,22 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
     }
   };
 
+  const publisher = createRuntimePublisher({
+    source: "pi-extension",
+    send: async (event) => {
+      await bridgeRequest(`/agents/${encodeURIComponent(event.agentId)}/runtime-events`, {
+        method: "POST",
+        body: JSON.stringify(event),
+      });
+    },
+  });
   const publishRuntime = (
     type: RuntimeEventType,
     payload: CanonicalRuntimeEvent["payload"],
     refs: { id?: string; turnId?: string; itemId?: string; requestId?: string } = {},
   ) => {
     if (!ctx) return Promise.resolve();
-    const body: CanonicalRuntimeEvent = {
-      id: refs.id ?? crypto.randomUUID(),
-      agentId: agentId(),
-      type,
-      createdAt: new Date().toISOString(),
-      payload,
-    };
-    if (refs.turnId) body.turnId = refs.turnId;
-    if (refs.itemId) body.itemId = refs.itemId;
-    if (refs.requestId) body.requestId = refs.requestId;
-    return bridgeRequest(`/agents/${encodeURIComponent(agentId())}/runtime-events`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return publisher(agentId(), type, payload, refs);
   };
 
   const publishEvent = (

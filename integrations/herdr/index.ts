@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
 import { AgentDeckClient } from "../../packages/agent-adapter/src/client";
-import type {
-  CanonicalRuntimeEvent,
-  RuntimeEventType,
-} from "../../packages/agent-adapter/src/runtime-events";
+import type { RuntimeEventType } from "../../packages/agent-adapter/src/runtime-events";
+import type { RuntimeEventPayload } from "../../packages/agent-adapter/src/runtime-publisher";
 import { drainRemoteMessages, promptContext } from "../runtime-hooks/remote-messages";
 import { listAgents, promptAgent, readPane, sendKeys } from "./herdr-cli";
 import { parsePrompt, type TerminalPrompt } from "./prompt";
@@ -78,21 +76,10 @@ async function deckAgents(): Promise<Map<string, DeckAgent>> {
   return new Map((snapshot?.agents ?? []).map((agent) => [agent.id, agent]));
 }
 
-const publish = (
-  agentId: string,
-  type: RuntimeEventType,
-  payload: CanonicalRuntimeEvent["payload"],
-  id?: string,
-) =>
-  client
-    .runtimeEvent({
-      id: id ?? crypto.randomUUID(),
-      agentId,
-      type,
-      createdAt: new Date().toISOString(),
-      payload,
-    })
-    .catch(() => {});
+const publisher = client.publisher("herdr");
+
+const publish = (agentId: string, type: RuntimeEventType, payload: RuntimeEventPayload) =>
+  publisher(agentId, type, payload).catch(() => {});
 
 /**
  * Waits for an answer and presses it, then lets the screen speak for itself.
@@ -167,22 +154,18 @@ async function claimBlocked(agent: HerdrAgent, agentId: string) {
   if (asked.has(requestId)) return;
   asked.add(requestId);
   openRequests.set(agentId, requestId);
-  await client
-    .runtimeEvent({
-      id: `terminal-prompt:${requestId}`,
-      agentId,
-      type: "user-input.requested",
+  await publisher(
+    agentId,
+    "user-input.requested",
+    {
+      kind: "user-input",
+      question: prompt.question,
+      options: prompt.options.map((option) => option.label),
       createdAt: new Date().toISOString(),
-      requestId,
-      payload: {
-        kind: "user-input",
-        question: prompt.question,
-        options: prompt.options.map((option) => option.label),
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + ANSWER_TIMEOUT_MS).toISOString(),
-      },
-    })
-    .catch(() => openRequests.delete(agentId));
+      expiresAt: new Date(Date.now() + ANSWER_TIMEOUT_MS).toISOString(),
+    },
+    { id: `terminal-prompt:${requestId}`, requestId },
+  ).catch(() => openRequests.delete(agentId));
 
   void awaitAnswer(agentId, requestId, agent.target, prompt);
 }

@@ -301,8 +301,9 @@ export const pendingBlockFrom = (
  *
  * Only "session.state.changed" is guarded: item, tool, and usage facts are
  * append-only history, where arriving late loses nothing. A report with no
- * origin keeps the old behaviour exactly — the Pi and OpenCode adapters never
- * send one, and their reports must keep landing.
+ * origin keeps the old behaviour exactly — every in-tree adapter now names
+ * one through the shared publisher, but events from an older adapter or a
+ * third-party integration must keep landing.
  */
 export const isStaleStateReport = (
   lastAcceptedSeq: Map<string, number>,
@@ -515,7 +516,9 @@ export class BridgeState extends Context.Service<
             ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, summary = excluded.summary, detail = excluded.detail,
               tool = excluded.tool, command = excluded.command, path = excluded.path, options = excluded.options,
               subagent_id = excluded.subagent_id, subagent_type = excluded.subagent_type,
-              subagent_name = excluded.subagent_name, turn_id = excluded.turn_id`.pipe(Effect.orDie);
+              subagent_name = excluded.subagent_name, turn_id = excluded.turn_id`.pipe(
+          Effect.orDie,
+        );
 
       const persistFileChange = (agentId: string, event: AgentEvent) =>
         event.diff === undefined

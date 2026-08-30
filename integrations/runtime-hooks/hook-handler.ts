@@ -19,7 +19,6 @@ import {
   clipMultiline,
   type AgentEventInput,
   type AgentState,
-  type CanonicalRuntimeEvent,
   type ControlAction,
   type RuntimeEventType,
 } from "../../packages/agent-adapter/src/index";
@@ -232,10 +231,7 @@ export async function handleHookEvent(request: HookEventRequest): Promise<HookEv
   return out.length > 0 ? { stdout: out.join("\n") } : {};
 }
 
-async function handle(
-  request: HookEventRequest,
-  emit: (line: string) => void,
-): Promise<void> {
+async function handle(request: HookEventRequest, emit: (line: string) => void): Promise<void> {
   const { runtime, hookPpid } = request;
   const input = parseHookPayload(request.payloadText);
   const event = canonicalLifecycleEvent(input.eventName ?? request.expectedEvent);
@@ -417,6 +413,7 @@ async function handle(
       pendingApproval: state.pendingApproval,
     });
   const save = () => writeFileSync(statePath, JSON.stringify(state));
+  const publisher = client.publisher(REPORT_SOURCE);
   const publishRuntime = (
     type: RuntimeEventType,
     payload: RuntimePayload,
@@ -428,18 +425,7 @@ async function handle(
     // that went out must never be re-numbered by the next one.
     const seq = nextReportSeq(statePath, state);
     save();
-    const runtimeEvent: CanonicalRuntimeEvent = {
-      id: refs.id ?? crypto.randomUUID(),
-      agentId,
-      type,
-      createdAt: new Date().toISOString(),
-      origin: { source: REPORT_SOURCE, seq },
-      payload,
-    };
-    if (refs.turnId) runtimeEvent.turnId = refs.turnId;
-    if (refs.itemId) runtimeEvent.itemId = refs.itemId;
-    if (refs.requestId) runtimeEvent.requestId = refs.requestId;
-    return client.runtimeEvent(runtimeEvent);
+    return publisher(agentId, type, payload, { ...refs, seq });
   };
   const publish = (
     kind: "thought" | "tool" | "output" | "warning" | "error" | "question" | "user",
@@ -549,7 +535,11 @@ async function handle(
             turnId: state.activeTurnId,
           },
         );
-        await publish("question", "Question", question, { id: questionId, tool: toolName, options });
+        await publish("question", "Question", question, {
+          id: questionId,
+          tool: toolName,
+          options,
+        });
         const answer =
           options.length > 0 && QUESTION_TIMEOUT_MS > 0
             ? await client.waitForAnswer(agentId, questionId, { timeoutMs: QUESTION_TIMEOUT_MS })
@@ -726,10 +716,15 @@ async function handle(
                 : runtime === "gemini"
                   ? discoverGeminiSlashCommands(join(homedir(), ".gemini"))
                   : discoverSlashCommands({
-                    userDir: join(homedir(), ".claude"),
-                    projectDir: cwd,
-                    pluginManifest: join(homedir(), ".claude", "plugins", "installed_plugins.json"),
-                  }),
+                      userDir: join(homedir(), ".claude"),
+                      projectDir: cwd,
+                      pluginManifest: join(
+                        homedir(),
+                        ".claude",
+                        "plugins",
+                        "installed_plugins.json",
+                      ),
+                    }),
           }),
         })
         .catch(() => {});

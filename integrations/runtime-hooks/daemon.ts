@@ -71,9 +71,9 @@ const runtime = agentId.startsWith("claude-")
  * append-only JSONL; neither transcript grammar below can tail it, so its chat
  * and reasoning arrive from the hooks instead of from here.
  */
-const transcriptRuntime: TranscriptRuntime | undefined =
-  runtime === "gemini" ? undefined : runtime;
+const transcriptRuntime: TranscriptRuntime | undefined = runtime === "gemini" ? undefined : runtime;
 const client = new AgentDeckClient();
+const publisher = client.publisher(REPORT_SOURCE);
 const HEARTBEAT_INTERVAL_MS = 10_000;
 /** How often a running session's transcript is tailed for new reasoning. */
 const REASONING_INTERVAL_MS = 2_000;
@@ -217,15 +217,12 @@ async function heartbeat() {
     // it. Persisted before the wire, same as the handler.
     const seq = nextReportSeq(statePath, state);
     writeFileSync(statePath, JSON.stringify(state));
-    await client
-      .runtimeEvent({
-        id: `daemon-state:${agentId}:${stateFingerprint}`,
-        agentId,
-        type: "session.state.changed",
-        createdAt: new Date().toISOString(),
-        origin: { source: REPORT_SOURCE, seq },
-        payload: { state: state.state, task: displayTask },
-      })
+    await publisher(
+      agentId,
+      "session.state.changed",
+      { state: state.state, task: displayTask },
+      { id: `daemon-state:${agentId}:${stateFingerprint}`, seq },
+    )
       .then(() => {
         lastStateFingerprint = stateFingerprint;
       })
