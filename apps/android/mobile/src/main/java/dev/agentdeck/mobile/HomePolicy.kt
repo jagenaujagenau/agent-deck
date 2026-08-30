@@ -12,10 +12,14 @@ internal enum class HomeAgentState(
     val attention: Boolean = false,
     val compact: Boolean = false,
 ) {
+    // Declaration order is the section order, and the section order is the
+    // shared Attention Priority: the stuck one — an error — is always first,
+    // before anything merely blocked. Parity with HomePolicy.swift is
+    // enforced by fixtures/attention-parity.json's homeState section.
+    Failed("Failed", "FAILED", attention = true),
     ApprovalRequired("Approval required", "APPROVALS", attention = true),
     Question("Question", "QUESTIONS", attention = true),
     InputRequired("Input required", "INPUT REQUIRED", attention = true),
-    Failed("Failed", "FAILED", attention = true),
 
     // "Finished while you weren't looking", ranked above Running because a
     // result nobody has collected is worth more than progress that needs

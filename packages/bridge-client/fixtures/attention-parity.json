@@ -1,18 +1,90 @@
 {
-  "comment": "The Attention Priority and Seen contracts, as data. Three implementations answer for every case here — attention.ts (bun test), AttentionRank.kt (JVM test), AttentionPolicy.swift + SeenPolicy.swift (swift test) — so the 'kept in step' comments are a build failure instead of a code-review hope. Extend this file, never one implementation.",
+  "comment": "The Attention Priority, Seen, and home presentation-state contracts, as data. The rank and seen sections run in three languages — attention.ts (bun test), AttentionRank.kt (JVM test), AttentionPolicy.swift + SeenPolicy.swift (swift test in apps/ios/PolicyTests). The homeState sections run in the two that render a home deck — HomePolicy.kt (mobile JVM test) and HomePolicy.swift (swift test); no TypeScript surface renders one. Extend this file, never one implementation.",
   "rank": [
-    { "case": "the stuck one is always first", "state": "error", "blocked": false, "seen": true, "expect": 5 },
-    { "case": "error while blocked is still first as an error", "state": "error", "blocked": true, "seen": false, "expect": 5 },
-    { "case": "blocked on a person", "state": "waiting", "blocked": true, "seen": false, "expect": 4 },
-    { "case": "blocked stays blocked however often it was read", "state": "waiting", "blocked": true, "seen": true, "expect": 4 },
-    { "case": "finished while you weren't looking outranks running", "state": "idle", "blocked": false, "seen": false, "expect": 3 },
-    { "case": "running minds its own business", "state": "running", "blocked": false, "seen": false, "expect": 2 },
-    { "case": "running is running whether or not it was read", "state": "running", "blocked": false, "seen": true, "expect": 2 },
-    { "case": "idle and read asks for almost nothing", "state": "idle", "blocked": false, "seen": true, "expect": 1 },
-    { "case": "offline asks for nothing", "state": "offline", "blocked": false, "seen": false, "expect": 0 },
-    { "case": "paused asks for nothing", "state": "paused", "blocked": false, "seen": false, "expect": 0 },
-    { "case": "a state nobody recognises asks for nothing", "state": "someday-state", "blocked": false, "seen": false, "expect": 0 },
-    { "case": "waiting is only blocked when the caller says so", "state": "waiting", "blocked": false, "seen": true, "expect": 0 }
+    {
+      "case": "the stuck one is always first",
+      "state": "error",
+      "blocked": false,
+      "seen": true,
+      "expect": 5
+    },
+    {
+      "case": "error while blocked is still first as an error",
+      "state": "error",
+      "blocked": true,
+      "seen": false,
+      "expect": 5
+    },
+    {
+      "case": "blocked on a person",
+      "state": "waiting",
+      "blocked": true,
+      "seen": false,
+      "expect": 4
+    },
+    {
+      "case": "blocked stays blocked however often it was read",
+      "state": "waiting",
+      "blocked": true,
+      "seen": true,
+      "expect": 4
+    },
+    {
+      "case": "finished while you weren't looking outranks running",
+      "state": "idle",
+      "blocked": false,
+      "seen": false,
+      "expect": 3
+    },
+    {
+      "case": "running minds its own business",
+      "state": "running",
+      "blocked": false,
+      "seen": false,
+      "expect": 2
+    },
+    {
+      "case": "running is running whether or not it was read",
+      "state": "running",
+      "blocked": false,
+      "seen": true,
+      "expect": 2
+    },
+    {
+      "case": "idle and read asks for almost nothing",
+      "state": "idle",
+      "blocked": false,
+      "seen": true,
+      "expect": 1
+    },
+    {
+      "case": "offline asks for nothing",
+      "state": "offline",
+      "blocked": false,
+      "seen": false,
+      "expect": 0
+    },
+    {
+      "case": "paused asks for nothing",
+      "state": "paused",
+      "blocked": false,
+      "seen": false,
+      "expect": 0
+    },
+    {
+      "case": "a state nobody recognises asks for nothing",
+      "state": "someday-state",
+      "blocked": false,
+      "seen": false,
+      "expect": 0
+    },
+    {
+      "case": "waiting is only blocked when the caller says so",
+      "state": "waiting",
+      "blocked": false,
+      "seen": true,
+      "expect": 0
+    }
   ],
   "seen": [
     {
@@ -26,7 +98,9 @@
     {
       "case": "this device's own mark covers",
       "lastSeenAt": "2026-08-30T10:00:00.000Z",
-      "eventAts": ["2026-08-30T10:05:00.000Z"],
+      "eventAts": [
+        "2026-08-30T10:05:00.000Z"
+      ],
       "viewedAt": null,
       "localSeenAt": "2026-08-30T10:05:00.000Z",
       "expect": true
@@ -34,7 +108,9 @@
     {
       "case": "a view anywhere counts, through the bridge's mark",
       "lastSeenAt": "2026-08-30T10:00:00.000Z",
-      "eventAts": ["2026-08-30T10:05:00.000Z"],
+      "eventAts": [
+        "2026-08-30T10:05:00.000Z"
+      ],
       "viewedAt": "2026-08-30T10:06:00.000Z",
       "localSeenAt": null,
       "expect": true
@@ -42,7 +118,9 @@
     {
       "case": "newer activity re-badges, no matter which surface looked",
       "lastSeenAt": "2026-08-30T10:00:00.000Z",
-      "eventAts": ["2026-08-30T10:09:00.000Z"],
+      "eventAts": [
+        "2026-08-30T10:09:00.000Z"
+      ],
       "viewedAt": "2026-08-30T10:06:00.000Z",
       "localSeenAt": "2026-08-30T10:07:00.000Z",
       "expect": false
@@ -50,7 +128,9 @@
     {
       "case": "an event newer than the heartbeat is activity too",
       "lastSeenAt": "2026-08-30T10:00:00.000Z",
-      "eventAts": ["2026-08-30T10:08:00.000Z"],
+      "eventAts": [
+        "2026-08-30T10:08:00.000Z"
+      ],
       "viewedAt": "2026-08-30T10:01:00.000Z",
       "localSeenAt": null,
       "expect": false
@@ -58,7 +138,9 @@
     {
       "case": "a heartbeat newer than every event is the activity",
       "lastSeenAt": "2026-08-30T10:08:00.000Z",
-      "eventAts": ["2026-08-30T10:02:00.000Z"],
+      "eventAts": [
+        "2026-08-30T10:02:00.000Z"
+      ],
       "viewedAt": "2026-08-30T10:08:00.000Z",
       "localSeenAt": null,
       "expect": true
@@ -71,5 +153,181 @@
       "localSeenAt": "2026-08-30T10:03:00.000Z",
       "expect": true
     }
-  ]
+  ],
+  "homeState": {
+    "now": "2026-08-30T12:00:00.000Z",
+    "sectionOrder": [
+      "failed",
+      "approval-required",
+      "question",
+      "input-required",
+      "done",
+      "running",
+      "paused",
+      "recently-completed",
+      "history"
+    ],
+    "attentionStates": [
+      "failed",
+      "approval-required",
+      "question",
+      "input-required"
+    ],
+    "cases": [
+      {
+        "case": "a held approval names the concrete reason",
+        "state": "waiting",
+        "approval": true,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "approval-required"
+      },
+      {
+        "case": "a durable question is authoritative",
+        "state": "waiting",
+        "approval": false,
+        "question": true,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "question"
+      },
+      {
+        "case": "the event window is the fallback for a bridge that predates durable questions",
+        "state": "waiting",
+        "approval": false,
+        "question": false,
+        "questionEvent": true,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "question"
+      },
+      {
+        "case": "waiting with nothing nameable is input required",
+        "state": "waiting",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "input-required"
+      },
+      {
+        "case": "an error is failed, whatever else it holds",
+        "state": "error",
+        "approval": true,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "failed"
+      },
+      {
+        "case": "running is running",
+        "state": "running",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "running"
+      },
+      {
+        "case": "paused is paused",
+        "state": "paused",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "paused"
+      },
+      {
+        "case": "a fresh finish nobody has looked at is done",
+        "state": "idle",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": false,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "done"
+      },
+      {
+        "case": "unseen wins over the ten-minute clock",
+        "state": "idle",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": false,
+        "lastSeenAt": "2026-08-30T10:00:00Z",
+        "expect": "done"
+      },
+      {
+        "case": "a read finish stays completed for ten minutes",
+        "state": "idle",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "recently-completed"
+      },
+      {
+        "case": "at exactly ten minutes it is history",
+        "state": "idle",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:50:00Z",
+        "expect": "history"
+      },
+      {
+        "case": "archive always wins, whatever the session is doing",
+        "state": "waiting",
+        "approval": true,
+        "question": false,
+        "questionEvent": false,
+        "archived": true,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "history"
+      },
+      {
+        "case": "an unreadable heartbeat files under history rather than guessing",
+        "state": "idle",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "not a timestamp",
+        "expect": "history"
+      },
+      {
+        "case": "offline asks for nothing and files away",
+        "state": "offline",
+        "approval": false,
+        "question": false,
+        "questionEvent": false,
+        "archived": false,
+        "seen": true,
+        "lastSeenAt": "2026-08-30T11:55:00Z",
+        "expect": "history"
+      }
+    ]
+  }
 }
