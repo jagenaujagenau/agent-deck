@@ -54,5 +54,8 @@ One shared ranking every surface sorts by: error, then blocked (waiting), then d
 ## Blocked Refusal
 A prompt, steer, or follow-up aimed at an Agent that is waiting on an approval or question is refused by the bridge with `agent_blocked` rather than silently queued — answering the block is the real next action. A device may deliberately queue anyway by forcing the command.
 
+## Service Controller
+The desktop app is a controller for the host bridge service — install, start, stop, and inspect the launchd job — and not a deck surface. It renders no Agents, holds no Snapshot Sequence, and speaks to its own Rust backend rather than the bridge wire, which is why it shares no types with the surfaces. A desktop deck view, if one comes, is a new surface built on `bridge-client`, not an extension of the controller.
+
 ## Product Experience Bar
 Agent Deck must feel award-worthy in daily use, not merely look polished in screenshots. Phone and watch interactions prioritize immediate feedback, stable spatial behavior, excellent typography, deliberate optical alignment, fluid interruptible motion, clear hierarchy, and calm information density. Visual novelty never outranks operational truth, capability safety, accessibility, performance, or native platform behavior. Every primary flow is evaluated in loading, live, waiting, error, stale, empty, keyboard, and recovery states on real Pixel hardware.
