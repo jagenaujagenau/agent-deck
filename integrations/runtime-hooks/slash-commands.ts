@@ -30,19 +30,19 @@ function frontmatter(file: string): Frontmatter {
   const fields: Frontmatter = {};
   const lines = head.slice(3, end === -1 ? undefined : end).split("\n");
   for (let index = 0; index < lines.length; index += 1) {
-    const match = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(lines[index].trim());
+    const match = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec((lines[index] ?? "").trim());
     if (!match) continue;
-    const key = match[1].toLowerCase();
-    let value = match[2].trim();
+    // SAFETY: both groups are non-optional in the pattern; a match carries them.
+    const key = match[1]!.toLowerCase();
+    let value = match[2]!.trim();
     if (/^[>|][-+]?$/.test(value)) {
       // A YAML block scalar: the value is the indented lines that follow, not the marker itself.
       const block: string[] = [];
-      while (
-        index + 1 < lines.length &&
-        (lines[index + 1].trim() === "" || /^\s+\S/.test(lines[index + 1]))
-      ) {
+      for (;;) {
+        const next = lines[index + 1];
+        if (next === undefined || !(next.trim() === "" || /^\s+\S/.test(next))) break;
         index += 1;
-        block.push(lines[index].trim());
+        block.push(next.trim());
       }
       value = block.join(" ").trim();
     }
@@ -55,7 +55,7 @@ function frontmatter(file: string): Frontmatter {
   return fields;
 }
 
-function describe(file: string, fields: Frontmatter): string | undefined {
+function describe(fields: Frontmatter): string | undefined {
   const description = fields.description?.trim();
   if (description)
     return description.length > MAX_DESCRIPTION
@@ -104,7 +104,7 @@ function commandsIn(root: string, source: SlashCommandSource): SlashCommand[] {
       const fields = frontmatter(path);
       found.push({
         name: `${prefix}${basename(entry, ".md")}`,
-        description: describe(path, fields),
+        description: describe(fields),
         source,
       });
     }
@@ -121,7 +121,7 @@ function skillsIn(root: string, source: SlashCommandSource, namespace = ""): Sla
     return [
       {
         name: `${namespace}${fields.name || directory}`,
-        description: describe(file, fields),
+        description: describe(fields),
         source,
       },
     ];

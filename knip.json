@@ -2,15 +2,28 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts", "integrations/**/*.ts"],
-      "project": ["scripts/**/*.ts", "integrations/**/*.ts"]
+      "entry": [
+        "scripts/*.ts",
+        "integrations/**/*.ts"
+      ],
+      "project": [
+        "scripts/**/*.ts",
+        "integrations/**/*.ts"
+      ]
     },
     "apps/server": {
-      "entry": ["scripts/*.ts", "src/**/*.test.ts"]
+      "entry": [
+        "scripts/*.ts",
+        "src/**/*.test.ts"
+      ]
     },
     "packages/agent-adapter": {
-      "entry": ["src/**/*.test.ts"]
+      "entry": [
+        "src/**/*.test.ts"
+      ]
     }
   },
-  "ignoreDependencies": ["@earendil-works/pi-coding-agent"]
+  "rules": {
+    "duplicates": "warn"
+  }
 }

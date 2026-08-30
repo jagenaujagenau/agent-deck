@@ -21,7 +21,7 @@ import type {
 } from "../../packages/agent-adapter/src/runtime-events";
 import { createRuntimePublisher } from "../../packages/agent-adapter/src/runtime-publisher";
 import { unifiedDiff } from "../../packages/agent-adapter/src/unified-diff";
-import { asObject, asString, type JsonValue } from "./payload";
+import { asObject, asString, fromSdkJson, type JsonValue } from "./payload";
 import { askedQuestion, isAskUserQuestionTool } from "./questions";
 import {
   changedPaths,
@@ -122,7 +122,7 @@ function lastUserTask(ctx: ExtensionContext): string {
   const entries = [...ctx.sessionManager.getBranch()].reverse();
   for (const entry of entries) {
     if (entry.type === "message" && entry.message.role === "user") {
-      const text = clip(textContent(entry.message.content));
+      const text = clip(textContent(fromSdkJson(entry.message.content)));
       if (text) return text;
     }
   }
@@ -503,7 +503,7 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, nextCtx) => {
     adopt(nextCtx);
-    const input = asObject(event.input) ?? {};
+    const input = asObject(fromSdkJson(event.input)) ?? {};
     if (isAskUserQuestionTool(event.toolName)) {
       const { question, options } = askedQuestion(input);
       if (options.length === 0 || QUESTION_TIMEOUT_MS === 0) {
@@ -746,8 +746,8 @@ export default function agentDeckExtension(pi: ExtensionAPI) {
   pi.on("message_end", (event, nextCtx) => {
     adopt(nextCtx);
     if (event.message.role !== "assistant") return;
-    const output = textContent(event.message.content);
-    const reasoning = reasoningContent(event.message.content);
+    const output = textContent(fromSdkJson(event.message.content));
+    const reasoning = reasoningContent(fromSdkJson(event.message.content));
     if (reasoning) publishEvent("thought", "Reasoning", reasoning, streamingReasoningEventId);
     if (output) {
       publishEvent(

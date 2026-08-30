@@ -1,3 +1,7 @@
 {
-  "extends": "@agent-control-dashboard/config/tsconfig.base.json"
+  "extends": "@agent-control-dashboard/config/tsconfig.base.json",
+  // tmp holds vendored scratch repos. tools and apps/desktop typecheck under
+  // their own projects — tools needs allowImportingTsExtensions, desktop the
+  // DOM lib — and the `typecheck` script runs every project together.
+  "exclude": ["tmp", "tools", "apps/desktop"]
 }

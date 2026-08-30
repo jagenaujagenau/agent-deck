@@ -246,9 +246,9 @@ describe("conversation sync", () => {
       uuid: "u1",
       message: { role: "user", content: "hello" },
     });
-    expect(readConversationBacklog(path, "key").messages[0].id).toBe("chat:key:u1");
-    expect(readConversationBacklog(path, "key").messages[0].id).toBe(
-      readConversationBacklog(path, "key").messages[0].id,
+    expect(readConversationBacklog(path, "key").messages[0]?.id).toBe("chat:key:u1");
+    expect(readConversationBacklog(path, "key").messages[0]?.id).toBe(
+      readConversationBacklog(path, "key").messages[0]?.id,
     );
   });
 

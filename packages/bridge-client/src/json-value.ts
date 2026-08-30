@@ -8,7 +8,7 @@ export type JsonValue = string | number | boolean | null | ReadonlyArray<JsonVal
 export type JsonObject = { [key: string]: JsonValue };
 
 /** `String` hands a string back unchanged, and everything else a different value. */
-export function isJsonString(value: JsonValue | undefined): value is string {
+function isJsonString(value: JsonValue | undefined): value is string {
   return String(value) === value;
 }
 

@@ -95,7 +95,7 @@ describe("discoverSlashCommands", () => {
       `---\ndescription: ${"x".repeat(400)}\n---\n`,
     );
 
-    const description = discoverSlashCommands(s.roots)[0].description!;
+    const description = discoverSlashCommands(s.roots)[0]?.description ?? "";
     expect(description.length).toBeLessThanOrEqual(200);
     expect(description.endsWith("…")).toBe(true);
   });
@@ -113,7 +113,7 @@ describe("discoverSlashCommands", () => {
       "---\nname: caveman\ndescription: >\n  Ultra-compressed mode. Cuts token usage\n  while keeping accuracy.\n---\n\n# caveman",
     );
 
-    expect(discoverSlashCommands(s.roots)[0].description).toBe(
+    expect(discoverSlashCommands(s.roots)[0]?.description).toBe(
       "Ultra-compressed mode. Cuts token usage while keeping accuracy.",
     );
   });

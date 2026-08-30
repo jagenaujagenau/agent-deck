@@ -15,6 +15,7 @@
   "scripts": {
     "build": "turbo build",
     "check-types": "turbo check-types",
+    "typecheck": "tsc --noEmit && tsc -p tools/oxlint --noEmit && turbo check-types",
     "dev": "turbo dev",
     "dev:native": "turbo -F native dev",
     "dev:server": "turbo -F server dev",
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@agent-control-dashboard/config": "workspace:*",
+    "@earendil-works/pi-coding-agent": "0.84.4",
     "@oxlint/plugins": "1.80.0",
     "@types/bun": "catalog:",
     "knip": "^6.32.2",

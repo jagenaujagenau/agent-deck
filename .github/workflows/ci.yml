@@ -1,9 +1,6 @@
 # Every suite the repo already runs locally, run on every push — the parity
 # corpus and the contract suite only bite when something executes them.
 #
-# Deliberately not gated here: `tsc --noEmit` (carries known pre-existing
-# errors in two hook modules) and `knip` (carries known pre-existing
-# findings); gate them once their baselines are clean.
 name: ci
 
 on:
@@ -26,6 +23,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run format:check
+      - run: bun run typecheck
+      - run: bun run knip
       # Server (incl. the contract suite against a real bridge subprocess),
       # agent-adapter, bridge-client (incl. the attention parity corpus), and
       # the integrations.

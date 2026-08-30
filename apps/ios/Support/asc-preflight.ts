@@ -112,3 +112,6 @@ if (certificates.status === 200) {
 }
 
 if (!found) process.exit(1);
+
+// Top-level await needs module scope; the script exports nothing.
+export {};

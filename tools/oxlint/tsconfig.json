@@ -1,0 +1,11 @@
+{
+  "extends": "@agent-control-dashboard/config/tsconfig.base.json",
+  "compilerOptions": {
+    // The oxlint plugin is loaded from source by oxlint itself, so its
+    // internal imports carry the .ts extension the loader wants; this
+    // project exists only to typecheck (never to emit), which is the one
+    // mode the flag is legal in.
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  }
+}
