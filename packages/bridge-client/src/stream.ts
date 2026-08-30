@@ -36,6 +36,12 @@ export function subscribeDeck(
   const fetcher = options.fetcher ?? fetch;
   const base = baseUrl.replace(/\/+$/, "");
   let attempt = 0;
+  // The Snapshot Sequence guard every surface carries (ConnectionPolicy.kt,
+  // ConnectionPolicy.swift, WearSnapshotPolicy.kt): a client never applies a
+  // lower sequence over a higher one. Held across reconnects — a fresh
+  // connection replaying an older deck must not roll back what the caller
+  // has already been shown.
+  let lastSequence = 0;
 
   const run = async () => {
     while (!controller.signal.aborted) {
@@ -58,13 +64,21 @@ export function subscribeDeck(
             if (frame.event === "snapshot") {
               // SAFETY: the contract states the snapshot frame's data is a
               // BridgeSnapshot; the bridge is the authority on the shape.
-              current = JSON.parse(frame.data) as BridgeSnapshot;
+              const snapshot = JSON.parse(frame.data) as BridgeSnapshot;
               attempt = 0;
-              options.onSnapshot(current);
+              if (snapshot.sequence >= lastSequence) {
+                lastSequence = snapshot.sequence;
+                current = snapshot;
+                options.onSnapshot(current);
+              }
             } else if (frame.event === "patch" && current !== undefined) {
               // SAFETY: same contract, patch frame.
-              current = applyPatch(current, JSON.parse(frame.data) as BridgeSnapshotPatch);
-              options.onSnapshot(current);
+              const patch = JSON.parse(frame.data) as BridgeSnapshotPatch;
+              if (patch.sequence >= lastSequence) {
+                lastSequence = patch.sequence;
+                current = applyPatch(current, patch);
+                options.onSnapshot(current);
+              }
             }
             // ping frames keep proxies awake and mean nothing here.
           }
