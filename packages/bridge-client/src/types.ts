@@ -73,6 +73,13 @@ export interface RateLimitWindow {
   runtime?: string;
 }
 
+/**
+ * An agent as the snapshot serves it — a deliberate restatement of the
+ * bridge's `SnapshotAgent`, not an import of it: this package is the
+ * consumer-side spec, dependency-free so a client can vendor it whole. The
+ * contract suite drives a real bridge through these types; change a field
+ * there and here together.
+ */
 export interface Agent {
   id: string;
   name: string;

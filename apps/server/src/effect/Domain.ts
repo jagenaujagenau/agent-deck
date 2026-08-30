@@ -141,7 +141,15 @@ export const RateLimitWindow = Schema.Struct({
 export interface RateLimitWindow extends Schema.Schema.Type<typeof RateLimitWindow> {}
 
 /** The heartbeat body a runtime adapter sends to keep its session live. */
-export const Heartbeat = Schema.Struct({
+/**
+ * The fields an agent carries in every shape it takes — the heartbeat that
+ * announces it and the row that stores it. One list, spread into both
+ * schemas, so adding an agent field is one edit here plus only the shapes
+ * that treat it specially: `tokens`, `costUsd`, and `events` differ in
+ * requiredness between wire and storage, and the stored row alone carries
+ * liveness and seen marks.
+ */
+const agentCore = {
   id: Schema.String,
   name: Schema.String,
   project: Schema.String,
@@ -154,12 +162,16 @@ export const Heartbeat = Schema.Struct({
   task: Schema.String,
   objective: optionalField(Schema.String),
   progress: optionalField(Schema.Number),
-  tokens: optionalField(Schema.Number),
   processedTokens: optionalField(Schema.Number),
-  costUsd: optionalField(Schema.Number),
   capabilities: optionalField(Schema.Array(ControlAction)),
   rateLimits: optionalField(Schema.Array(RateLimitWindow)),
   pendingApproval: optionalField(PendingApproval),
+};
+
+export const Heartbeat = Schema.Struct({
+  ...agentCore,
+  tokens: optionalField(Schema.Number),
+  costUsd: optionalField(Schema.Number),
   events: optionalField(Schema.Array(AgentEvent)),
 });
 export interface Heartbeat extends Schema.Schema.Type<typeof Heartbeat> {}
@@ -248,26 +260,12 @@ export const RuntimeEventEnvelope = Schema.Struct({
  * one session missing from the deck, not a bridge that fails to start.
  */
 export const StoredAgent = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  project: Schema.String,
-  cwd: optionalField(Schema.String),
-  model: Schema.String,
-  runtime: optionalField(Schema.String),
-  runtimeProtocol: optionalField(Schema.Literals(["canonical-v1"])),
-  state: AgentState,
-  task: Schema.String,
-  objective: optionalField(Schema.String),
-  progress: optionalField(Schema.Number),
+  ...agentCore,
   tokens: Schema.Number,
-  processedTokens: optionalField(Schema.Number),
   costUsd: Schema.Number,
   lastSeenAt: Schema.String,
   viewedAt: optionalField(Schema.String),
   events: Schema.Array(AgentEvent),
-  capabilities: optionalField(Schema.Array(ControlAction)),
-  rateLimits: optionalField(Schema.Array(RateLimitWindow)),
-  pendingApproval: optionalField(PendingApproval),
   isDemo: optionalField(Schema.Boolean),
 });
 

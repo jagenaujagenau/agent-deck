@@ -31,6 +31,13 @@ export type ControlAction =
   | "steer"
   | "follow_up";
 
+/**
+ * The heartbeat as an adapter posts it — a deliberate restatement of the
+ * bridge's `Heartbeat` schema, not an import of it: adapters stay
+ * dependency-light and never pull the server's Effect graph. The contract
+ * suite (apps/server/src/contract.test.ts) is what holds the two in step;
+ * change a field there and here together.
+ */
 export type AgentHeartbeat = {
   id: string;
   name: string;
