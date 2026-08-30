@@ -41,6 +41,19 @@ export const blockedDetail = (block: PendingBlock): string =>
 const promptActions: ReadonlyArray<string> = ["prompt", "steer", "follow_up"];
 
 /**
+ * The `wait` query as a parking window: how long a poller may be held open
+ * for the answer to settle, in seconds, capped below every client timeout
+ * so a parked response always beats the socket. Absent or unreadable means
+ * answer now — which is also what an older bridge did with the parameter,
+ * so a new adapter against an old bridge simply polls faster.
+ */
+const waitWindow = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const asked = Number(new URL(request.url, "http://bridge").searchParams.get("wait"));
+  return Number.isFinite(asked) && asked > 0 ? Math.min(asked, 25) * 1_000 : 0;
+});
+
+/**
  * Parses a request body against the wire contract, so a handler receives a
  * domain value rather than something it has to inspect field by field.
  *
@@ -134,7 +147,11 @@ export const BridgeRoutes = HttpRouter.addAll([
     "/agents/:agentId/requests/:requestId",
     Effect.gen(function* () {
       const state = yield* BridgeState;
-      const status = yield* state.requestStatus(yield* param("agentId"), yield* param("requestId"));
+      const status = yield* state.requestStatus(
+        yield* param("agentId"),
+        yield* param("requestId"),
+        yield* waitWindow,
+      );
       return status === undefined
         ? yield* error("Request not found", 404)
         : yield* HttpServerResponse.json(status);
@@ -148,7 +165,7 @@ export const BridgeRoutes = HttpRouter.addAll([
       const request = yield* HttpServerRequest.HttpServerRequest;
       const after = new URL(request.url, "http://bridge").searchParams.get("after") ?? undefined;
       return yield* HttpServerResponse.json({
-        commands: yield* state.pendingCommands(yield* param("id"), after),
+        commands: yield* state.pendingCommands(yield* param("id"), after, yield* waitWindow),
       });
     }),
   ),

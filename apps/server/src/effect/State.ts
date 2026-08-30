@@ -1,4 +1,14 @@
-import { Context, Effect, Layer, Option, Ref, Schema, SubscriptionRef } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Ref,
+  Schema,
+  Stream,
+  SubscriptionRef,
+} from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import {
   canonicalRuntimeEvent,
@@ -266,6 +276,7 @@ export class BridgeState extends Context.Service<
     readonly pendingCommands: (
       agentId: string,
       after?: string,
+      waitMs?: number,
     ) => Effect.Effect<ReadonlyArray<Command>>;
     readonly acknowledge: (
       agentId: string,
@@ -276,6 +287,7 @@ export class BridgeState extends Context.Service<
     readonly requestStatus: (
       agentId: string,
       requestId: string,
+      waitMs?: number,
     ) => Effect.Effect<{ status: RuntimeRequestStatus; value?: JsonValue } | undefined>;
     readonly resolveRuntimeRequest: (
       agentId: string,
@@ -859,7 +871,43 @@ export class BridgeState extends Context.Service<
         return command;
       });
 
-      const pendingCommands = Effect.fn("BridgeState.pendingCommands")(function* (
+      /**
+       * One deck change, however long it takes — the primitive behind the
+       * routes' `wait`. Woken by the same revision bump that wakes the SSE
+       * stream, so a parked caller costs nothing between changes.
+       */
+      const nextChange = SubscriptionRef.changes(revision).pipe(
+        // `changes` replays the current value before any change; the park is
+        // for the change after it.
+        Stream.drop(1),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+
+      /**
+       * A semantic wait: re-asks `look` after every deck change until the
+       * answer settles or the deadline passes, then answers with whatever
+       * stands. Adapters used to ask these questions once a second for up to
+       * ten minutes; parked here, the answer arrives on the change that
+       * settles it and an unsettled wait costs one read per change.
+       */
+      const awaitSettled = <A>(
+        waitMs: number,
+        look: Effect.Effect<A>,
+        settled: (value: A) => boolean,
+      ) =>
+        Effect.gen(function* () {
+          const deadline = Date.now() + waitMs;
+          for (;;) {
+            const value = yield* look;
+            if (settled(value)) return value;
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) return value;
+            yield* Effect.race(nextChange, Effect.sleep(Duration.millis(remaining)));
+          }
+        });
+
+      const pendingCommandsNow = Effect.fn("BridgeState.pendingCommands")(function* (
         agentId: string,
         after?: string,
       ) {
@@ -872,6 +920,9 @@ export class BridgeState extends Context.Service<
             Date.parse(command.createdAt) > afterTime,
         );
       });
+
+      const pendingCommands = (agentId: string, after?: string, waitMs = 0) =>
+        awaitSettled(waitMs, pendingCommandsNow(agentId, after), (queued) => queued.length > 0);
 
       const acknowledge = Effect.fn("BridgeState.acknowledge")(function* (
         agentId: string,
@@ -922,8 +973,12 @@ export class BridgeState extends Context.Service<
         return agent.viewedAt;
       });
 
-      const requestStatus = (agentId: string, requestId: string) =>
-        requests.status(requestId, agentId);
+      const requestStatus = (agentId: string, requestId: string, waitMs = 0) =>
+        awaitSettled(
+          waitMs,
+          requests.status(requestId, agentId),
+          (standing) => standing === undefined || standing.status !== "pending",
+        );
 
       const resolveRuntimeRequest = requests.resolve;
 

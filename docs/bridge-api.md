@@ -190,7 +190,13 @@ An adapter is anything that can speak three routes:
   (project and user prompts, skills, plugins; capped at 400).
 - `GET /agents/:id/commands` + `POST /agents/:id/commands/:commandId/ack` —
   the queue of remote instructions; acknowledge before delivering, so a
-  message is delivered at most once.
+  message is delivered at most once. `?wait=<seconds>` (capped at 25) parks
+  the request until a command queues or the window passes — the same
+  semantic wait `GET /agents/:id/requests/:requestId` honors while a request
+  stays pending, so a blocked adapter learns of the decision on the change
+  that settles it instead of on its next poll. A bridge that predates the
+  parameter answers immediately, and the adapter client falls back to
+  pacing itself.
 
 The reference adapters live in `integrations/` (hook-driven for Claude Code,
 Codex, and Gemini CLI — one handler serves all three, folding Gemini's

@@ -146,7 +146,7 @@ export class AgentDeckClient {
     this.timeoutMs = options.timeoutMs ?? 5_000;
   }
 
-  async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async request<T>(path: string, init: RequestInit = {}, timeoutMs = this.timeoutMs): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Content-Type", "application/json");
     const token = this.token instanceof Function ? this.token() : this.token;
@@ -154,7 +154,7 @@ export class AgentDeckClient {
     const response = await fetch(`${this.baseUrl}/bridge/v1${path}`, {
       ...init,
       headers,
-      signal: AbortSignal.timeout(this.timeoutMs),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new Error(`Bridge ${response.status}: ${await response.text()}`);
     // SAFETY: the bridge answers JSON on every endpoint; each caller names the
@@ -193,9 +193,17 @@ export class AgentDeckClient {
     });
   }
 
-  async commands(agentId: string): Promise<RemoteCommand[]> {
+  /**
+   * The agent's queued commands — parked on the bridge for up to
+   * `waitSeconds` when none are pending yet, so a blocked adapter learns of
+   * a decision on the change that queues it instead of on its next poll.
+   */
+  async commands(agentId: string, waitSeconds = 0): Promise<RemoteCommand[]> {
+    const wait = waitSeconds > 0 ? `?wait=${Math.min(waitSeconds, 25)}` : "";
     const result = await this.request<{ commands: RemoteCommand[] }>(
-      `/agents/${encodeURIComponent(agentId)}/commands`,
+      `/agents/${encodeURIComponent(agentId)}/commands${wait}`,
+      {},
+      waitSeconds > 0 ? Math.min(waitSeconds, 25) * 1_000 + this.timeoutMs : this.timeoutMs,
     );
     return result.commands;
   }
@@ -207,9 +215,13 @@ export class AgentDeckClient {
     );
   }
 
-  requestStatus(agentId: string, requestId: string) {
+  /** The request's standing — parked on the bridge while it stays pending, like `commands`. */
+  requestStatus(agentId: string, requestId: string, waitSeconds = 0) {
+    const wait = waitSeconds > 0 ? `?wait=${Math.min(waitSeconds, 25)}` : "";
     return this.request<{ status: string; value?: JsonValue }>(
-      `/agents/${encodeURIComponent(agentId)}/requests/${encodeURIComponent(requestId)}`,
+      `/agents/${encodeURIComponent(agentId)}/requests/${encodeURIComponent(requestId)}${wait}`,
+      {},
+      waitSeconds > 0 ? Math.min(waitSeconds, 25) * 1_000 + this.timeoutMs : this.timeoutMs,
     );
   }
 
@@ -225,14 +237,20 @@ export class AgentDeckClient {
     const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
     const pollMs = options.pollMs ?? 1_000;
     while (Date.now() < deadline) {
+      const asked = Date.now();
       try {
-        const request = await this.requestStatus(agentId, requestId);
+        // Parked on the bridge: the answer arrives on the change that
+        // resolves it, not on the next poll.
+        const request = await this.requestStatus(agentId, requestId, 25);
         if (request.status === "answered") return answerText(request.value);
         if (request.status !== "pending") return undefined;
       } catch {
         // Bridge restarts are transient while the runtime is blocked on the answer.
       }
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      // A bridge that ignores `wait` answers immediately; without this pause
+      // the loop would spin. A parked response longer than the pause loops
+      // straight back into the next park.
+      if (Date.now() - asked < pollMs) await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
     return undefined;
   }
@@ -244,8 +262,10 @@ export class AgentDeckClient {
     const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
     const pollMs = options.pollMs ?? 1_000;
     while (Date.now() < deadline) {
+      const asked = Date.now();
       try {
-        const decision = (await this.commands(agentId)).find(
+        // Parked on the bridge, same as waitForAnswer.
+        const decision = (await this.commands(agentId, 25)).find(
           (command) => command.action === "approve" || command.action === "reject",
         );
         if (decision) {
@@ -255,7 +275,7 @@ export class AgentDeckClient {
       } catch {
         // Network and bridge restarts are transient while a native tool call is blocked.
       }
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      if (Date.now() - asked < pollMs) await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
     return false;
   }

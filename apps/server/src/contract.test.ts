@@ -335,6 +335,58 @@ describe("the wire contract, executed", () => {
     expect(((await standing.json()) as { status?: string }).status).toBe("approved");
   });
 
+  test("a wait parks on the bridge and wakes on the change that settles it", async () => {
+    await heartbeat("codex-contract-wait", { runtimeProtocol: "canonical-v1" });
+    await publish("/agents/codex-contract-wait/runtime-events", {
+      id: "contract-wait-open",
+      agentId: "codex-contract-wait",
+      type: "user-input.requested",
+      createdAt: new Date().toISOString(),
+      requestId: "contract-wait-r1",
+      payload: {
+        kind: "user-input",
+        question: "Which?",
+        options: ["A", "B"],
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      },
+    });
+
+    // The poller parks first; the answer lands a beat later.
+    const startedAt = Date.now();
+    const parked = fetch(
+      `${base}/bridge/v1/agents/codex-contract-wait/requests/contract-wait-r1?wait=10`,
+      { headers: { Authorization: `Bearer ${MASTER}` } },
+    );
+    await Bun.sleep(250);
+    await publish("/agents/codex-contract-wait/requests/contract-wait-r1/resolve", {
+      status: "answered",
+      value: "A",
+    });
+    // SAFETY: the route answers the documented `{status, value}` shape.
+    const standing = (await (await parked).json()) as { status?: string; value?: unknown };
+    const elapsed = Date.now() - startedAt;
+    expect(standing.status).toBe("answered");
+    expect(standing.value).toBe("A");
+    // Woken by the resolution, not the ten-second window running out.
+    expect(elapsed).toBeGreaterThanOrEqual(200);
+    expect(elapsed).toBeLessThan(8_000);
+  });
+
+  test("a command wait wakes when the command queues", async () => {
+    const startedAt = Date.now();
+    const parked = fetch(`${base}/bridge/v1/agents/codex-contract-wait/commands?wait=10`, {
+      headers: { Authorization: `Bearer ${MASTER}` },
+    });
+    await Bun.sleep(250);
+    const queued = await master.control("codex-contract-wait", "prompt", "keep going");
+    // SAFETY: the route answers the documented `{commands}` shape.
+    const result = (await (await parked).json()) as { commands?: Array<{ id: string }> };
+    const elapsed = Date.now() - startedAt;
+    expect(result.commands?.some((command) => command.id === queued.id)).toBe(true);
+    expect(elapsed).toBeGreaterThanOrEqual(200);
+    expect(elapsed).toBeLessThan(8_000);
+  });
+
   test("marking seen is shared state, and unknown sessions are 404", async () => {
     const viewedAt = await master.markSeen("codex-contract-1");
     const agent = await master.agent("codex-contract-1");
