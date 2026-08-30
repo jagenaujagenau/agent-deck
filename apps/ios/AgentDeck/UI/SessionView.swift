@@ -461,11 +461,7 @@ struct SessionView: View {
     /// takes one. Saying so up front is the difference between a queue and a
     /// message that seems to have vanished.
     private func deliveryNotice(_ agent: Agent) -> String? {
-        switch agent.state {
-        case "running": nil
-        case "offline": "Queued · session is offline"
-        default: "Queued · delivers at the next turn"
-        }
+        MessageDelivery.of(agentState: agent.state).notice
     }
 
     /// The bridge refused to deliver over a pending approval or question. The
