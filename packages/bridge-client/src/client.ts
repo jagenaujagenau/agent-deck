@@ -116,11 +116,12 @@ export class BridgeClient {
     value?: string,
     options: { commandId?: string; force?: boolean } = {},
   ): Promise<QueuedCommand> {
-    return this.request<QueuedCommand>(
-      "POST",
-      `/agents/${encodeURIComponent(agentId)}/control`,
-      { action, value, commandId: options.commandId, force: options.force },
-    );
+    return this.request<QueuedCommand>("POST", `/agents/${encodeURIComponent(agentId)}/control`, {
+      action,
+      value,
+      commandId: options.commandId,
+      force: options.force,
+    });
   }
 
   /**
@@ -205,7 +206,10 @@ export class BridgeClient {
       if (response.status === 409 && refusal?.error === "agent_blocked") {
         throw new AgentBlockedError(refusal.detail ?? "The agent is waiting on a person");
       }
-      throw new BridgeError(response.status, refusal?.error ?? `Bridge returned ${response.status}`);
+      throw new BridgeError(
+        response.status,
+        refusal?.error ?? `Bridge returned ${response.status}`,
+      );
     }
     // SAFETY: T states what the contract says this route returns; the bridge
     // is the authority on the shape, and a mismatch is a contract bug.

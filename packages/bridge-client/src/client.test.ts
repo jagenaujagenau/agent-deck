@@ -38,7 +38,13 @@ const server = Bun.serve({
     if (url.pathname === "/bridge/v1/agents/claude-1/history") {
       return Response.json({
         events: [
-          { id: "e1", kind: "user", summary: "Message", detail: "hi", createdAt: "2026-08-28T10:00:01.000Z" },
+          {
+            id: "e1",
+            kind: "user",
+            summary: "Message",
+            detail: "hi",
+            createdAt: "2026-08-28T10:00:01.000Z",
+          },
         ],
       });
     }
@@ -52,7 +58,12 @@ const server = Bun.serve({
         );
       }
       return Response.json(
-        { id: "cmd-1", agentId: "claude-1", action: body.action, createdAt: "2026-08-28T10:00:02.000Z" },
+        {
+          id: "cmd-1",
+          agentId: "claude-1",
+          action: body.action,
+          createdAt: "2026-08-28T10:00:02.000Z",
+        },
         { status: 202 },
       );
     }

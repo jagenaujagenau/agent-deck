@@ -98,9 +98,7 @@
     {
       "case": "this device's own mark covers",
       "lastSeenAt": "2026-08-30T10:00:00.000Z",
-      "eventAts": [
-        "2026-08-30T10:05:00.000Z"
-      ],
+      "eventAts": ["2026-08-30T10:05:00.000Z"],
       "viewedAt": null,
       "localSeenAt": "2026-08-30T10:05:00.000Z",
       "expect": true
@@ -108,9 +106,7 @@
     {
       "case": "a view anywhere counts, through the bridge's mark",
       "lastSeenAt": "2026-08-30T10:00:00.000Z",
-      "eventAts": [
-        "2026-08-30T10:05:00.000Z"
-      ],
+      "eventAts": ["2026-08-30T10:05:00.000Z"],
       "viewedAt": "2026-08-30T10:06:00.000Z",
       "localSeenAt": null,
       "expect": true
@@ -118,9 +114,7 @@
     {
       "case": "newer activity re-badges, no matter which surface looked",
       "lastSeenAt": "2026-08-30T10:00:00.000Z",
-      "eventAts": [
-        "2026-08-30T10:09:00.000Z"
-      ],
+      "eventAts": ["2026-08-30T10:09:00.000Z"],
       "viewedAt": "2026-08-30T10:06:00.000Z",
       "localSeenAt": "2026-08-30T10:07:00.000Z",
       "expect": false
@@ -128,9 +122,7 @@
     {
       "case": "an event newer than the heartbeat is activity too",
       "lastSeenAt": "2026-08-30T10:00:00.000Z",
-      "eventAts": [
-        "2026-08-30T10:08:00.000Z"
-      ],
+      "eventAts": ["2026-08-30T10:08:00.000Z"],
       "viewedAt": "2026-08-30T10:01:00.000Z",
       "localSeenAt": null,
       "expect": false
@@ -138,9 +130,7 @@
     {
       "case": "a heartbeat newer than every event is the activity",
       "lastSeenAt": "2026-08-30T10:08:00.000Z",
-      "eventAts": [
-        "2026-08-30T10:02:00.000Z"
-      ],
+      "eventAts": ["2026-08-30T10:02:00.000Z"],
       "viewedAt": "2026-08-30T10:08:00.000Z",
       "localSeenAt": null,
       "expect": true
@@ -167,12 +157,7 @@
       "recently-completed",
       "history"
     ],
-    "attentionStates": [
-      "failed",
-      "approval-required",
-      "question",
-      "input-required"
-    ],
+    "attentionStates": ["failed", "approval-required", "question", "input-required"],
     "cases": [
       {
         "case": "a held approval names the concrete reason",

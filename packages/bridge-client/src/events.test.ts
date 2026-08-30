@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { conversationEntries, mergeSessionEvents, reasoningEvents, terminalEvents, turnThreads } from "./events";
+import {
+  conversationEntries,
+  mergeSessionEvents,
+  reasoningEvents,
+  terminalEvents,
+  turnThreads,
+} from "./events";
 import type { AgentEvent } from "./types";
 
 const at = (second: number) => `2026-08-28T10:00:${String(second).padStart(2, "0")}.000Z`;
@@ -46,7 +52,13 @@ describe("conversationEntries", () => {
   test("user events and agent responses interleave, oldest first", () => {
     const entries = conversationEntries([
       event({ id: "2", detail: "Sure, on it.", createdAt: at(2) }),
-      event({ id: "1", kind: "user", summary: "Message", detail: "Fix the test", createdAt: at(1) }),
+      event({
+        id: "1",
+        kind: "user",
+        summary: "Message",
+        detail: "Fix the test",
+        createdAt: at(1),
+      }),
     ]);
     expect(entries.map((entry) => entry.role)).toEqual(["user", "agent"]);
     expect(entries[0]?.content).toBe("Fix the test");
@@ -55,7 +67,13 @@ describe("conversationEntries", () => {
   test("the same prompt arriving twice within seconds collapses to one bubble", () => {
     const entries = conversationEntries([
       event({ id: "hook", kind: "user", summary: "Message", detail: "Do it", createdAt: at(1) }),
-      event({ id: "transcript", kind: "user", summary: "Message", detail: "Do it", createdAt: at(3) }),
+      event({
+        id: "transcript",
+        kind: "user",
+        summary: "Message",
+        detail: "Do it",
+        createdAt: at(3),
+      }),
     ]);
     expect(entries).toHaveLength(1);
   });
@@ -99,8 +117,20 @@ describe("conversationEntries", () => {
 describe("tabs", () => {
   test("reasoning is thoughts with words, oldest first", () => {
     const events = [
-      event({ id: "2", kind: "thought", summary: "Reasoning", detail: "then this", createdAt: at(2) }),
-      event({ id: "1", kind: "thought", summary: "Reasoning", detail: "first this", createdAt: at(1) }),
+      event({
+        id: "2",
+        kind: "thought",
+        summary: "Reasoning",
+        detail: "then this",
+        createdAt: at(2),
+      }),
+      event({
+        id: "1",
+        kind: "thought",
+        summary: "Reasoning",
+        detail: "first this",
+        createdAt: at(1),
+      }),
       event({ id: "3", kind: "thought", summary: "Reasoning", detail: " ", createdAt: at(3) }),
     ];
     expect(reasoningEvents(events).map((item) => item.id)).toEqual(["1", "2"]);
@@ -119,9 +149,30 @@ describe("tabs", () => {
 describe("turnThreads", () => {
   test("a user event opens a thread; its work follows it", () => {
     const threads = turnThreads([
-      event({ id: "u1", kind: "user", summary: "Message", detail: "fix it", createdAt: at(1), turnId: "t1" }),
-      event({ id: "w1", kind: "tool", summary: "Bash", command: "bun test", createdAt: at(2), turnId: "t1" }),
-      event({ id: "u2", kind: "user", summary: "Message", detail: "now ship it", createdAt: at(3), turnId: "t2" }),
+      event({
+        id: "u1",
+        kind: "user",
+        summary: "Message",
+        detail: "fix it",
+        createdAt: at(1),
+        turnId: "t1",
+      }),
+      event({
+        id: "w1",
+        kind: "tool",
+        summary: "Bash",
+        command: "bun test",
+        createdAt: at(2),
+        turnId: "t1",
+      }),
+      event({
+        id: "u2",
+        kind: "user",
+        summary: "Message",
+        detail: "now ship it",
+        createdAt: at(3),
+        turnId: "t2",
+      }),
       event({ id: "w2", summary: "Response", detail: "shipped", createdAt: at(4), turnId: "t2" }),
     ]);
     expect(threads.map((thread) => thread.events.length)).toEqual([2, 2]);
@@ -138,7 +189,14 @@ describe("turnThreads", () => {
 
   test("untagged events stay with the thread they follow", () => {
     const threads = turnThreads([
-      event({ id: "u", kind: "user", summary: "Message", detail: "go", createdAt: at(1), turnId: "t1" }),
+      event({
+        id: "u",
+        kind: "user",
+        summary: "Message",
+        detail: "go",
+        createdAt: at(1),
+        turnId: "t1",
+      }),
       event({ id: "r", kind: "thought", summary: "Reasoning", detail: "hm", createdAt: at(2) }),
       event({ id: "o", summary: "Response", detail: "done", createdAt: at(3), turnId: "t1" }),
     ]);

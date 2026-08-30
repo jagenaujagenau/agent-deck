@@ -179,7 +179,10 @@ async function sseLatency(samples: number): Promise<Stats> {
 }
 
 /** One subscribed device: a frame parser over a held-open /events response. */
-async function subscriber(): Promise<{ nextFrame: (event: string) => Promise<void>; stop: () => void }> {
+async function subscriber(): Promise<{
+  nextFrame: (event: string) => Promise<void>;
+  stop: () => void;
+}> {
   const controller = new AbortController();
   const subscribe = () => fetch(`${BASE}/events`, { signal: controller.signal });
   const response = await subscribe().catch(subscribe);
@@ -250,7 +253,10 @@ for (let index = 0; index < AGENTS; index++) await drained(heartbeat(index, "see
 
 console.log(`bridge bench — ${AGENTS} agents seeded, Bun ${Bun.version}`);
 console.log(
-  row("heartbeat ingest", await measure(EVENTS_PER_KIND, 16, (index) => heartbeat(index, `load ${index}`))),
+  row(
+    "heartbeat ingest",
+    await measure(EVENTS_PER_KIND, 16, (index) => heartbeat(index, `load ${index}`)),
+  ),
 );
 console.log(
   row(

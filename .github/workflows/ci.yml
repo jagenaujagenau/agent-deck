@@ -1,0 +1,61 @@
+# Every suite the repo already runs locally, run on every push — the parity
+# corpus and the contract suite only bite when something executes them.
+#
+# Deliberately not gated here: `tsc --noEmit` (carries known pre-existing
+# errors in two hook modules) and `knip` (carries known pre-existing
+# findings); gate them once their baselines are clean.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bridge:
+    name: bridge (bun)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run format:check
+      # Server (incl. the contract suite against a real bridge subprocess),
+      # agent-adapter, bridge-client (incl. the attention parity corpus), and
+      # the integrations.
+      - run: bun run test
+
+  android:
+    name: android (jvm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      # Compiles phone, wear, and shared main sources and runs every JVM
+      # policy test, including the shared attention parity corpus.
+      - run: ./gradlew :shared:testDebugUnitTest :mobile:testDebugUnitTest :wear:testDebugUnitTest
+        working-directory: apps/android
+
+  ios-policy:
+    name: ios policy (swift)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # Compiles the app's real Model sources (symlinked into the package)
+      # and runs the Swift half of the parity corpus. The full app build
+      # stays local for now: xcodebuild against a moving Xcode on runners is
+      # a flakiness source this suite does not need.
+      - run: swift test
+        working-directory: apps/ios/PolicyTests

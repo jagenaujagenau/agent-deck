@@ -5,10 +5,8 @@ describe("SseParser", () => {
   test("a frame split across chunks arrives once, whole", () => {
     const parser = new SseParser();
     expect(parser.push("event: snap")).toEqual([]);
-    expect(parser.push("shot\nid: 4\ndata: {\"a\":")).toEqual([]);
-    expect(parser.push("1}\n\n")).toEqual([
-      { event: "snapshot", id: "4", data: '{"a":1}' },
-    ]);
+    expect(parser.push('shot\nid: 4\ndata: {"a":')).toEqual([]);
+    expect(parser.push("1}\n\n")).toEqual([{ event: "snapshot", id: "4", data: '{"a":1}' }]);
   });
 
   test("several frames in one chunk all come out, in order", () => {

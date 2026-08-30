@@ -45,7 +45,6 @@ export interface RuntimeEventLogDeps {
   now: () => string;
 }
 
-
 export function makeRuntimeEventLog(deps: RuntimeEventLogDeps) {
   const { sql, now } = deps;
   /** The newest accepted report position per (agent, source) — the stale guard's memory. */

@@ -139,9 +139,7 @@ function isAgentResponse(event: AgentEvent): boolean {
 
 function isSubagentMessage(event: AgentEvent): boolean {
   return (
-    event.subagentId !== undefined &&
-    event.tool === "Task" &&
-    (event.detail ?? "").trim() !== ""
+    event.subagentId !== undefined && event.tool === "Task" && (event.detail ?? "").trim() !== ""
   );
 }
 

@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { AgentEvent } from "./Domain";
 import { trimHistory } from "./Store";
 
-const at = (index: number) => `2026-08-28T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`;
+const at = (index: number) =>
+  `2026-08-28T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`;
 
 const event = (id: string, index: number, command?: string): AgentEvent => ({
   id,
