@@ -603,7 +603,13 @@ private fun AgentList(snapshot: BridgeSnapshot?, state: BridgeState, seenMarks: 
     }
 
     val pages = WearStatePage.entries
-    val pagerState = rememberPagerState(pageCount = { pages.size })
+    // A raised wrist lands where the highest-ranked session lives — the whole
+    // point of raising it because it buzzed. Decided once at composition; the
+    // person's own swipes rule from then on.
+    val pagerState = rememberPagerState(
+        initialPage = pages.indexOf(landingPage(snapshot.agents, seenMarks)),
+        pageCount = { pages.size },
+    )
     val pageListStates = pages.map { rememberTransformingLazyColumnState() }
     val pagerFlingBehavior = PagerDefaults.flingBehavior(
         state = pagerState,

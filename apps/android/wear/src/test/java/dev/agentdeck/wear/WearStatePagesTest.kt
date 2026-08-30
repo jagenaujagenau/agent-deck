@@ -60,3 +60,50 @@ class WearStatePagesTest {
         assertEquals(listOf("unread", "read"), agentsForPage(agents, WearStatePage.Idle).map { it.id })
     }
 }
+
+class LandingPageTest {
+    private fun agent(id: String, state: String, viewedAt: String? = null) = Agent(
+        id = id,
+        name = id,
+        project = "deck",
+        model = "model",
+        state = state,
+        task = "task",
+        tokens = 0,
+        costUsd = 0.0,
+        lastSeenAt = "2026-08-24T10:00:00Z",
+        viewedAt = viewedAt,
+    )
+
+    @Test
+    fun aRaisedWristLandsOnTheStuckOne() {
+        val agents = listOf(agent("run", "running"), agent("stuck", "waiting"))
+        assertEquals(WearStatePage.NeedsYou, landingPage(agents))
+    }
+
+    @Test
+    fun aFinishNobodyHasSeenOutranksWhatIsMerelyRunning() {
+        val agents = listOf(agent("run", "running"), agent("fresh", "idle"))
+        assertEquals(WearStatePage.Idle, landingPage(agents))
+    }
+
+    @Test
+    fun aFinishAlreadyReadAnywhereLetsRunningLead() {
+        val agents = listOf(
+            agent("run", "running"),
+            agent("read", "idle", viewedAt = "2026-08-24T10:00:00Z"),
+        )
+        assertEquals(WearStatePage.Running, landingPage(agents))
+    }
+
+    @Test
+    fun aDeckWithNothingToSayOpensOnRunning() {
+        assertEquals(WearStatePage.Running, landingPage(emptyList()))
+        assertEquals(WearStatePage.Running, landingPage(listOf(agent("gone", "offline"))))
+    }
+
+    @Test
+    fun aDeckOfOnlyPausedSessionsLandsWhereTheyAre() {
+        assertEquals(WearStatePage.Paused, landingPage(listOf(agent("held", "paused"))))
+    }
+}
