@@ -2,8 +2,6 @@ import { Context, Effect, Layer, Option, Ref, Schema, SubscriptionRef } from "ef
 import { SqlClient } from "effect/unstable/sql";
 import {
   canonicalRuntimeEvent,
-  emptyRuntimeProjection,
-  projectRuntimeEvent,
   type CanonicalRuntimeEvent,
   type RuntimeProjection,
   type RuntimeRequestStatus,
@@ -32,6 +30,7 @@ import type {
 import { StoredAgent, StoredCommand } from "./Domain";
 import { makeRequestLedger } from "./RequestLedger";
 import type { PendingQuestion, RequestLedger } from "./RequestLedger";
+import { makeRuntimeEventLog } from "./RuntimeEventLog";
 
 import { createHash, randomBytes, randomInt } from "node:crypto";
 
@@ -190,28 +189,6 @@ export const pendingBlockFrom = (
     : question !== undefined
       ? { kind: "question", question: question.question }
       : undefined;
-
-/**
- * Whether a state report arrived behind one already accepted from the same
- * publisher, recording the newer position when it did not.
- *
- * Only "session.state.changed" is guarded: item, tool, and usage facts are
- * append-only history, where arriving late loses nothing. A report with no
- * origin keeps the old behaviour exactly — every in-tree adapter now names
- * one through the shared publisher, but events from an older adapter or a
- * third-party integration must keep landing.
- */
-export const isStaleStateReport = (
-  lastAcceptedSeq: Map<string, number>,
-  event: Pick<CanonicalRuntimeEvent, "type" | "agentId" | "origin">,
-): boolean => {
-  if (event.type !== "session.state.changed" || event.origin === undefined) return false;
-  const key = `${event.agentId}\u0000${event.origin.source}`;
-  const last = lastAcceptedSeq.get(key);
-  if (last !== undefined && event.origin.seq <= last) return true;
-  lastAcceptedSeq.set(key, event.origin.seq);
-  return false;
-};
 
 /**
  * Rate limits as the snapshot renders them: what the runtime's own events
@@ -435,55 +412,11 @@ export class BridgeState extends Context.Service<
           Effect.orDie,
         );
 
-      const appendRuntimeEvent = Effect.fn("BridgeState.appendRuntimeEvent")(function* (
-        event: CanonicalRuntimeEvent,
-      ) {
-        yield* sql`INSERT OR IGNORE INTO bridge_runtime_events (id, agent_id, type, data, created_at)
-                   VALUES (${event.id}, ${event.agentId}, ${event.type}, ${JSON.stringify(event)}, ${event.createdAt})`;
-        const seqRows = yield* sql<{ sequence: number }>`
-          SELECT sequence FROM bridge_runtime_events WHERE id = ${event.id}`;
-        const sequence = seqRows[0]?.sequence ?? 0;
-        if (sequence > 0) {
-          const projRows = yield* sql<{ data: string }>`
-            SELECT data FROM bridge_runtime_projections WHERE agent_id = ${event.agentId}`;
-          let projection = emptyRuntimeProjection(event.agentId);
-          if (projRows[0]) {
-            try {
-              projection = JSON.parse(projRows[0].data);
-            } catch {
-              /* Rebuild from this event. */
-            }
-          }
-          const projected = projectRuntimeEvent(projection, event, sequence);
-          yield* sql`INSERT INTO bridge_runtime_projections (agent_id, sequence, data, updated_at)
-                     VALUES (${event.agentId}, ${projected.sequence}, ${JSON.stringify(projected)}, ${projected.updatedAt})
-                     ON CONFLICT(agent_id) DO UPDATE SET sequence = excluded.sequence, data = excluded.data,
-                       updated_at = excluded.updated_at
-                     WHERE excluded.sequence >= bridge_runtime_projections.sequence`;
-        }
-        return sequence;
-      }, Effect.orDie);
-
-      const recordFact = (
-        agentId: string,
-        type: CanonicalRuntimeEvent["type"],
-        payload: CanonicalRuntimeEvent["payload"],
-        options: { id?: string; requestId?: string; itemId?: string } = {},
-      ) => {
-        const event: CanonicalRuntimeEvent = {
-          id: options.id ?? makeId(),
-          agentId,
-          type,
-          createdAt: now(),
-          payload,
-        };
-        // Only the lifecycles that have them carry these, and the projector
-        // reading these back treats a present-but-undefined key differently
-        // from an absent one.
-        if (options.requestId !== undefined) event.requestId = options.requestId;
-        if (options.itemId !== undefined) event.itemId = options.itemId;
-        return appendRuntimeEvent(event);
-      };
+      /**
+       * The durable ordered log and its folded projections — ADR-0001's core,
+       * owned by one module; see RuntimeEventLog.
+       */
+      const log = makeRuntimeEventLog({ sql, now });
 
       /**
        * The Request lifecycle in one place. The ledger publishes each
@@ -494,10 +427,12 @@ export class BridgeState extends Context.Service<
         sql,
         now,
         recordResolution: (agentId, eventType, requestId, payload) =>
-          recordFact(agentId, eventType, payload, {
-            requestId,
-            id: `request-resolved:${requestId}`,
-          }).pipe(Effect.asVoid),
+          log
+            .record(agentId, eventType, payload, {
+              requestId,
+              id: `request-resolved:${requestId}`,
+            })
+            .pipe(Effect.asVoid),
         changed,
       });
 
@@ -534,16 +469,7 @@ export class BridgeState extends Context.Service<
         const timestamp = Date.now();
         const agents = yield* Ref.get(agentsRef);
         // One query for every projection rather than one per agent.
-        const projRows = yield* sql<{ agent_id: string; data: string }>`
-          SELECT agent_id, data FROM bridge_runtime_projections`.pipe(Effect.orDie);
-        const projections = new Map<string, RuntimeProjection>();
-        for (const row of projRows) {
-          try {
-            projections.set(row.agent_id, JSON.parse(row.data));
-          } catch {
-            /* Compatibility projection remains available. */
-          }
-        }
+        const projections = yield* log.projections();
         const { approvals, questions } = yield* requests.pendingByAgent();
         const rendered = [...agents.values()].map((agent) => {
           /**
@@ -697,7 +623,7 @@ export class BridgeState extends Context.Service<
             previous.task !== agent.task ||
             previous.objective !== agent.objective)
         ) {
-          yield* recordFact(agent.id, "session.state.changed", {
+          yield* log.record(agent.id, "session.state.changed", {
             state: agent.state,
             task: agent.task,
             objective: agent.objective ?? null,
@@ -708,7 +634,7 @@ export class BridgeState extends Context.Service<
           agent.pendingApproval &&
           previous?.pendingApproval?.id !== agent.pendingApproval.id
         ) {
-          yield* recordFact(
+          yield* log.record(
             agent.id,
             "request.opened",
             {
@@ -758,7 +684,7 @@ export class BridgeState extends Context.Service<
         yield* persistFileChange(agentId, created);
         yield* persistSessionEvent(agentId, created);
         if (agent.runtimeProtocol !== "canonical-v1") {
-          yield* recordFact(
+          yield* log.record(
             agentId,
             created.kind === "error"
               ? "runtime.error"
@@ -784,7 +710,6 @@ export class BridgeState extends Context.Service<
        * In memory only: a restart forgets it, and the first report after a
        * restart is accepted regardless, which is the safe direction to fail.
        */
-      const stateReportSeqs = new Map<string, number>();
 
       const ingestRuntimeEvent = Effect.fn("BridgeState.ingestRuntimeEvent")(function* (
         value: JsonValue | CanonicalRuntimeEvent,
@@ -796,12 +721,9 @@ export class BridgeState extends Context.Service<
               reason: cause instanceof Error ? cause.message : "Invalid runtime event",
             }),
         });
-        // Dropped as a success, not a 4xx: a well-behaved runtime retries an
-        // error, and retrying a report that lost the race would never converge.
-        if (isStaleStateReport(stateReportSeqs, event)) {
-          return { accepted: false, reason: "stale" } as const;
-        }
-        const sequence = yield* appendRuntimeEvent(event);
+        const outcome = yield* log.ingest(event);
+        if (outcome.accepted === false) return { accepted: false, reason: outcome.reason } as const;
+        const sequence = outcome.sequence;
         // A request's kind comes from the event type, never the payload: the
         // two lifecycles resolve through different endpoints.
         if (event.type === "request.opened" || event.type === "user-input.requested") {
@@ -927,7 +849,7 @@ export class BridgeState extends Context.Service<
           createdAt: now(),
         });
         yield* persistAgent(agent);
-        yield* recordFact(agentId, "session.state.changed", {
+        yield* log.record(agentId, "session.state.changed", {
           state: agent.state,
           commandId: command.id,
           action,
@@ -961,7 +883,7 @@ export class BridgeState extends Context.Service<
         const command: Command = { ...existing, acknowledgedAt: now() };
         yield* Ref.update(commandsRef, (map) => new Map(map).set(commandId, command));
         yield* persistCommand(command);
-        const sequence = yield* recordFact(agentId, "session.state.changed", {
+        const sequence = yield* log.record(agentId, "session.state.changed", {
           commandId,
           delivery: "acknowledged",
         });
@@ -1108,21 +1030,12 @@ export class BridgeState extends Context.Service<
         );
         const out: Array<ProjectionParityRow> = [];
         for (const agent of canonical) {
-          const rows = yield* sql<{ sequence: number; data: string }>`
-            SELECT sequence, data FROM bridge_runtime_projections WHERE agent_id = ${agent.id}`.pipe(
-            Effect.orDie,
-          );
-          const row = rows[0];
-          let projection: RuntimeProjection | undefined;
-          try {
-            if (row) projection = JSON.parse(row.data);
-          } catch {
-            /* Report missing below. */
-          }
+          const stored = yield* log.projection(agent.id);
+          const projection = stored?.projection;
           out.push({
             agentId: agent.id,
             runtime: runtimeFor(agent),
-            projectionSequence: row?.sequence ?? null,
+            projectionSequence: stored?.sequence ?? null,
             heartbeat: {
               state: agent.state,
               task: agent.task,

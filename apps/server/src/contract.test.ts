@@ -267,6 +267,41 @@ describe("the wire contract, executed", () => {
     expect(released?.stateAuthority).toBeUndefined();
   });
 
+  test("a canonical session's projection is believed over its heartbeat", async () => {
+    // ADR-0001's central claim, executed: for a runtime that declared
+    // canonical-v1, state, task, and identity come from the folded event log,
+    // and a later heartbeat repeating a stale view does not win them back.
+    await heartbeat("codex-contract-proj", {
+      runtimeProtocol: "canonical-v1",
+      state: "running",
+      task: "heartbeat says running",
+    });
+    await publish("/agents/codex-contract-proj/runtime-events", {
+      id: "contract-proj-registered",
+      agentId: "codex-contract-proj",
+      type: "session.registered",
+      createdAt: at,
+      payload: { name: "Projected Name", project: "contract", model: "projected-model" },
+    });
+    await publish("/agents/codex-contract-proj/runtime-events", {
+      id: "contract-proj-state",
+      agentId: "codex-contract-proj",
+      type: "session.state.changed",
+      createdAt: new Date().toISOString(),
+      origin: { source: "contract-suite-proj", seq: 1 },
+      payload: { state: "waiting", task: "Projected waiting" },
+    });
+    await heartbeat("codex-contract-proj", {
+      runtimeProtocol: "canonical-v1",
+      state: "running",
+      task: "heartbeat still says running",
+    });
+    const agent = await master.agent("codex-contract-proj");
+    expect(agent?.state).toBe("waiting");
+    expect(agent?.task).toBe("Projected waiting");
+    expect(agent?.name).toBe("Projected Name");
+  });
+
   test("a resolution fits its kind, and lands exactly once", async () => {
     await heartbeat("codex-contract-ledger", { runtimeProtocol: "canonical-v1" });
     await publish("/agents/codex-contract-ledger/runtime-events", {

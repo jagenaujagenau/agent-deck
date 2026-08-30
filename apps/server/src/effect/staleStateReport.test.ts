@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isStaleStateReport } from "./State";
+import { isStaleStateReport } from "./RuntimeEventLog";
 
 const report = (seq: number, agentId = "agent-1", source = "claude-hooks") => ({
   type: "session.state.changed" as const,
@@ -33,9 +33,9 @@ describe("isStaleStateReport", () => {
   test("a report with no origin always lands, as it always has", () => {
     const seen = new Map<string, number>();
     expect(isStaleStateReport(seen, report(9))).toBe(false);
-    expect(
-      isStaleStateReport(seen, { type: "session.state.changed", agentId: "agent-1" }),
-    ).toBe(false);
+    expect(isStaleStateReport(seen, { type: "session.state.changed", agentId: "agent-1" })).toBe(
+      false,
+    );
   });
 
   test("only state reports are guarded; item facts are append-only history", () => {
