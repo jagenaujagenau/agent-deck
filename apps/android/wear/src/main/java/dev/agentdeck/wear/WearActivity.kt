@@ -130,6 +130,9 @@ private val QUEUED_ACTIONS = setOf("pause", "resume", "stop")
 /** Enough recent events to hold the newest message, thought and command. */
 private const val WATCH_HISTORY_LIMIT = 60
 
+/** The command a Blocked Refusal turned away, held so "send anyway" can force it. */
+data class BlockedCommand(val action: String, val value: String?, val detail: String)
+
 class WearDeckViewModel(application: Application) : AndroidViewModel(application),
     com.google.android.gms.wearable.DataClient.OnDataChangedListener,
     com.google.android.gms.wearable.MessageClient.OnMessageReceivedListener {
@@ -151,6 +154,17 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
     val busy = _busy.asStateFlow()
     private val _deliveryError = MutableStateFlow<String?>(null)
     val deliveryError = _deliveryError.asStateFlow()
+
+    /**
+     * A command the bridge refused over a pending approval or question — the
+     * Blocked Refusal. Kept apart from delivery errors: the bridge answered,
+     * it did not fail, and the answer is "deal with the card first, or say
+     * force". Until this existed the relay flattened the refusal into a
+     * generic failure line, so a blocked send on the wrist read as a network
+     * error with nothing to do about it.
+     */
+    private val _blockedCommand = MutableStateFlow<BlockedCommand?>(null)
+    val blockedCommand = _blockedCommand.asStateFlow()
     private val pendingCommands = mutableMapOf<String, String>()
     private var lastRelayAt = relayCache.getLong("publishedAt", 0L)
     private var lastSequence = -1L
@@ -361,10 +375,11 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun control(agent: Agent, action: String, value: String? = null) {
+    fun control(agent: Agent, action: String, value: String? = null, force: Boolean = false) {
         val commandId = UUID.randomUUID().toString()
         _busy.value = agent.id
         _deliveryError.value = null
+        _blockedCommand.value = null
         // An approval is collected by a runtime already blocked waiting for it,
         // so it arrives whatever the session is doing. A pause, resume or stop
         // goes on the same queue a message does, and a session running no turn
@@ -377,13 +392,26 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
             .put("agentId", agent.id)
             .put("action", action)
             .apply { if (value != null) put("value", value) }
+            .apply { if (force) put("force", true) }
             .toString()
         commandOutbox.put(commandId, payloadText)
         val payload = payloadText.toByteArray()
         sendToPhone(
             CONTROL_PATH,
             payload,
-            fallback = { repository.control(agent.id, action, value, commandId = commandId) },
+            fallback = {
+                try {
+                    repository.control(agent.id, action, value, commandId = commandId, force = force)
+                } catch (blocked: AgentBlockedException) {
+                    // The refusal is the answer: answering the pending card is
+                    // the real next action, and the person may still force it.
+                    _blockedCommand.value = BlockedCommand(
+                        action,
+                        value,
+                        blocked.message ?: "Waiting on an approval or question",
+                    )
+                }
+            },
         )
         viewModelScope.launch {
             delay(12_000)
@@ -394,10 +422,17 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** Re-issues the refused command with force, deliberately queuing behind the block. */
+    fun sendAnyway(agent: Agent) {
+        val blocked = _blockedCommand.value ?: return
+        control(agent, blocked.action, blocked.value, force = true)
+    }
+
     fun answer(agent: Agent, event: AgentEvent, option: String) {
         val commandId = UUID.randomUUID().toString()
         _busy.value = agent.id
         _deliveryError.value = null
+        _blockedCommand.value = null
         _commandNotice.value = null
         pendingCommands[commandId] = agent.id
         val question = event.detail ?: event.summary
@@ -420,10 +455,25 @@ class WearDeckViewModel(application: Application) : AndroidViewModel(application
         val payload = runCatching { JSONObject(event.data.toString(Charsets.UTF_8)) }.getOrNull() ?: return
         val commandId = payload.optString("commandId")
         val wasPending = pendingCommands.remove(commandId) != null
-        if (!wasPending && commandOutbox.all().none { it.id == commandId }) return
+        val queued = commandOutbox.all().firstOrNull { it.id == commandId }
+        if (!wasPending && queued == null) return
         commandOutbox.remove(commandId)
         _busy.value = null
-        _deliveryError.value = if (payload.optString("status") == "delivered") null else payload.optString("error", "Command delivery failed")
+        when (payload.optString("status")) {
+            "delivered" -> _deliveryError.value = null
+            // The bridge refused, it did not fail. The original command is
+            // recovered from the outbox so "send anyway" can re-issue it forced.
+            "blocked" -> {
+                val original = runCatching { JSONObject(queued?.payload ?: "") }.getOrNull()
+                _deliveryError.value = null
+                _blockedCommand.value = BlockedCommand(
+                    action = original?.optString("action")?.takeIf { it.isNotBlank() } ?: "prompt",
+                    value = original?.optString("value")?.takeIf { it.isNotBlank() },
+                    detail = payload.optString("error", "Waiting on an approval or question"),
+                )
+            }
+            else -> _deliveryError.value = payload.optString("error", "Command delivery failed")
+        }
     }
 
     private fun retryQueuedCommands() {
@@ -518,6 +568,7 @@ private fun WearDeck(openAgentId: String? = null, vm: WearDeckViewModel = viewMo
     val state by vm.state.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
     val deliveryError by vm.deliveryError.collectAsStateWithLifecycle()
+    val blockedCommand by vm.blockedCommand.collectAsStateWithLifecycle()
     val commandNotice by vm.commandNotice.collectAsStateWithLifecycle()
     val sessionEvents by vm.sessionEvents.collectAsStateWithLifecycle()
     val historyLoading by vm.historyLoading.collectAsStateWithLifecycle()
@@ -573,6 +624,8 @@ private fun WearDeck(openAgentId: String? = null, vm: WearDeckViewModel = viewMo
                     busy == agent.id,
                     deliveryError,
                     commandNotice,
+                    blocked = blockedCommand,
+                    onSendAnyway = { vm.sendAnyway(agent) },
                     onAnswer = { event, option -> vm.answer(agent, event, option) },
                     sendAction = remoteMessageAction(agent.state) { action ->
                         supportsCapability(agent.capabilities, action)
@@ -779,6 +832,8 @@ private fun SessionControls(
     busy: Boolean,
     deliveryError: String?,
     commandNotice: String?,
+    blocked: BlockedCommand?,
+    onSendAnyway: () -> Unit,
     onAnswer: (AgentEvent, String) -> Unit,
     sendAction: String?,
     onSend: (String, String) -> Unit,
@@ -842,12 +897,30 @@ private fun SessionControls(
             }
         }
         if (busy) item { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) }
-        deliveryError?.let { message ->
-            item { Text(message, color = Danger, fontSize = 11.sp, textAlign = TextAlign.Center) }
+        blocked?.let { refusal ->
+            // The choice the refusal offers: answer the card below first, or
+            // deliberately queue behind it — the same pair the phone offers.
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Blocked · ${refusal.detail}",
+                        color = Amber,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        maxLines = 3,
+                    )
+                    TextButton(onClick = onSendAnyway) { Text("Send anyway", fontSize = 12.sp) }
+                }
+            }
         }
-        if (deliveryError == null) {
-            commandNotice?.let { notice ->
-                item { Text(notice, color = Muted, fontSize = 11.sp, textAlign = TextAlign.Center) }
+        if (blocked == null) {
+            deliveryError?.let { message ->
+                item { Text(message, color = Danger, fontSize = 11.sp, textAlign = TextAlign.Center) }
+            }
+            if (deliveryError == null) {
+                commandNotice?.let { notice ->
+                    item { Text(notice, color = Muted, fontSize = 11.sp, textAlign = TextAlign.Center) }
+                }
             }
         }
         if (hasApproval) {
@@ -952,6 +1025,8 @@ private fun AgentDetail(
     busy: Boolean,
     deliveryError: String?,
     commandNotice: String?,
+    blocked: BlockedCommand?,
+    onSendAnyway: () -> Unit,
     onAnswer: (AgentEvent, String) -> Unit,
     sendAction: String?,
     onSend: (String, String) -> Unit,
@@ -970,6 +1045,8 @@ private fun AgentDetail(
                         busy = busy,
                         deliveryError = deliveryError,
                         commandNotice = commandNotice,
+                        blocked = blocked,
+                        onSendAnyway = onSendAnyway,
                         onAnswer = onAnswer,
                         sendAction = sendAction,
                         onSend = onSend,

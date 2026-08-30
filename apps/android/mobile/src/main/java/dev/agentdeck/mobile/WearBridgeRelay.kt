@@ -5,6 +5,7 @@ import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
+import dev.agentdeck.shared.AgentBlockedException
 import dev.agentdeck.shared.BridgeClient
 import dev.agentdeck.shared.BridgeSnapshot
 import dev.agentdeck.shared.SecureTokenStore
@@ -68,6 +69,7 @@ class WearControlListenerService : WearableListenerService() {
                             payload.getString("action"),
                             payload.optString("value").takeIf { it.isNotBlank() },
                             commandId,
+                            force = payload.optBoolean("force", false),
                         )
                         var delivered = false
                         for (attempt in 0 until 20) {
@@ -86,12 +88,21 @@ class WearControlListenerService : WearableListenerService() {
                             JSONObject().put("commandId", commandId).put("status", "delivered").toString().toByteArray(),
                         )
                     }.onFailure { error ->
+                        // A Blocked Refusal is the bridge answering, not failing:
+                        // it travels to the wrist as its own status, with the
+                        // reason, so the watch can offer "send anyway" instead of
+                        // reading it as a network error.
+                        val blocked = error is AgentBlockedException
                         Wearable.getMessageClient(this@WearControlListenerService).sendMessage(
                             event.sourceNodeId,
                             WearBridgeRelay.CONTROL_RESULT_PATH,
-                            JSONObject().put("commandId", commandId).put("status", "failed").put("error", error.message ?: "Delivery failed").toString().toByteArray(),
+                            JSONObject().put("commandId", commandId)
+                                .put("status", if (blocked) "blocked" else "failed")
+                                .put("error", error.message ?: "Delivery failed").toString().toByteArray(),
                         )
-                        throw error
+                        // Blocked still refreshes the snapshot below, so the watch
+                        // shows the pending card the refusal points at.
+                        if (!blocked) throw error
                     }
                 }
                 if (event.path == WearBridgeRelay.ANSWER_PATH) {
