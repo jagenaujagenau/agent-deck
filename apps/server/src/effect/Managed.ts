@@ -1,6 +1,5 @@
 import { stat } from "node:fs/promises";
 import { Context, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
-import { SqlClient } from "effect/unstable/sql";
 import {
   ClaudeSdkManagedRuntimeAdapter,
   type CanonicalRuntimeEvent,
@@ -70,9 +69,7 @@ export class ManagedRuntime extends Context.Service<
   ManagedRuntime,
   {
     readonly available: Effect.Effect<ReadonlyArray<ManagedRuntimeDescriptor>>;
-    readonly start: (
-      input: StartInput,
-    ) => Effect.Effect<StartedManagedSession, ManagedStartError>;
+    readonly start: (input: StartInput) => Effect.Effect<StartedManagedSession, ManagedStartError>;
     readonly resolve: (
       agentId: string,
       requestId: string,
@@ -86,7 +83,6 @@ export class ManagedRuntime extends Context.Service<
     ManagedRuntime,
     Effect.gen(function* () {
       const state = yield* BridgeState;
-      const sql = yield* SqlClient.SqlClient;
       const sessions = yield* Ref.make(new Map<string, Hosted>());
       // The adapter's callbacks are plain promises, so they step outside the
       // Effect runtime to call back in.
@@ -100,68 +96,36 @@ export class ManagedRuntime extends Context.Service<
       const requests: ManagedRequestStore = {
         open: async (request) => {
           await run(
-            Effect.gen(function* () {
-              yield* sql`INSERT INTO bridge_requests (request_id, agent_id, kind, status, data, created_at, expires_at, resolved_at)
-                       VALUES (${request.requestId}, ${request.agentId}, ${request.kind}, 'pending',
-                               ${JSON.stringify(request.payload)}, ${request.createdAt}, ${request.expiresAt ?? null}, NULL)
-                       ON CONFLICT(request_id) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind,
-                         data = excluded.data, expires_at = excluded.expires_at`.pipe(Effect.orDie);
-            }),
+            state.requests.open(
+              request.agentId,
+              request.requestId,
+              request.kind,
+              request.payload,
+              request.createdAt,
+              request.expiresAt,
+            ),
           );
         },
         resolve: async (requestId, status, value) => {
           await run(
             Effect.gen(function* () {
-              const rows = yield* sql<{ agent_id: string }>`
-              SELECT agent_id FROM bridge_requests WHERE request_id = ${requestId}`.pipe(
-                Effect.orDie,
-              );
-              const agentId = rows[0]?.agent_id;
+              const agentId = yield* state.requests.agentFor(requestId);
               if (agentId) {
                 // SAFETY: the adapter hands back the resolution value it was
                 // given, which arrived through a JSON body or a JSON column,
                 // so it is a JSON value by construction.
-                yield* state.resolveRuntimeRequest(agentId, requestId, status, value as JsonValue);
+                yield* state.requests.resolve(agentId, requestId, status, value as JsonValue);
               }
             }),
           );
         },
         waitForResolution: async (requestId, signal) => {
           while (!signal.aborted) {
-            const row = await run(
-              Effect.gen(function* () {
-                const rows = yield* sql<{
-                  status: RuntimeRequestStatus;
-                  data: string;
-                  expires_at: string | null;
-                }>`
-                SELECT status, data, expires_at FROM bridge_requests WHERE request_id = ${requestId}`.pipe(
-                  Effect.orDie,
-                );
-                return rows[0];
-              }),
-            );
-            if (!row) throw new Error(`Managed request disappeared: ${requestId}`);
-            if (row.status !== "pending") {
-              let data: JsonObject = {};
-              try {
-                data = JSON.parse(row.data);
-              } catch {
-                /* No resolution value. */
-              }
-              return { status: row.status, value: data.resolutionValue };
-            }
-            if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) {
-              await run(
-                Effect.gen(function* () {
-                  yield* sql`UPDATE bridge_requests SET status = 'expired', resolved_at = ${now()}
-                           WHERE request_id = ${requestId} AND status = 'pending'`.pipe(
-                    Effect.orDie,
-                  );
-                }),
-              );
-              return { status: "expired" as const };
-            }
+            // Expiry is the ledger's to settle — settled here on read, and
+            // published as a resolution fact like any other.
+            const standing = await run(state.requests.status(requestId));
+            if (!standing) throw new Error(`Managed request disappeared: ${requestId}`);
+            if (standing.status !== "pending") return standing;
             await Bun.sleep(250);
           }
           throw new Error("Managed request aborted");
@@ -196,8 +160,7 @@ export class ManagedRuntime extends Context.Service<
             // SAFETY: the adapter publishes `usage` as the SDK's token-usage
             // object; each field is still parsed before it is counted.
             const usage = event.payload.usage as JsonObject | undefined;
-            const num = (key: string) =>
-              Option.getOrElse(decodeNumber(usage?.[key]), () => 0);
+            const num = (key: string) => Option.getOrElse(decodeNumber(usage?.[key]), () => 0);
             const turnTokens =
               num("input_tokens") +
               num("cache_read_input_tokens") +
@@ -369,19 +332,6 @@ export class ManagedRuntime extends Context.Service<
         };
       });
 
-      const canResolve = (agentId: string, requestId: string, status: RuntimeRequestStatus) =>
-        Effect.gen(function* () {
-          const rows = yield* sql<{ kind: string; status: string }>`
-            SELECT kind, status FROM bridge_requests
-            WHERE request_id = ${requestId} AND agent_id = ${agentId}`.pipe(Effect.orDie);
-          const row = rows[0];
-          return (
-            row?.status === "pending" &&
-            (status !== "answered" || row.kind === "user-input") &&
-            (!["approved", "rejected"].includes(status) || row.kind === "approval")
-          );
-        });
-
       const resolve = Effect.fn("ManagedRuntime.resolve")(function* (
         agentId: string,
         requestId: string,
@@ -389,7 +339,8 @@ export class ManagedRuntime extends Context.Service<
         value?: JsonValue,
       ) {
         const hosted = (yield* Ref.get(sessions)).get(agentId);
-        if (hosted === undefined || !(yield* canResolve(agentId, requestId, status))) return false;
+        if (hosted === undefined || !(yield* state.requests.canResolve(agentId, requestId, status)))
+          return false;
         yield* Effect.promise(() =>
           adapter.resolveRequest(hosted.session, requestId, status, value),
         );

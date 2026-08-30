@@ -25,12 +25,13 @@ import type {
   AgentState,
   ControlAction,
   Heartbeat,
-  JsonObject,
   JsonValue,
   PendingApproval,
   RateLimitWindow,
 } from "./Domain";
 import { StoredAgent, StoredCommand } from "./Domain";
+import { makeRequestLedger } from "./RequestLedger";
+import type { PendingQuestion, RequestLedger } from "./RequestLedger";
 
 import { createHash, randomBytes, randomInt } from "node:crypto";
 
@@ -117,103 +118,9 @@ const decodeStoredCommand = Schema.decodeUnknownOption(StoredCommand);
  */
 const decodeString = Schema.decodeUnknownOption(Schema.String);
 
-/** A pending approval request row, reduced to what a card renders. */
-const toPendingApproval = (
-  requestId: string,
-  rawData: string,
-  created_at: string,
-  expires_at: string | null,
-): PendingApproval | undefined => {
-  let data: JsonObject;
-  try {
-    data = JSON.parse(rawData);
-  } catch {
-    return undefined;
-  }
-  const tool = decodeString(data.tool);
-  const detail = decodeString(data.detail);
-  if (Option.isNone(tool) || Option.isNone(detail)) return undefined;
-  return {
-    id: requestId,
-    tool: tool.value,
-    detail: detail.value,
-    createdAt: Option.getOrElse(decodeString(data.createdAt), () => created_at),
-    expiresAt: Option.getOrElse(
-      decodeString(data.expiresAt),
-      () => expires_at ?? new Date(Date.now() + 10 * 60_000).toISOString(),
-    ),
-  };
-};
-
-/**
- * A question option reduced to the text a card renders. Runtimes phrase an
- * option either as a plain string or as the SDK's labelled object; `decodeString`
- * tells the two apart and `.label` is read off the object form.
- */
-const optionList = (value: JsonValue | undefined): string[] => {
-  if (!Array.isArray(value)) return [];
-  const out: string[] = [];
-  for (const option of value) {
-    const direct = Option.getOrUndefined(decodeString(option));
-    if (direct) {
-      out.push(direct);
-      continue;
-    }
-    // SAFETY: a non-string option is the SDK's labelled object; `.label` read
-    // off a primitive is undefined, which `decodeString` turns into None.
-    const label = Option.getOrUndefined(decodeString((option as JsonObject).label));
-    if (label) out.push(label);
-  }
-  return out;
-};
-
-/**
- * A pending user-input request, reduced to what a card renders.
- *
- * Two runtimes phrase a question differently: the hooks and Pi publish a flat
- * `{ question, options }`, while the hosted Claude SDK publishes the tool's
- * `questions` array. Both reduce to the same card shape, and the decode reads
- * whichever arrived rather than knowing the runtime in advance.
- */
-export const toPendingQuestion = (
-  requestId: string,
-  rawData: string,
-  created_at: string,
-  expires_at: string | null,
-): PendingQuestion | undefined => {
-  let data: JsonObject;
-  try {
-    data = JSON.parse(rawData);
-  } catch {
-    return undefined;
-  }
-  let question = Option.getOrUndefined(decodeString(data.question));
-  let options = optionList(data.options);
-  if (Array.isArray(data.questions) && data.questions.length > 0) {
-    // SAFETY: the hosted SDK phrases a question as a `questions` array whose
-    // first entry carries `question` (or `prompt`) and labelled `options`;
-    // `Array.isArray` above told that shape apart from the flat fields, so
-    // this entry is an object by construction.
-    const first = data.questions[0] as JsonObject;
-    question =
-      question ??
-      Option.getOrUndefined(decodeString(first.question)) ??
-      Option.getOrUndefined(decodeString(first.prompt));
-    const sdkOptions = optionList(first.options);
-    if (sdkOptions.length > 0) options = sdkOptions;
-  }
-  if (!question) return undefined;
-  return {
-    id: requestId,
-    question,
-    options,
-    createdAt: Option.getOrElse(decodeString(data.createdAt), () => created_at),
-    expiresAt: Option.getOrElse(
-      decodeString(data.expiresAt),
-      () => expires_at ?? new Date(Date.now() + 10 * 60_000).toISOString(),
-    ),
-  };
-};
+// The row-to-card reductions moved to the Request Ledger with the rest of the
+// request lifecycle; the type stays re-exported so consumers keep one import.
+export type { PendingQuestion } from "./RequestLedger";
 
 /**
  * Turns a decoded row back into the record the bridge mutates.
@@ -260,18 +167,6 @@ export interface ProjectionParityRow {
     processedTokens: number | null;
   } | null;
   stateMatches: boolean;
-}
-
-/** What a stored request row holds: a runtime event's payload, or an approval. */
-type RequestData = PendingApproval | CanonicalRuntimeEvent["payload"];
-
-/** A pending user-input question, as the snapshot renders it on a card. */
-export interface PendingQuestion {
-  id: string;
-  question: string;
-  options: ReadonlyArray<string>;
-  createdAt: string;
-  expiresAt: string;
 }
 
 /**
@@ -411,6 +306,8 @@ export class BridgeState extends Context.Service<
       status: RuntimeRequestStatus,
       value?: JsonValue,
     ) => Effect.Effect<boolean>;
+    /** The one owner of durable Requests; see RequestLedger. */
+    readonly requests: RequestLedger;
     readonly setSlashCommands: (
       agentId: string,
       commands: ReadonlyArray<JsonValue>,
@@ -588,211 +485,31 @@ export class BridgeState extends Context.Service<
         return appendRuntimeEvent(event);
       };
 
-      const upsertRequest = (
-        agentId: string,
-        requestId: string,
-        kind: "approval" | "user-input",
-        status: RuntimeRequestStatus,
-        data: RequestData,
-        createdAt: string,
-        expiresAt?: string,
-      ) =>
-        sql`INSERT INTO bridge_requests (request_id, agent_id, kind, status, data, created_at, expires_at, resolved_at)
-            VALUES (${requestId}, ${agentId}, ${kind}, ${status}, ${JSON.stringify(data)}, ${createdAt},
-                    ${expiresAt ?? null}, ${status === "pending" ? null : now()})
-            ON CONFLICT(request_id) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind,
-              status = CASE WHEN bridge_requests.status = 'pending' THEN excluded.status ELSE bridge_requests.status END,
-              data = excluded.data, expires_at = excluded.expires_at,
-              resolved_at = CASE WHEN bridge_requests.status = 'pending' THEN excluded.resolved_at ELSE bridge_requests.resolved_at END`.pipe(
-          Effect.orDie,
-        );
-
-      const setRequestStatus = Effect.fn("BridgeState.setRequestStatus")(function* (
-        requestId: string,
-        status: RuntimeRequestStatus,
-        value?: JsonValue,
-      ) {
-        const rows = yield* sql<{
-          data: string;
-        }>`SELECT data FROM bridge_requests WHERE request_id = ${requestId}`;
-        let data: JsonObject = {};
-        try {
-          if (rows[0]) data = JSON.parse(rows[0].data);
-        } catch {
-          /* Preserve an empty payload. */
-        }
-        if (value !== undefined) data.resolutionValue = value;
-        yield* sql`UPDATE bridge_requests SET status = ${status}, data = ${JSON.stringify(data)}, resolved_at = ${now()}
-                   WHERE request_id = ${requestId} AND status = 'pending'`;
-      }, Effect.orDie);
-
-      const pendingApprovalFor = Effect.fn("BridgeState.pendingApprovalFor")(function* (
-        agentId: string,
-      ) {
-        const rows = yield* sql<{
-          request_id: string;
-          data: string;
-          created_at: string;
-          expires_at: string | null;
-        }>`SELECT request_id, data, created_at, expires_at FROM bridge_requests
-           WHERE agent_id = ${agentId} AND kind = 'approval' AND status = 'pending'
-           ORDER BY created_at DESC LIMIT 1`;
-        const row = rows[0];
-        if (row === undefined) return undefined;
-        if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) {
-          yield* setRequestStatus(row.request_id, "expired");
-          yield* recordFact(
-            agentId,
-            "request.resolved",
-            { status: "expired" },
-            {
-              requestId: row.request_id,
-              id: `request-resolved:${row.request_id}`,
-            },
-          );
-          yield* changed;
-          return undefined;
-        }
-        return toPendingApproval(row.request_id, row.data, row.created_at, row.expires_at);
-      }, Effect.orDie);
-
-      /** The question counterpart of `pendingApprovalFor`, with the same expiry rules. */
-      const pendingQuestionFor = Effect.fn("BridgeState.pendingQuestionFor")(function* (
-        agentId: string,
-      ) {
-        const rows = yield* sql<{
-          request_id: string;
-          data: string;
-          created_at: string;
-          expires_at: string | null;
-        }>`SELECT request_id, data, created_at, expires_at FROM bridge_requests
-           WHERE agent_id = ${agentId} AND kind = 'user-input' AND status = 'pending'
-           ORDER BY created_at DESC LIMIT 1`;
-        const row = rows[0];
-        if (row === undefined) return undefined;
-        if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) {
-          yield* setRequestStatus(row.request_id, "expired");
-          yield* recordFact(
-            agentId,
-            "user-input.resolved",
-            { status: "expired" },
-            {
-              requestId: row.request_id,
-              id: `request-resolved:${row.request_id}`,
-            },
-          );
-          yield* changed;
-          return undefined;
-        }
-        return toPendingQuestion(row.request_id, row.data, row.created_at, row.expires_at);
-      }, Effect.orDie);
-
       /**
-       * Every pending approval in one query, keyed by agent. The snapshot reads
-       * this once per revision instead of once per agent, so a deck of N
-       * sessions is one `SELECT` rather than N.
+       * The Request lifecycle in one place. The ledger publishes each
+       * resolution it settles — expiry included — through the same event log
+       * as any other fact, and announces the change.
        */
-      const pendingApprovalsByAgent = Effect.fn("BridgeState.pendingApprovalsByAgent")(
-        function* () {
-          const rows = yield* sql<{
-            agent_id: string;
-            request_id: string;
-            data: string;
-            created_at: string;
-            expires_at: string | null;
-          }>`SELECT agent_id, request_id, data, created_at, expires_at FROM bridge_requests
-             WHERE kind = 'approval' AND status = 'pending'
-             ORDER BY created_at DESC`.pipe(Effect.orDie);
-          const approvals = new Map<string, PendingApproval>();
-          const seen = new Set<string>();
-          for (const row of rows) {
-            // Latest per agent wins; the rest are stale duplicates.
-            if (seen.has(row.agent_id)) continue;
-            seen.add(row.agent_id);
-            if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) {
-              yield* setRequestStatus(row.request_id, "expired");
-              yield* recordFact(
-                row.agent_id,
-                "request.resolved",
-                { status: "expired" },
-                {
-                  requestId: row.request_id,
-                  id: `request-resolved:${row.request_id}`,
-                },
-              );
-              yield* changed;
-              continue;
-            }
-            const approval = toPendingApproval(
-              row.request_id,
-              row.data,
-              row.created_at,
-              row.expires_at,
-            );
-            if (approval) approvals.set(row.agent_id, approval);
-          }
-          return approvals;
-        },
-        Effect.orDie,
-      );
-
-      /**
-       * Every pending question in one query, keyed by agent — the same batch
-       * shape as approvals, so the snapshot never issues a query per session.
-       */
-      const pendingQuestionsByAgent = Effect.fn("BridgeState.pendingQuestionsByAgent")(
-        function* () {
-          const rows = yield* sql<{
-            agent_id: string;
-            request_id: string;
-            data: string;
-            created_at: string;
-            expires_at: string | null;
-          }>`SELECT agent_id, request_id, data, created_at, expires_at FROM bridge_requests
-             WHERE kind = 'user-input' AND status = 'pending'
-             ORDER BY created_at DESC`.pipe(Effect.orDie);
-          const questions = new Map<string, PendingQuestion>();
-          const seen = new Set<string>();
-          for (const row of rows) {
-            if (seen.has(row.agent_id)) continue;
-            seen.add(row.agent_id);
-            if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) {
-              yield* setRequestStatus(row.request_id, "expired");
-              yield* recordFact(
-                row.agent_id,
-                "user-input.resolved",
-                { status: "expired" },
-                {
-                  requestId: row.request_id,
-                  id: `request-resolved:${row.request_id}`,
-                },
-              );
-              yield* changed;
-              continue;
-            }
-            const question = toPendingQuestion(
-              row.request_id,
-              row.data,
-              row.created_at,
-              row.expires_at,
-            );
-            if (question) questions.set(row.agent_id, question);
-          }
-          return questions;
-        },
-        Effect.orDie,
-      );
+      const requests: RequestLedger = makeRequestLedger({
+        sql,
+        now,
+        recordResolution: (agentId, eventType, requestId, payload) =>
+          recordFact(agentId, eventType, payload, {
+            requestId,
+            id: `request-resolved:${requestId}`,
+          }).pipe(Effect.asVoid),
+        changed,
+      });
 
       const syncApprovalRequest = Effect.fn("BridgeState.syncApprovalRequest")(function* (
         agent: AgentRecord,
         previous?: AgentRecord,
       ) {
         if (agent.pendingApproval) {
-          yield* upsertRequest(
+          yield* requests.open(
             agent.id,
             agent.pendingApproval.id,
             "approval",
-            "pending",
             agent.pendingApproval,
             agent.pendingApproval.createdAt,
             agent.pendingApproval.expiresAt,
@@ -801,10 +518,10 @@ export class BridgeState extends Context.Service<
             previous?.pendingApproval &&
             previous.pendingApproval.id !== agent.pendingApproval.id
           ) {
-            yield* setRequestStatus(previous.pendingApproval.id, "unavailable");
+            yield* requests.setStatus(previous.pendingApproval.id, "unavailable");
           }
         } else if (previous?.pendingApproval) {
-          yield* setRequestStatus(
+          yield* requests.setStatus(
             previous.pendingApproval.id,
             Date.parse(previous.pendingApproval.expiresAt) <= Date.now()
               ? "expired"
@@ -827,8 +544,7 @@ export class BridgeState extends Context.Service<
             /* Compatibility projection remains available. */
           }
         }
-        const approvals = yield* pendingApprovalsByAgent();
-        const questions = yield* pendingQuestionsByAgent();
+        const { approvals, questions } = yield* requests.pendingByAgent();
         const rendered = [...agents.values()].map((agent) => {
           /**
            * The projection is believed, not checked against the heartbeat.
@@ -1096,11 +812,10 @@ export class BridgeState extends Context.Service<
           }
           const kind = event.type === "request.opened" ? "approval" : "user-input";
           const expiresAt = Option.getOrUndefined(decodeString(event.payload.expiresAt));
-          yield* upsertRequest(
+          yield* requests.open(
             event.agentId,
             event.requestId,
             kind,
-            "pending",
             event.payload,
             event.createdAt,
             expiresAt,
@@ -1122,22 +837,21 @@ export class BridgeState extends Context.Service<
               : event.type === "user-input.resolved"
                 ? "answered"
                 : "unavailable";
-          yield* setRequestStatus(event.requestId, status);
+          yield* requests.setStatus(event.requestId, status);
         }
         yield* changed;
         return { sequence, event };
       });
 
       const hasPendingApproval = (agentId: string) =>
-        Effect.map(pendingApprovalFor(agentId), (approval) => approval != null);
+        Effect.map(requests.pendingFor(agentId), (pending) => pending.approval != null);
 
       /** What the agent is blocked on right now, or undefined when it is free. */
       const pendingBlock = Effect.fn("BridgeState.pendingBlock")(function* (agentId: string) {
-        // Both reads run even when the first answers, so an expired question
-        // gets settled here the same way the snapshot would settle it.
-        const approval = yield* pendingApprovalFor(agentId);
-        const question = yield* pendingQuestionFor(agentId);
-        return pendingBlockFrom(approval, question);
+        // Both kinds are read even when the first answers, so an expired
+        // question gets settled here the same way the snapshot would settle it.
+        const pending = yield* requests.pendingFor(agentId);
+        return pendingBlockFrom(pending.approval, pending.question);
       });
 
       const supportsControl = Effect.fn("BridgeState.supportsControl")(function* (
@@ -1190,18 +904,12 @@ export class BridgeState extends Context.Service<
         if (action === "resume") agent.state = "running";
         if (action === "stop") agent.state = "idle";
         if (action === "approve" || action === "reject") {
-          const request = yield* pendingApprovalFor(agentId);
+          const request = (yield* requests.pendingFor(agentId)).approval;
           if (request) {
-            const status = action === "approve" ? "approved" : "rejected";
-            yield* setRequestStatus(request.id, status);
-            yield* recordFact(
+            yield* requests.resolve(
               agentId,
-              "request.resolved",
-              { status },
-              {
-                requestId: request.id,
-                id: `request-resolved:${request.id}`,
-              },
+              request.id,
+              action === "approve" ? "approved" : "rejected",
             );
           }
           agent.state = "running";
@@ -1292,72 +1000,10 @@ export class BridgeState extends Context.Service<
         return agent.viewedAt;
       });
 
-      const requestStatus = Effect.fn("BridgeState.requestStatus")(function* (
-        agentId: string,
-        requestId: string,
-      ) {
-        const rows = yield* sql<{
-          status: RuntimeRequestStatus;
-          data: string;
-          expires_at: string | null;
-        }>`
-          SELECT status, data, expires_at FROM bridge_requests
-          WHERE request_id = ${requestId} AND agent_id = ${agentId}`;
-        const row = rows[0];
-        if (row === undefined) return undefined;
-        if (
-          row.status === "pending" &&
-          row.expires_at &&
-          Date.parse(row.expires_at) <= Date.now()
-        ) {
-          yield* setRequestStatus(requestId, "expired");
-          const status: RuntimeRequestStatus = "expired";
-          return { status };
-        }
-        let data: JsonObject = {};
-        try {
-          data = JSON.parse(row.data);
-        } catch {
-          /* No resolution value. */
-        }
-        return { status: row.status, value: data.resolutionValue };
-      }, Effect.orDie);
+      const requestStatus = (agentId: string, requestId: string) =>
+        requests.status(requestId, agentId);
 
-      const canResolve = Effect.fn("BridgeState.canResolve")(function* (
-        agentId: string,
-        requestId: string,
-        status: RuntimeRequestStatus,
-      ) {
-        const rows = yield* sql<{ kind: string; status: string }>`
-          SELECT kind, status FROM bridge_requests WHERE request_id = ${requestId} AND agent_id = ${agentId}`;
-        const row = rows[0];
-        return (
-          row?.status === "pending" &&
-          (status !== "answered" || row.kind === "user-input") &&
-          (!["approved", "rejected"].includes(status) || row.kind === "approval")
-        );
-      }, Effect.orDie);
-
-      const resolveRuntimeRequest = Effect.fn("BridgeState.resolveRuntimeRequest")(function* (
-        agentId: string,
-        requestId: string,
-        status: RuntimeRequestStatus,
-        value?: JsonValue,
-      ) {
-        if (!(yield* canResolve(agentId, requestId, status))) return false;
-        yield* setRequestStatus(requestId, status, value);
-        // The projector reading this back treats a present-but-undefined
-        // `value` key differently from an absent one, so the key only exists
-        // when a value was actually supplied.
-        const payload: CanonicalRuntimeEvent["payload"] = { status };
-        if (value !== undefined) payload.value = value;
-        yield* recordFact(agentId, "request.resolved", payload, {
-          requestId,
-          id: `request-resolved:${requestId}`,
-        });
-        yield* changed;
-        return true;
-      });
+      const resolveRuntimeRequest = requests.resolve;
 
       const setSlashCommands = Effect.fn("BridgeState.setSlashCommands")(
         function* (agentId: string, commands: ReadonlyArray<JsonValue>) {
@@ -1561,6 +1207,7 @@ export class BridgeState extends Context.Service<
         markViewed,
         requestStatus,
         resolveRuntimeRequest,
+        requests,
         setSlashCommands,
         commandReceipt,
         analytics,

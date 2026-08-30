@@ -267,6 +267,39 @@ describe("the wire contract, executed", () => {
     expect(released?.stateAuthority).toBeUndefined();
   });
 
+  test("a resolution fits its kind, and lands exactly once", async () => {
+    await heartbeat("codex-contract-ledger", { runtimeProtocol: "canonical-v1" });
+    await publish("/agents/codex-contract-ledger/runtime-events", {
+      id: "contract-ledger-open",
+      agentId: "codex-contract-ledger",
+      type: "request.opened",
+      createdAt: at,
+      requestId: "contract-ledger-r1",
+      payload: {
+        kind: "approval",
+        tool: "Bash",
+        detail: "rm -rf build",
+        createdAt: at,
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      },
+    });
+    const resolve = (status: string) =>
+      publish("/agents/codex-contract-ledger/requests/contract-ledger-r1/resolve", { status });
+
+    // An answer settles a question, never an approval.
+    expect((await resolve("answered")).status).toBe(404);
+    expect((await resolve("approved")).status).toBe(200);
+    // Settled means settled: a second decision has nothing left to resolve.
+    expect((await resolve("rejected")).status).toBe(404);
+    const standing = await fetch(
+      `${base}/bridge/v1/agents/codex-contract-ledger/requests/contract-ledger-r1`,
+      { headers: { Authorization: `Bearer ${MASTER}` } },
+    );
+    // SAFETY: the route answers the documented `{status}` shape; this test is
+    // what holds it to that.
+    expect(((await standing.json()) as { status?: string }).status).toBe("approved");
+  });
+
   test("marking seen is shared state, and unknown sessions are 404", async () => {
     const viewedAt = await master.markSeen("codex-contract-1");
     const agent = await master.agent("codex-contract-1");
