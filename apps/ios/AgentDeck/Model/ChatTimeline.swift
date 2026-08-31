@@ -199,3 +199,40 @@ func markerPreview(_ text: String, limit: Int = 96) -> String {
 func failedSteps(_ events: [AgentEvent]) -> Int {
     events.filter { $0.kind == "error" }.count
 }
+
+/// A cluster's steps, partitioned into who did them.
+///
+/// A session that farms work out mixes its subagents' tool calls into its
+/// own, and a flat list of forty steps hides that three belonged to a search
+/// agent and thirty to a build agent. Consecutive runs of one subagent's
+/// work become one segment, titled by what that run was asked to do, so the
+/// steps sheet can fold each helper to a single line the way the cluster
+/// itself folds into the conversation. Mirrored from `ChatTimeline.kt`.
+struct ActivitySegment: Identifiable, Equatable {
+    /// Nil for the session's own work.
+    var subagentId: String?
+    var title: String
+    var events: [AgentEvent]
+    var id: String { "segment:\(events[0].id)" }
+}
+
+func activitySegments(_ events: [AgentEvent]) -> [ActivitySegment] {
+    var segments: [ActivitySegment] = []
+    for event in events {
+        if let last = segments.indices.last, segments[last].subagentId == event.subagentId {
+            segments[last].events.append(event)
+        } else {
+            segments.append(ActivitySegment(
+                subagentId: event.subagentId,
+                title: event.subagentName ?? event.subagentType ?? "Subagent",
+                events: [event]
+            ))
+        }
+    }
+    return segments
+}
+
+/// Whether a tool looks things up rather than changes them.
+func isSearchTool(_ tool: String?) -> Bool {
+    searchTools.contains(tool ?? "")
+}

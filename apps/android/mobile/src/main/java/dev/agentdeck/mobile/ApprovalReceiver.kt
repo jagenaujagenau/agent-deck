@@ -27,7 +27,8 @@ class ApprovalReceiver : BroadcastReceiver() {
                 )
                 val current = client.snapshot().agents.firstOrNull { it.id == agentId }
                 if (current != null && AttentionPolicy.approvalKey(current) == approvalKey) {
-                    client.control(agentId, action)
+                    // One id per decision: a transport retry must not answer twice.
+                    client.control(agentId, action, commandId = java.util.UUID.randomUUID().toString())
                     ApprovalNotifier.rearm(appContext, agentId)
                 }
                 appContext.getSystemService(NotificationManager::class.java).cancel(agentId.hashCode())

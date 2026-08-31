@@ -406,7 +406,12 @@ final class DeckStore {
     }
 
     func control(agentId: String, action: String, value: String? = nil, force: Bool = false) async throws {
-        try await client.control(agentId: agentId, action: action, value: value, force: force)
+        // One id per logical send: the bridge dedupes on it, so a transport
+        // retry can never queue the same instruction twice.
+        try await client.control(
+            agentId: agentId, action: action, value: value,
+            commandId: UUID().uuidString, force: force
+        )
         await refresh()
     }
 

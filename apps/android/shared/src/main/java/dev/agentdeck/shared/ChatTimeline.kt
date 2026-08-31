@@ -189,3 +189,40 @@ fun markerPreview(text: String, limit: Int = 96): String {
 
 /** How many steps of a run failed — worn on the cluster header so triage needs no expansion. */
 fun failedSteps(events: List<AgentEvent>): Int = events.count { it.kind == "error" }
+
+/**
+ * A cluster's steps, partitioned into who did them.
+ *
+ * A session that farms work out mixes its subagents' tool calls into its
+ * own, and a flat list of forty steps hides that three belonged to a
+ * search agent and thirty to a build agent. Consecutive runs of one
+ * subagent's work become one segment, titled by what that run was asked to
+ * do, so the steps sheet can fold each helper to a single line the way the
+ * cluster itself folds into the conversation.
+ */
+data class ActivitySegment(
+    /** Null for the session's own work. */
+    val subagentId: String?,
+    val title: String,
+    val events: List<AgentEvent>,
+)
+
+fun activitySegments(events: List<AgentEvent>): List<ActivitySegment> {
+    val segments = mutableListOf<ActivitySegment>()
+    for (event in events) {
+        val last = segments.lastOrNull()
+        if (last != null && last.subagentId == event.subagentId) {
+            segments[segments.size - 1] = last.copy(events = last.events + event)
+        } else {
+            segments += ActivitySegment(
+                subagentId = event.subagentId,
+                title = event.subagentName ?: event.subagentType ?: "Subagent",
+                events = listOf(event),
+            )
+        }
+    }
+    return segments
+}
+
+/** Whether a tool looks things up rather than changes them. */
+fun isSearchTool(tool: String?): Boolean = tool in searchTools

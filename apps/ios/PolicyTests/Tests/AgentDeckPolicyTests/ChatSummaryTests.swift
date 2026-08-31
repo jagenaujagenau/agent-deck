@@ -90,4 +90,27 @@ final class ChatSummaryTests: XCTestCase {
         XCTAssertEqual(failedSteps(events), 2)
         XCTAssertEqual(failedSteps(events.filter { $0.kind != "error" }), 0)
     }
+
+    func testASubagentsConsecutiveWorkFoldsToOneSegmentTitledByItsTask() throws {
+        func step(_ id: String, sub: String? = nil, name: String? = nil) throws -> AgentEvent {
+            var document: [String: Any] = [
+                "id": id, "kind": "tool", "summary": "Edit", "createdAt": "2026-08-30T10:00:0\(id)Z",
+            ]
+            if let sub { document["subagentId"] = sub }
+            if let name { document["subagentName"] = name }
+            return try JSONDecoder().decode(
+                AgentEvent.self, from: JSONSerialization.data(withJSONObject: document))
+        }
+        let segments = activitySegments([
+            try step("1"),
+            try step("2", sub: "s1", name: "Search the docs"),
+            try step("3", sub: "s1", name: "Search the docs"),
+            try step("4"),
+            try step("5", sub: "s1", name: "Search the docs"),
+        ])
+        XCTAssertEqual(segments.map(\.subagentId), [nil, "s1", nil, "s1"])
+        XCTAssertEqual(segments[1].events.count, 2)
+        XCTAssertEqual(segments[1].title, "Search the docs")
+        XCTAssertEqual(segments[3].events.count, 1)
+    }
 }

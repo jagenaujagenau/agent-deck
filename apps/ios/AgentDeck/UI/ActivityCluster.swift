@@ -98,6 +98,8 @@ struct DiffStatLabel: View {
 struct StepsSheet: View {
     var events: [AgentEvent]
     @State private var openStep: AgentEvent?
+    /// Subagent segments the reader has opened, by lead event id.
+    @State private var openSegments: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -115,10 +117,30 @@ struct StepsSheet: View {
                         .foregroundStyle(Palette.danger)
                 }
             }
+            // Steps partitioned into who did them: the session's own work
+            // reads flat; a subagent's run folds to one titled line, openable
+            // into its steps — the same one-more-level the cluster itself is.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(events) { event in
-                        ActivityRowView(event: event, onOpen: { openStep = $0 })
+                    ForEach(activitySegments(events)) { segment in
+                        if segment.subagentId == nil {
+                            ForEach(segment.events) { event in
+                                ActivityRowView(event: event, onOpen: { openStep = $0 })
+                            }
+                        } else {
+                            SubagentSegmentView(
+                                segment: segment,
+                                open: openSegments.contains(segment.id),
+                                onToggle: {
+                                    if openSegments.contains(segment.id) {
+                                        openSegments.remove(segment.id)
+                                    } else {
+                                        openSegments.insert(segment.id)
+                                    }
+                                },
+                                onOpen: { openStep = $0 }
+                            )
+                        }
                     }
                 }
             }
@@ -132,6 +154,59 @@ struct StepsSheet: View {
         .presentationDragIndicator(.visible)
         .sheet(item: $openStep) { event in
             ActivityDetailSheet(event: event)
+        }
+    }
+}
+
+/// A subagent's run inside the steps sheet: one titled line, its steps behind it.
+struct SubagentSegmentView: View {
+    var segment: ActivitySegment
+    var open: Bool
+    var onToggle: () -> Void
+    var onOpen: (AgentEvent) -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 0) {
+                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.blue)
+                Text(segment.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Palette.blue)
+                    .lineLimit(1)
+                    .padding(.leading, 8)
+                Text(segment.events.count == 1 ? "1 step" : "\(segment.events.count) steps")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.leading, 6)
+                if failedSteps(segment.events) > 0 {
+                    Text("\(failedSteps(segment.events)) failed")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.danger)
+                        .padding(.leading, 6)
+                }
+                Image(systemName: open ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Palette.muted.opacity(0.7))
+                    .padding(.leading, 5)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        if open {
+            ForEach(segment.events) { event in
+                HStack(alignment: .top, spacing: 8) {
+                    Rectangle()
+                        .fill(Palette.line)
+                        .frame(width: 1)
+                        .padding(.leading, 14)
+                    ActivityRowView(event: event, onOpen: onOpen)
+                }
+            }
         }
     }
 }
@@ -161,6 +236,7 @@ struct ActivityRowView: View {
     private var verb: String? {
         if command != nil { return "Ran" }
         guard fileName != nil else { return nil }
+        if isSearchTool(event.tool) { return "Searched" }
         if event.tool == "Write" { return "Created" }
         if event.tool == "Read" { return "Read" }
         return "Edited"
@@ -171,6 +247,7 @@ struct ActivityRowView: View {
         if failed || event.kind == "warning" { return "exclamationmark.triangle" }
         switch verb {
         case "Ran": return "terminal"
+        case "Searched": return "magnifyingglass"
         case "Created": return "doc.badge.plus"
         case "Read": return "eye"
         case "Edited": return "pencil"

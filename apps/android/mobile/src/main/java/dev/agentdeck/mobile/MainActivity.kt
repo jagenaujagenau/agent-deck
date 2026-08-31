@@ -340,7 +340,11 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
     fun control(agent: Agent, action: String, value: String? = null, force: Boolean = false) = viewModelScope.launch {
         _commandInFlight.value = agent.id
         _commandBlocked.value = null
-        runCatching { repository.control(agent.id, action, value, force = force) }
+        // One id per logical send: the bridge dedupes on it, so a transport
+        // retry (OkHttp re-sends some POSTs on connection failure) can never
+        // queue the same instruction twice.
+        val commandId = java.util.UUID.randomUUID().toString()
+        runCatching { repository.control(agent.id, action, value, commandId = commandId, force = force) }
             .onSuccess {
                 _commandError.value = null
                 // The bridge accepting a message is not the session receiving
@@ -2602,8 +2606,74 @@ private fun StepsSheet(events: List<AgentEvent>, onOpen: (AgentEvent) -> Unit, o
                     Text("$failed failed", color = Danger, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+            // Steps partitioned into who did them: the session's own work
+            // reads flat; a subagent's run folds to one titled line, openable
+            // into its steps — the same one-more-level the cluster itself is.
+            val segments = remember(events) { activitySegments(events) }
+            var openSegments by remember(events.firstOrNull()?.id) { mutableStateOf(setOf<String>()) }
             LazyColumn(Modifier.heightIn(max = 560.dp)) {
-                items(events, key = { "step:${it.id}" }) { event -> ActivityRow(event, onOpen) }
+                segments.forEach { segment ->
+                    val segmentKey = segment.events.first().id
+                    if (segment.subagentId == null) {
+                        items(segment.events, key = { "step:${it.id}" }) { event -> ActivityRow(event, onOpen) }
+                    } else {
+                        item(key = "segment:$segmentKey") {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .clickable {
+                                        openSegments = if (segmentKey in openSegments) {
+                                            openSegments - segmentKey
+                                        } else {
+                                            openSegments + segmentKey
+                                        }
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Rounded.Route, null, tint = Blue, modifier = Modifier.size(13.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    segment.title,
+                                    color = Blue,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "${segment.events.size} step${if (segment.events.size == 1) "" else "s"}",
+                                    color = Muted,
+                                    fontSize = 11.sp,
+                                )
+                                failedSteps(segment.events).takeIf { it > 0 }?.let { failed ->
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("$failed failed", color = Danger, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                Spacer(Modifier.width(5.dp))
+                                Icon(
+                                    if (segmentKey in openSegments) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                    null,
+                                    tint = Muted.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
+                        if (segmentKey in openSegments) {
+                            items(segment.events, key = { "step:${it.id}" }) { event ->
+                                Row {
+                                    Spacer(Modifier.width(14.dp))
+                                    Box(Modifier.width(1.dp).height(28.dp).background(Line))
+                                    Spacer(Modifier.width(8.dp))
+                                    Box(Modifier.weight(1f)) { ActivityRow(event, onOpen) }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -2618,6 +2688,7 @@ private fun ActivityRow(event: AgentEvent, onOpen: (AgentEvent) -> Unit) {
     val fileName = event.path?.substringAfterLast('/')
     val verb = when {
         command != null -> "Ran"
+        fileName != null && isSearchTool(event.tool) -> "Searched"
         fileName != null && event.tool == "Write" -> "Created"
         fileName != null && event.tool == "Read" -> "Read"
         fileName != null -> "Edited"
@@ -2627,6 +2698,7 @@ private fun ActivityRow(event: AgentEvent, onOpen: (AgentEvent) -> Unit) {
         event.kind == "thought" -> Icons.Rounded.Psychology
         failed || event.kind == "warning" -> Icons.Rounded.WarningAmber
         command != null -> Icons.Rounded.Terminal
+        verb == "Searched" -> Icons.Rounded.Search
         verb == "Created" -> Icons.Rounded.NoteAdd
         verb == "Read" -> Icons.Rounded.Visibility
         verb == "Edited" -> Icons.Rounded.Edit

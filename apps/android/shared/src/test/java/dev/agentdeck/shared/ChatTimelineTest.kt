@@ -147,4 +147,27 @@ class CompletionIsActivityTest {
         assertEquals(2, failedSteps(events))
         assertEquals(0, failedSteps(events.filter { it.kind != "error" }))
     }
+
+    @Test
+    fun `a subagent's consecutive work folds to one segment, titled by its task`() {
+        fun step(id: String, sub: String? = null, name: String? = null) = AgentEvent(
+            id = id, kind = "tool", summary = "Edit", createdAt = "2026-08-30T10:00:0$id:00Z".take(20) + "Z",
+            subagentId = sub, subagentName = name,
+        )
+        val segments = activitySegments(
+            listOf(
+                step("1"),
+                step("2", sub = "s1", name = "Search the docs"),
+                step("3", sub = "s1", name = "Search the docs"),
+                step("4"),
+                step("5", sub = "s1", name = "Search the docs"),
+            ),
+        )
+        assertEquals(listOf(null, "s1", null, "s1"), segments.map { it.subagentId })
+        assertEquals(2, segments[1].events.size)
+        assertEquals("Search the docs", segments[1].title)
+        // The same subagent returning later is a new run, not a merge across
+        // the session's own work between them.
+        assertEquals(1, segments[3].events.size)
+    }
 }

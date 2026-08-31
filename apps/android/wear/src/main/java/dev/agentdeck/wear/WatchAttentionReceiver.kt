@@ -34,11 +34,14 @@ class WatchAttentionReceiver : BroadcastReceiver() {
         val token = SecureTokenStore(context).get()
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // One id per decision, reused across every candidate address:
+                // reaching the bridge twice must not answer twice.
+                val commandId = java.util.UUID.randomUUID().toString()
                 for (candidate in addresses.candidates(BuildConfig.BRIDGE_URL)) {
                     val client = BridgeClient(candidate, token)
                     val sent = runCatching {
                         when {
-                            control != null -> client.control(agentId, control)
+                            control != null -> client.control(agentId, control, commandId = commandId)
                             requestId != null && answer != null ->
                                 client.answerQuestion(agentId, requestId, "", answer)
                             else -> return@runCatching
