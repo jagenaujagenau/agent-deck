@@ -58,7 +58,7 @@ internal fun cardFreshness(timestamp: String, now: java.time.Instant = java.time
     val seconds = runCatching { java.time.Duration.between(java.time.Instant.parse(timestamp), now).seconds.coerceAtLeast(0) }.getOrDefault(0)
     return when {
         seconds < 45 -> "now"
-        seconds < 3_600 -> "${seconds / 60}m ago"
+        seconds < 3_600 -> "${(seconds / 60).coerceAtLeast(1)}m ago"
         seconds < 86_400 -> "${seconds / 3_600}h ago"
         else -> "${seconds / 86_400}d ago"
     }

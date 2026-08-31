@@ -113,18 +113,19 @@ export const toPendingQuestion = (
 };
 
 /**
- * The one shape an answer may take: the question's own text mapped to the
- * words chosen, which is what every runtime consumes. Anything else fed
- * through would reach a blocked runtime as garbage it cannot act on — and a
- * consumed request with a useless resolution leaves the real answer with
- * nothing left to answer. A decision carries no value at all: approve or
- * reject is the whole of it.
+ * The shapes an answer may take: the words chosen, bare (the documented
+ * contract shape), or the question's own text mapped to them (what the
+ * phones send). Anything else fed through would reach a blocked runtime as
+ * garbage it cannot act on — and a consumed request with a useless
+ * resolution leaves the real answer with nothing left to answer. A decision
+ * carries no value at all: approve or reject is the whole of it.
  */
 export const resolutionFitsKind = (
   status: RuntimeRequestStatus,
   value: JsonValue | undefined,
 ): boolean => {
   if (status === "answered") {
+    if (typeof value === "string") return value.trim().length > 0;
     return (
       typeof value === "object" &&
       value !== null &&

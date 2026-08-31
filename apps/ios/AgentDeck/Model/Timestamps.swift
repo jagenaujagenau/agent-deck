@@ -25,7 +25,7 @@ enum Timestamps {
         let seconds = max(0, Int(now.timeIntervalSince(date)))
         switch seconds {
         case ..<45: return "now"
-        case ..<3_600: return "\(seconds / 60)m ago"
+        case ..<3_600: return "\(max(1, seconds / 60))m ago"
         case ..<86_400: return "\(seconds / 3_600)h ago"
         default: return "\(seconds / 86_400)d ago"
         }

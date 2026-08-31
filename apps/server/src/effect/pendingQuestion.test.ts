@@ -81,14 +81,15 @@ describe("toPendingQuestion", () => {
 });
 
 describe("resolutionFitsKind", () => {
-  test("an answer is the question mapped to the words chosen", () => {
+  test("an answer is words: bare, or mapped to the question that asked", () => {
+    expect(resolutionFitsKind("answered", "main")).toBe(true);
     expect(resolutionFitsKind("answered", { "Which branch?": "main" })).toBe(true);
     expect(resolutionFitsKind("answered", { a: "x", b: "y" })).toBe(true);
   });
 
-  test("an answer that is not question-to-text is refused whole", () => {
+  test("an answer that is not text is refused whole", () => {
     expect(resolutionFitsKind("answered", undefined)).toBe(false);
-    expect(resolutionFitsKind("answered", "main")).toBe(false);
+    expect(resolutionFitsKind("answered", "   ")).toBe(false);
     expect(resolutionFitsKind("answered", ["main"])).toBe(false);
     expect(resolutionFitsKind("answered", { "Which?": 42 })).toBe(false);
     expect(resolutionFitsKind("answered", { "Which?": { nested: "no" } })).toBe(false);
