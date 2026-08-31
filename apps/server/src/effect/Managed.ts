@@ -11,6 +11,7 @@ import {
   type RuntimeRequestStatus,
 } from "@agent-control-dashboard/agent-adapter";
 import type { AgentState, JsonObject, JsonValue } from "./Domain";
+import { isMessageAction } from "./CommandQueue";
 import { BridgeState, type AgentRecord, type Command } from "./State";
 
 const now = () => new Date().toISOString();
@@ -364,7 +365,7 @@ export class ManagedRuntime extends Context.Service<
         const hosted = (yield* Ref.get(sessions)).get(command.agentId);
         if (hosted === undefined) return false;
         const action = Effect.gen(function* () {
-          if (["prompt", "steer", "follow_up"].includes(command.action) && command.value) {
+          if (isMessageAction(command.action) && command.value) {
             yield* Effect.promise(() => adapter.send(hosted.session, command.value!));
           } else if (command.action === "set_model" && command.value && adapter.setModel) {
             yield* Effect.promise(() => adapter.setModel!(hosted.session, command.value!));

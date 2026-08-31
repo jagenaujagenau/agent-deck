@@ -38,6 +38,7 @@ import type {
   RateLimitWindow,
 } from "./Domain";
 import { StoredAgent, StoredCommand } from "./Domain";
+import { isMessageAction, makeCommandQueue } from "./CommandQueue";
 import { makeRequestLedger } from "./RequestLedger";
 import type { PendingQuestion, RequestLedger } from "./RequestLedger";
 import { makeRuntimeEventLog } from "./RuntimeEventLog";
@@ -449,13 +450,6 @@ export class BridgeState extends Context.Service<
           Effect.orDie,
         );
 
-      const persistCommand = (command: Command) =>
-        sql`INSERT INTO bridge_commands (id, agent_id, data, updated_at)
-            VALUES (${command.id}, ${command.agentId}, ${JSON.stringify(command)}, ${now()})
-            ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`.pipe(
-          Effect.orDie,
-        );
-
       const persistSessionEvent = (agentId: string, event: AgentEvent) =>
         sql`INSERT INTO bridge_session_events (id, agent_id, kind, summary, detail, tool, command, path, options, subagent_id, subagent_type, subagent_name, turn_id, created_at)
             VALUES (${event.id}, ${agentId}, ${event.kind}, ${event.summary}, ${event.detail ?? null},
@@ -508,6 +502,25 @@ export class BridgeState extends Context.Service<
             .pipe(Effect.asVoid),
         changed,
       });
+
+      /**
+       * The one owner of queued Commands and their receipts. Built here for
+       * the same reason the ledger is: it publishes delivery facts through the
+       * event log and announces changes, and both live in this closure.
+       */
+      const queue = makeCommandQueue(
+        {
+          sql,
+          now,
+          recordDelivery: (agentId, commandId) =>
+            log.record(agentId, "session.state.changed", {
+              commandId,
+              delivery: "acknowledged",
+            }),
+          changed,
+        },
+        commandsRef,
+      );
 
       const syncApprovalRequest = Effect.fn("BridgeState.syncApprovalRequest")(function* (
         agent: AgentRecord,
@@ -873,26 +886,22 @@ export class BridgeState extends Context.Service<
         ) {
           return undefined;
         }
-        const commands = yield* Ref.get(commandsRef);
         // A retried command must not queue a second action.
-        if (commandId && commands.has(commandId)) return commands.get(commandId);
+        const retried = yield* queue.existing(commandId);
+        if (retried) return retried;
         if (
           (action === "approve" || action === "reject") &&
           !(yield* hasPendingApproval(agentId))
         ) {
           return undefined;
         }
-        const command: Command = {
+        const command = yield* queue.queue({
           id: commandId ?? makeId(),
           agentId,
           action,
           value,
           createdAt: now(),
-        };
-        yield* Ref.update(commandsRef, (map) => new Map(map).set(command.id, command));
-        yield* persistCommand(command);
-        yield* sql`INSERT OR REPLACE INTO bridge_command_receipts (command_id, status, updated_at)
-                   VALUES (${command.id}, 'queued', ${now()})`.pipe(Effect.orDie);
+        });
 
         const agent: AgentRecord = { ...existing, events: [...existing.events] };
         if (action === "pause") agent.state = "paused";
@@ -910,13 +919,13 @@ export class BridgeState extends Context.Service<
           agent.state = "running";
           agent.pendingApproval = undefined;
         }
-        if (["prompt", "steer", "follow_up"].includes(action) && value) {
+        if (isMessageAction(action) && value) {
           agent.task = value;
           agent.state = "running";
         }
         agent.events.push({
           id: makeId(),
-          kind: ["prompt", "steer", "follow_up"].includes(action) ? "user" : "output",
+          kind: isMessageAction(action) ? "user" : "output",
           summary: `Remote command: ${action}`,
           // A model id is not something a person said. Carrying it as the
           // event's detail put "sonnet" in the conversation as the reader's
@@ -971,80 +980,16 @@ export class BridgeState extends Context.Service<
           }
         });
 
-      const pendingCommandsNow = Effect.fn("BridgeState.pendingCommands")(function* (
-        agentId: string,
-        after?: string,
-      ) {
-        const afterTime = after ? Date.parse(after) : 0;
-        const commands = yield* Ref.get(commandsRef);
-        return [...commands.values()].filter(
-          (command) =>
-            command.agentId === agentId &&
-            !command.acknowledgedAt &&
-            Date.parse(command.createdAt) > afterTime,
-        );
-      });
+      const pendingCommandsNow = queue.pendingFor;
 
       const pendingCommands = (agentId: string, after?: string, waitMs = 0) =>
         awaitSettled(waitMs, pendingCommandsNow(agentId, after), (queued) => queued.length > 0);
 
-      /** The instruction-shaped actions a person can still take back. */
-      const messageActions: ReadonlyArray<string> = ["prompt", "steer", "follow_up"];
+      const queuedMessages = queue.queuedMessages;
 
-      const queuedMessages = Effect.fn("BridgeState.queuedMessages")(function* (agentId: string) {
-        const commands = yield* Ref.get(commandsRef);
-        return [...commands.values()]
-          .filter(
-            (command) =>
-              command.agentId === agentId &&
-              !command.acknowledgedAt &&
-              messageActions.includes(command.action),
-          )
-          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      });
+      const cancelCommand = queue.cancel;
 
-      const cancelCommand = Effect.fn("BridgeState.cancelCommand")(function* (
-        agentId: string,
-        commandId: string,
-      ) {
-        const commands = yield* Ref.get(commandsRef);
-        const existing = commands.get(commandId);
-        // Once acknowledged the runtime holds it; withdrawing the record
-        // would only make the deck lie about what was delivered.
-        if (existing === undefined || existing.agentId !== agentId || existing.acknowledgedAt) {
-          return false;
-        }
-        yield* Ref.update(commandsRef, (map) => {
-          const next = new Map(map);
-          next.delete(commandId);
-          return next;
-        });
-        yield* sql`DELETE FROM bridge_commands WHERE id = ${commandId}`.pipe(Effect.orDie);
-        yield* sql`UPDATE bridge_command_receipts SET status = 'canceled', updated_at = ${now()}
-                   WHERE command_id = ${commandId}`.pipe(Effect.orDie);
-        yield* changed;
-        return true;
-      });
-
-      const acknowledge = Effect.fn("BridgeState.acknowledge")(function* (
-        agentId: string,
-        commandId: string,
-      ) {
-        const commands = yield* Ref.get(commandsRef);
-        const existing = commands.get(commandId);
-        if (existing === undefined || existing.agentId !== agentId) return undefined;
-        const command: Command = { ...existing, acknowledgedAt: now() };
-        yield* Ref.update(commandsRef, (map) => new Map(map).set(commandId, command));
-        yield* persistCommand(command);
-        const sequence = yield* log.record(agentId, "session.state.changed", {
-          commandId,
-          delivery: "acknowledged",
-        });
-        yield* sql`UPDATE bridge_command_receipts SET status = 'delivered', result_sequence = ${sequence},
-                     updated_at = ${now()} WHERE command_id = ${commandId}`.pipe(Effect.orDie);
-        yield* changed;
-        return command;
-      });
+      const acknowledge = queue.acknowledge;
 
       const removeAgent = Effect.fn("BridgeState.removeAgent")(function* (agentId: string) {
         const agents = yield* Ref.get(agentsRef);
@@ -1101,12 +1046,7 @@ export class BridgeState extends Context.Service<
         Effect.asVoid,
       );
 
-      const commandReceipt = Effect.fn("BridgeState.commandReceipt")(function* (commandId: string) {
-        const rows = yield* sql<CommandReceiptRow>`
-          SELECT command_id, status, error, result_sequence, updated_at
-          FROM bridge_command_receipts WHERE command_id = ${commandId}`;
-        return rows[0];
-      }, Effect.orDie);
+      const commandReceipt = queue.receipt;
 
       const transcriptCacheRef = yield* Ref.make<
         | {

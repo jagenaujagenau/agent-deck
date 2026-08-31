@@ -1,5 +1,6 @@
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { MESSAGE_ACTIONS } from "./CommandQueue";
 import { isLoopback, pairingPage, pairingPayload } from "./Pairing";
 import {
   AgentEventInput,
@@ -38,8 +39,12 @@ export const blockedDetail = (block: PendingBlock): string =>
     ? `The agent is waiting for approval to run ${block.tool}`
     : `The agent is waiting for an answer to: ${block.question}`;
 
-/** The prompt-shaped actions: the ones a blocked agent would silently queue. */
-const promptActions: ReadonlyArray<string> = ["prompt", "steer", "follow_up"];
+/**
+ * The prompt-shaped actions: the ones a blocked agent would silently queue.
+ * Named by the queue that owns them, so "which actions are instructions" has
+ * one answer rather than the four copies it used to have.
+ */
+const promptActions = MESSAGE_ACTIONS;
 
 /**
  * The `wait` query as a parking window: how long a poller may be held open
