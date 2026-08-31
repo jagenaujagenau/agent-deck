@@ -56,6 +56,19 @@ fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// Opens the bridge's own pairing page in the default browser.
+///
+/// The page stays bridge-served — one implementation, working headless too —
+/// and this app is its doorway: the loopback-only rule the page enforces is
+/// "the person at this machine", which is exactly who clicked.
+#[tauri::command]
+fn open_pairing(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(service::PAIR_URL, None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
 /// One glyph per state, because a menu bar has room for exactly one.
 ///
 /// Text rather than a coloured dot: the menu bar is monochrome under most
@@ -151,7 +164,8 @@ pub fn run() {
             service_restart,
             harness_list,
             harness_install,
-            app_version
+            app_version,
+            open_pairing
         ])
         .setup(|app| {
             // A menu bar app with a dock icon is two ways to reach one window.
@@ -159,11 +173,12 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let open = MenuItem::with_id(app, "open", "Open Agent Deck", true, None::<&str>)?;
+            let pair = MenuItem::with_id(app, "pair", "Pair a phone…", true, None::<&str>)?;
             let restart =
                 MenuItem::with_id(app, "restart", "Restart services", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&open, &restart, &separator, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &pair, &restart, &separator, &quit])?;
 
             TrayIconBuilder::with_id("main")
                 .menu(&menu)
@@ -174,6 +189,10 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                    }
+                    "pair" => {
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = app.opener().open_url(service::PAIR_URL, None::<&str>);
                     }
                     "restart" => {
                         // Everything, because a menu item that silently restarted

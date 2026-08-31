@@ -14,6 +14,9 @@ use std::process::Command;
 /// from its plist.
 pub const LABEL: &str = "dev.agentdeck.bridge";
 const HEALTH_URL: &str = "http://127.0.0.1:3000/";
+/// The bridge's own pairing page. Loopback-only by the bridge's rule, which
+/// is exactly what a click in this app is.
+pub const PAIR_URL: &str = "http://127.0.0.1:3000/pair";
 /// What the bridge calls itself. Anything else on the port is somebody else.
 const BRIDGE_NAME: &str = "agent-deck-bridge";
 

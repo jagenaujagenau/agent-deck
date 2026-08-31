@@ -142,6 +142,18 @@ function render() {
         )
         .join("")}
     </div>
+    <h2>Phones</h2>
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="name">Pair a phone</div>
+          <div class="path">QR, one-time code, and the paired devices — served by the bridge</div>
+        </div>
+        <button id="pair" ${bridgeVersion ? "" : "disabled"}>Open pairing page</button>
+      </div>
+      ${bridgeVersion ? "" : `<div class="meta">Start the bridge first — the page is the bridge's own.</div>`}
+    </div>
+
     ${notice ? `<div class="error">${escape(notice)}</div>` : ""}
     ${info ? `<div class="info">${escape(info)}</div>` : ""}
 
@@ -180,6 +192,9 @@ function wire() {
       void act(() => invoke<void>(command, { name }));
     });
   }
+  document.querySelector("#pair")?.addEventListener("click", () => {
+    void act(() => invoke<void>("open_pairing"));
+  });
   document.querySelector("#update")?.addEventListener("click", () => {
     void act(async () => {
       const update = await check();
