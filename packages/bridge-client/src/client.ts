@@ -89,6 +89,28 @@ export class BridgeClient {
     return body.changes;
   }
 
+  /** The message commands queued for this session that the runtime has not collected. */
+  async queued(agentId: string): Promise<QueuedCommand[]> {
+    const body = await this.request<{ commands: QueuedCommand[] }>(
+      "GET",
+      `/agents/${encodeURIComponent(agentId)}/queued`,
+    );
+    return body.commands;
+  }
+
+  /** Withdraws a queued message; a delivered one cannot be unsaid, only followed up. */
+  async cancelQueued(agentId: string, commandId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/agents/${encodeURIComponent(agentId)}/queued/${encodeURIComponent(commandId)}`,
+    );
+  }
+
+  /** Why the deck believes what it believes about one session. */
+  async explain(agentId: string): Promise<JsonValue> {
+    return await this.request<JsonValue>("GET", `/agents/${encodeURIComponent(agentId)}/explain`);
+  }
+
   /**
    * The models a bridge-hosted session will answer as, asked of the runtime.
    * A session the bridge does not host has no list — its model belongs to the

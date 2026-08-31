@@ -79,13 +79,41 @@ const onMalformed =
   <E, R>(effect: Effect.Effect<HttpServerResponse.HttpServerResponse, Schema.SchemaError | E, R>) =>
     Effect.catchTag(effect, "SchemaError", () => error(message, 400));
 
+/**
+ * A route that answers only on the bridge's own machine.
+ *
+ * The gate rides the route rather than opening each handler, so a new
+ * desk-only route cannot ship without it: the wrapper is how the route is
+ * declared. `refusal` is the sentence this particular route refuses with —
+ * the shape is shared, the words are not.
+ */
+const loopbackOnly =
+  (refusal: string) =>
+  <E, R>(handler: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
+        return yield* error(refusal, 403);
+      }
+      return yield* handler;
+    });
+
 const route = <E, R>(
   method: "GET" | "POST" | "DELETE",
   path: string,
   handler: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
 ) => HttpRouter.route(method, `${BRIDGE_PREFIX}${path}`, handler);
 
-export const BridgeRoutes = HttpRouter.addAll([
+/**
+ * Every route this bridge serves, as data.
+ *
+ * The router is built from this array, so the inventory cannot drift from
+ * what actually answers — `bridgeRoutePaths` reads it back and the contract
+ * suite asserts that every route is documented and either exercised or
+ * listed as knowingly untested. A route added without a doc line is a
+ * failing test rather than something a reader has to notice.
+ */
+const bridgeRouteTable = [
   /**
    * Liveness and version, outside the versioned prefix and outside auth. The
    * service wrapper polls this to decide whether the bridge came up, and the
@@ -551,56 +579,48 @@ export const BridgeRoutes = HttpRouter.addAll([
   HttpRouter.route(
     "GET",
     "/pair",
-    Effect.gen(function* () {
-      const config = yield* BridgeConfig;
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
-        return yield* error("The pairing page answers only on the bridge's own machine", 403);
-      }
-      return HttpServerResponse.html(pairingPage(config.name));
-    }),
+    loopbackOnly("The pairing page answers only on the bridge's own machine")(
+      Effect.gen(function* () {
+        const config = yield* BridgeConfig;
+        return HttpServerResponse.html(pairingPage(config.name));
+      }),
+    ),
   ),
   HttpRouter.route(
     "POST",
     "/pair/code",
-    Effect.gen(function* () {
-      const config = yield* BridgeConfig;
-      const state = yield* BridgeState;
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
-        return yield* error("Pairing codes are minted only on the bridge's own machine", 403);
-      }
-      const minted = yield* state.createPairingCode;
-      return yield* HttpServerResponse.json(
-        pairingPayload(minted.code, minted.expiresAt, config.port, config.name),
-      );
-    }),
+    loopbackOnly("Pairing codes are minted only on the bridge's own machine")(
+      Effect.gen(function* () {
+        const config = yield* BridgeConfig;
+        const state = yield* BridgeState;
+        const minted = yield* state.createPairingCode;
+        return yield* HttpServerResponse.json(
+          pairingPayload(minted.code, minted.expiresAt, config.port, config.name),
+        );
+      }),
+    ),
   ),
   HttpRouter.route(
     "GET",
     "/pair/devices",
-    Effect.gen(function* () {
-      const state = yield* BridgeState;
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
-        return yield* error("The device list answers only on the bridge's own machine", 403);
-      }
-      return yield* HttpServerResponse.json(yield* state.devices);
-    }),
+    loopbackOnly("The device list answers only on the bridge's own machine")(
+      Effect.gen(function* () {
+        const state = yield* BridgeState;
+        return yield* HttpServerResponse.json(yield* state.devices);
+      }),
+    ),
   ),
   HttpRouter.route(
     "DELETE",
     "/pair/devices/:deviceId",
-    Effect.gen(function* () {
-      const state = yield* BridgeState;
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
-        return yield* error("Devices are revoked only on the bridge's own machine", 403);
-      }
-      return (yield* state.revokeDeviceById(yield* param("deviceId")))
-        ? yield* HttpServerResponse.json({ revoked: true })
-        : yield* error("Device not found", 404);
-    }),
+    loopbackOnly("Devices are revoked only on the bridge's own machine")(
+      Effect.gen(function* () {
+        const state = yield* BridgeState;
+        return (yield* state.revokeDeviceById(yield* param("deviceId")))
+          ? yield* HttpServerResponse.json({ revoked: true })
+          : yield* error("Device not found", 404);
+      }),
+    ),
   ),
 
   /** Pairing is the one route that runs before a credential exists. */
@@ -621,9 +641,9 @@ export const BridgeRoutes = HttpRouter.addAll([
         : yield* HttpServerResponse.json(device, { status: 201 });
     }),
   ),
-  HttpRouter.route(
+  route(
     "DELETE",
-    `${BRIDGE_PREFIX}/device`,
+    "/device",
     Effect.gen(function* () {
       const state = yield* BridgeState;
       const request = yield* HttpServerRequest.HttpServerRequest;
@@ -696,4 +716,10 @@ export const BridgeRoutes = HttpRouter.addAll([
       );
     }),
   ),
-]);
+] as const;
+
+export const BridgeRoutes = HttpRouter.addAll(bridgeRouteTable);
+
+/** `METHOD /path` for every route, with the prefix each one actually carries. */
+export const bridgeRoutePaths = (): ReadonlyArray<string> =>
+  bridgeRouteTable.map((route) => `${route.method} ${route.path}`);

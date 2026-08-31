@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AgentBlockedError,
@@ -401,20 +401,12 @@ describe("the wire contract, executed", () => {
     const first = await master.control("codex-contract-queue", "prompt", "do the first thing");
     const second = await master.control("codex-contract-queue", "prompt", "then the second");
 
-    const listed = await fetch(`${base}/bridge/v1/agents/codex-contract-queue/queued`, {
-      headers: { Authorization: `Bearer ${MASTER}` },
-    });
-    // SAFETY: the route answers the documented `{commands}` shape.
-    const queue = (await listed.json()) as {
-      commands: Array<{ id: string; action: string; value?: string }>;
-    };
-    expect(queue.commands.map((command) => command.id)).toEqual([first.id, second.id]);
+    // Through the SDK, which is what this suite claims to be: a stranger's
+    // client driving the documented wire.
+    const queue = await master.queued("codex-contract-queue");
+    expect(queue.map((command) => command.id)).toEqual([first.id, second.id]);
 
-    const withdraw = await fetch(
-      `${base}/bridge/v1/agents/codex-contract-queue/queued/${first.id}`,
-      { method: "DELETE", headers: { Authorization: `Bearer ${MASTER}` } },
-    );
-    expect(withdraw.status).toBe(200);
+    await master.cancelQueued("codex-contract-queue", first.id);
     const receipt = await fetch(`${base}/bridge/v1/commands/${first.id}/receipt`, {
       headers: { Authorization: `Bearer ${MASTER}` },
     });
@@ -432,11 +424,7 @@ describe("the wire contract, executed", () => {
       headers: { Authorization: `Bearer ${MASTER}` },
     });
     expect(late.status).toBe(404);
-    const drained = await fetch(`${base}/bridge/v1/agents/codex-contract-queue/queued`, {
-      headers: { Authorization: `Bearer ${MASTER}` },
-    });
-    // SAFETY: the route answers the documented `{commands}` shape.
-    expect(((await drained.json()) as { commands: unknown[] }).commands).toEqual([]);
+    expect(await master.queued("codex-contract-queue")).toEqual([]);
   });
 
   test("a model list belongs to a hosted session, and nobody else", async () => {
@@ -451,6 +439,29 @@ describe("the wire contract, executed", () => {
       headers: { Authorization: `Bearer ${MASTER}` },
     });
     expect(unknown.status).toBe(404);
+  });
+
+  test("the desk-only surface refuses a peer that is not this machine", async () => {
+    // Reached over the machine's own LAN address rather than loopback: the
+    // same request a phone on the Wi-Fi would make. Every declared desk-only
+    // path must refuse it — the gate rides the route, so a new one cannot
+    // ship without it.
+    const lan = Object.values(networkInterfaces())
+      .flatMap((entries) => entries ?? [])
+      .find((entry) => entry.family === "IPv4" && !entry.internal)?.address;
+    if (!lan) return; // A machine with no LAN address cannot be reached over one.
+    for (const [method, path] of [
+      ["GET", "/pair"],
+      ["POST", "/pair/code"],
+      ["GET", "/pair/devices"],
+      ["DELETE", "/pair/devices/whatever"],
+    ] as const) {
+      const response = await fetch(`http://${lan}:${port}${path}`, { method });
+      expect(`${method} ${path} → ${response.status}`).toBe(`${method} ${path} → 403`);
+    }
+    // And the same paths answer on loopback, so the refusal above is the gate
+    // and not the bridge being unreachable.
+    expect((await fetch(`${base}/pair`)).status).toBe(200);
   });
 
   test("explain says whose word each fact is", async () => {

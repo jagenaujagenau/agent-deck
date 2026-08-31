@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { bridgeAddresses, isLoopback, pairLink, pairingPayload, qrSvg } from "./Pairing";
+import {
+  LOOPBACK_ONLY_PATHS,
+  bridgeAddresses,
+  isLoopback,
+  isLoopbackOnlyPath,
+  pairLink,
+  pairingPayload,
+  qrSvg,
+} from "./Pairing";
 
 describe("isLoopback", () => {
   test("accepts the machine's own addresses in every dressing", () => {
@@ -55,5 +63,29 @@ describe("pairingPayload", () => {
     for (const address of payload.addresses) {
       expect(address.qrSvg).toStartWith("<svg");
     }
+  });
+});
+
+describe("the desk-only surface", () => {
+  test("every declared path is recognised, tails included", () => {
+    for (const path of LOOPBACK_ONLY_PATHS) {
+      expect(isLoopbackOnlyPath(path)).toBe(true);
+    }
+    // `/pair/devices/:deviceId` is the same surface as its parent — and so is
+    // anything else beneath a declared path, which is the safe direction: an
+    // unserved path under the desk surface 404s, while one wrongly treated as
+    // public would answer the LAN.
+    expect(isLoopbackOnlyPath("/pair/devices/abc-123")).toBe(true);
+    expect(isLoopbackOnlyPath("/pair/anything-new")).toBe(true);
+  });
+
+  test("a path that merely starts alike is not desk-only", () => {
+    // A sibling name is a different path: only the declared ones and what
+    // sits beneath them are the desk's.
+    expect(isLoopbackOnlyPath("/pairing")).toBe(false);
+    expect(isLoopbackOnlyPath("/bridge/v1/snapshot")).toBe(false);
+    // The device-facing POST /pair is prefixed and answers to anyone with a
+    // code: it is how a phone gets a credential, not part of the desk surface.
+    expect(isLoopbackOnlyPath("/bridge/v1/pair")).toBe(false);
   });
 });

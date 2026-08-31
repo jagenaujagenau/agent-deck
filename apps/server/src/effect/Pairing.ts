@@ -18,6 +18,22 @@ export const isLoopback = (address: string | undefined): boolean => {
   return bare === "127.0.0.1" || bare === "::1" || bare.startsWith("127.");
 };
 
+/**
+ * The desk-only surface: paths that answer to this machine and nobody else.
+ *
+ * One list, read twice — by the routes that carry the gate and by the auth
+ * middleware that lets them past bearer credentials. Split in two, as it was,
+ * the middleware waved every `/pair/*` path through on the *assumption* that
+ * each handler checked its peer, and a fifth route would have shipped both
+ * unauthenticated and LAN-reachable with nothing failing. Adding a path here
+ * is what makes it desk-only; forgetting to is what a reviewer can see.
+ */
+export const LOOPBACK_ONLY_PATHS: ReadonlyArray<string> = ["/pair", "/pair/code", "/pair/devices"];
+
+/** Whether a path is one of the desk-only ones, `:deviceId` tails included. */
+export const isLoopbackOnlyPath = (path: string): boolean =>
+  LOOPBACK_ONLY_PATHS.some((only) => path === only || path.startsWith(`${only}/`));
+
 export type BridgeAddress = { kind: "lan" | "tailscale"; url: string };
 
 /**

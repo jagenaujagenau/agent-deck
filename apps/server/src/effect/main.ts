@@ -5,6 +5,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { Authorizer } from "./Auth";
 import { BridgeConfig } from "./Config";
 import { BridgeRoutes } from "./Http";
+import { isLoopbackOnlyPath } from "./Pairing";
 import { ManagedRuntime } from "./Managed";
 import { BridgeSchema } from "./Schema";
 import { BridgeState } from "./State";
@@ -26,9 +27,10 @@ const AuthMiddleware = HttpRouter.use(
         const path = new URL(request.url, "http://bridge").pathname;
         // Pairing is how a device obtains a credential; it cannot present one,
         // and liveness is polled by the service wrapper, which has none either.
-        // The /pair page and its endpoints answer only to loopback — each
-        // handler checks the peer itself — so bearer auth stands aside here.
-        if (path === "/" || path.endsWith("/pair") || path.startsWith("/pair/")) {
+        // The desk-only routes stand aside from bearer auth because they are
+        // gated on the peer instead — and they are named by the same list the
+        // routes carry, so this can never wave through a path no route gates.
+        if (path === "/" || path.endsWith("/pair") || isLoopbackOnlyPath(path)) {
           return yield* httpApp;
         }
         const allowed = yield* auth.authorize(
