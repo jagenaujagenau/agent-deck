@@ -18,14 +18,7 @@ import {
   type StateAuthority,
 } from "@agent-control-dashboard/agent-adapter";
 import { mergeRecentEvents } from "../bridgeEvents";
-import { scanClaudeUsage, scanCodexUsage, type TranscriptUsageRow } from "../transcriptUsage";
-import {
-  buildAnalytics,
-  rangeCutoff,
-  type ActivityRow,
-  type AnalyticsReport,
-  type UsageRow,
-} from "./Analytics";
+import { buildAnalytics, rangeCutoff, type AnalyticsReport } from "./Analytics";
 import { BridgeConfig } from "./Config";
 import type {
   AgentEvent,
@@ -43,6 +36,7 @@ import { makeDeviceRegistry, type PairedDevice } from "./DeviceRegistry";
 import { makeRequestLedger } from "./RequestLedger";
 import type { PendingQuestion, RequestLedger } from "./RequestLedger";
 import { makeRuntimeEventLog } from "./RuntimeEventLog";
+import { emptyTranscriptCache, makeUsageLedger, runtimeFor, usageNumber } from "./UsageLedger";
 
 const now = () => new Date().toISOString();
 const makeId = () => crypto.randomUUID();
@@ -376,17 +370,6 @@ export interface BridgeSnapshot {
   agents: Array<SnapshotAgent>;
 }
 
-const usageNumber = (value: number | null | undefined, fallback: number): number =>
-  value != null && Number.isFinite(value) ? value : fallback;
-
-const runtimeFor = (agent: Pick<AgentRecord, "name" | "runtime">) => {
-  if (agent.runtime) return agent.runtime;
-  if (agent.name.startsWith("Claude")) return "claude";
-  if (agent.name.startsWith("Codex")) return "codex";
-  if (agent.name.startsWith("Pi")) return "pi";
-  return "other";
-};
-
 export class BridgeState extends Context.Service<
   BridgeState,
   {
@@ -566,16 +549,20 @@ export class BridgeState extends Context.Service<
             );
 
       const persistActivity = (agent: AgentRecord, event: AgentEvent) =>
-        sql`INSERT OR IGNORE INTO bridge_activity (id, agent_id, project, runtime, kind, created_at)
-            VALUES (${event.id}, ${agent.id}, ${agent.project}, ${runtimeFor(agent)}, ${event.kind}, ${event.createdAt})`.pipe(
-          Effect.orDie,
-        );
+        usage.recordActivity(agent, event);
 
       /**
        * The durable ordered log and its folded projections — ADR-0001's core,
        * owned by one module; see RuntimeEventLog.
        */
       const log = makeRuntimeEventLog({ sql, now });
+
+      /**
+       * What the deck has spent and what it has done. ADR-0001's separation
+       * of Processed from Context usage is that module's to keep; it used to
+       * be kept by twenty lines sitting in the middle of `heartbeat`.
+       */
+      const usage = makeUsageLedger({ sql, now }, yield* emptyTranscriptCache());
 
       /**
        * The Request lifecycle in one place. The ledger publishes each
@@ -660,10 +647,7 @@ export class BridgeState extends Context.Service<
             timestamp,
           ),
         );
-        const usageRows = yield* sql<{ tokens: number; cost_usd: number }>`
-          SELECT COALESCE(SUM(tokens), 0) AS tokens, COALESCE(SUM(cost_usd), 0) AS cost_usd
-          FROM bridge_usage_deltas`.pipe(Effect.orDie);
-        const historical = usageRows[0] ?? { tokens: 0, cost_usd: 0 };
+        const historical = yield* usage.total();
         return {
           sequence: yield* SubscriptionRef.get(revision),
           bridge: { status: "connected", name: config.name, timestamp: now() },
@@ -714,29 +698,9 @@ export class BridgeState extends Context.Service<
           rateLimits: input.rateLimits ?? undefined,
           pendingApproval: input.pendingApproval ?? undefined,
         };
-        const processedTokens = usageNumber(agent.processedTokens, agent.tokens);
         yield* persistAgent(agent);
         yield* syncApprovalRequest(agent, previous);
-        // Usage is stored as deltas against a high-water cursor: a runtime that
-        // re-reports the same totals must not double-count.
-        const cursorRows = yield* sql<{ tokens: number; cost_usd: number }>`
-          SELECT tokens, cost_usd FROM bridge_usage_cursors WHERE agent_id = ${agent.id}`.pipe(
-          Effect.orDie,
-        );
-        const tokenDelta = Math.max(0, processedTokens - (cursorRows[0]?.tokens ?? 0));
-        const costDelta = Math.max(0, agent.costUsd - (cursorRows[0]?.cost_usd ?? 0));
-        if (tokenDelta > 0 || costDelta > 0) {
-          yield* sql`INSERT INTO bridge_usage_deltas (agent_id, project, runtime, tokens, cost_usd, created_at)
-                     VALUES (${agent.id}, ${agent.project}, ${runtimeFor(agent)}, ${tokenDelta}, ${costDelta}, ${now()})`.pipe(
-            Effect.orDie,
-          );
-        }
-        yield* sql`INSERT INTO bridge_usage_cursors (agent_id, tokens, cost_usd, updated_at)
-                   VALUES (${agent.id}, ${processedTokens}, ${agent.costUsd}, ${now()})
-                   ON CONFLICT(agent_id) DO UPDATE SET tokens = MAX(tokens, excluded.tokens),
-                     cost_usd = MAX(cost_usd, excluded.cost_usd), updated_at = excluded.updated_at`.pipe(
-          Effect.orDie,
-        );
+        yield* usage.record(agent);
         if (
           agent.runtimeProtocol !== "canonical-v1" &&
           (!previous ||
@@ -1083,47 +1047,6 @@ export class BridgeState extends Context.Service<
 
       const commandReceipt = queue.receipt;
 
-      const transcriptCacheRef = yield* Ref.make<
-        | {
-            cutoff: string;
-            expiresAt: number;
-            rows: ReadonlyArray<TranscriptUsageRow>;
-            claudeFiles: number;
-            codexFiles: number;
-            duplicates: number;
-          }
-        | undefined
-      >(undefined);
-
-      /**
-       * Scanning every transcript is expensive, so a scan is reused for five
-       * minutes. A cached scan that reaches further back than the current
-       * cutoff is still usable — it is filtered down rather than redone.
-       */
-      const transcriptUsage = Effect.fn("BridgeState.transcriptUsage")(function* (cutoff: string) {
-        const cached = yield* Ref.get(transcriptCacheRef);
-        if (cached && cached.expiresAt > Date.now() && cached.cutoff <= cutoff) {
-          return { ...cached, rows: cached.rows.filter((row) => row.created_at >= cutoff) };
-        }
-        const [claude, codex] = yield* Effect.all(
-          [
-            Effect.promise(() => scanClaudeUsage(cutoff)),
-            Effect.promise(() => scanCodexUsage(cutoff)),
-          ],
-          { concurrency: 2 },
-        );
-        const fresh = {
-          cutoff,
-          expiresAt: Date.now() + 5 * 60_000,
-          rows: [...claude.rows, ...codex.rows],
-          claudeFiles: claude.files,
-          codexFiles: codex.files,
-          duplicates: claude.duplicates,
-        };
-        yield* Ref.set(transcriptCacheRef, fresh);
-        return fresh;
-      });
-
       const analytics = Effect.fn("BridgeState.analytics")(function* (
         range: string,
         project?: string,
@@ -1131,17 +1054,8 @@ export class BridgeState extends Context.Service<
       ) {
         const generatedAt = now();
         const { cutoff } = rangeCutoff(range, Date.parse(generatedAt));
-        const ledgerUsage = yield* sql<UsageRow>`
-          SELECT agent_id, project, runtime, tokens, cost_usd, created_at
-          FROM bridge_usage_deltas WHERE created_at >= ${cutoff} ORDER BY created_at`.pipe(
-          Effect.orDie,
-        );
-        const activityRows = yield* sql<ActivityRow>`
-          SELECT agent_id, project, runtime, kind, created_at
-          FROM bridge_activity WHERE created_at >= ${cutoff} ORDER BY created_at`.pipe(
-          Effect.orDie,
-        );
-        const transcript = yield* transcriptUsage(cutoff);
+        const { usage: ledgerUsage, activity: activityRows } = yield* usage.since(cutoff);
+        const transcript = yield* usage.transcripts(cutoff);
         const agents = yield* Ref.get(agentsRef);
         return buildAnalytics({
           range,
