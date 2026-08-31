@@ -1800,14 +1800,33 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                             HarnessMark(harness, running = agent.state == "running", statusColor = stateColor, diameter = 42.dp)
                             Spacer(Modifier.width(9.dp))
                             Column(Modifier.weight(1f, fill = false)) {
-                                Text(
-                                    activeRun?.title ?: agent.project,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = if (activeRun != null) Blue else Text,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        activeRun?.title ?: agent.project,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = if (activeRun != null) Blue else Text,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    // The session's ledger, worn beside the
+                                    // name: what all this work has amounted
+                                    // to, one tap from the diffs themselves.
+                                    // The receipt in the flow keeps the pass;
+                                    // the running total lives here.
+                                    if (activeRun == null) {
+                                        remember(sessionChanges) { diffStat(sessionChanges) }?.let { stat ->
+                                            Box(
+                                                Modifier
+                                                    .padding(start = 7.dp)
+                                                    .clip(RoundedCornerShape(5.dp))
+                                                    .clickable { changesOpen = true }
+                                                    .padding(horizontal = 2.dp),
+                                            ) { DiffStatLabel(stat) }
+                                        }
+                                    }
+                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (activeRun != null) {
                                         // Under a lens the state word belongs
@@ -2452,19 +2471,6 @@ private fun ResponsesView(
                             Spacer(Modifier.weight(1f))
                             Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
                         }
-                        if (passLeads) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 22.dp, top = 1.dp)) {
-                                Text(
-                                    "$changedFiles files across the session",
-                                    color = Muted.copy(alpha = 0.65f),
-                                    fontSize = 11.sp,
-                                )
-                                changedStat?.let { stat ->
-                                    Spacer(Modifier.width(6.dp))
-                                    Box(Modifier.graphicsLayer { alpha = 0.65f }) { DiffStatLabel(stat) }
-                                }
-                            }
-                        }
                     }
                 }
                 if (working) item(key = "working") {
@@ -2712,10 +2718,12 @@ private fun ActivityCluster(
 /** `+190 −11`, in the diff's own colours. */
 @Composable
 private fun DiffStatLabel(stat: DiffStat) {
+    // Never wraps: "+7 −" over "3" is worse than clipping. A squeezed line
+    // yields its neighbours first; the numbers stay whole.
     Row {
-        Text("+${stat.added}", color = Signal, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text("+${stat.added}", color = Signal, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
         Spacer(Modifier.width(4.dp))
-        Text("−${stat.removed}", color = Danger.copy(alpha = 0.9f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text("−${stat.removed}", color = Danger.copy(alpha = 0.9f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 

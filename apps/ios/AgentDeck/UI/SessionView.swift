@@ -191,6 +191,19 @@ struct SessionView: View {
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
+            // The session's ledger, worn on the header: what all this work
+            // has amounted to, one tap from the diffs themselves. The receipt
+            // in the flow keeps the current pass; the running total lives here.
+            if let stat = diffStat(store.sessionChanges[agentId] ?? []) {
+                Button {
+                    changesOpen = true
+                } label: {
+                    DiffStatLabel(stat: stat)
+                }
+                .accessibilityLabel("Session changes")
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
             if let agent {
                 // The conversation map: a long chat's table of contents. Only
                 // offered once there are exchanges to jump between.
@@ -323,17 +336,6 @@ struct SessionView: View {
                                     Image(systemName: "chevron.right")
                                         .font(.system(size: 11))
                                         .foregroundStyle(Palette.muted.opacity(0.7))
-                                }
-                                if passLeads {
-                                    HStack(spacing: 6) {
-                                        Text("\(fileChanges.count) files across the session")
-                                            .font(.system(size: 11))
-                                        if let stat = diffStat(store.sessionChanges[agentId] ?? []) {
-                                            DiffStatLabel(stat: stat)
-                                        }
-                                    }
-                                    .opacity(0.65)
-                                    .padding(.leading, 22)
                                 }
                             }
                             .foregroundStyle(Palette.muted)
