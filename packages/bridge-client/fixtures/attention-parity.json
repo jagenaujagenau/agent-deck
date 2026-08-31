@@ -1,5 +1,5 @@
 {
-  "comment": "The Attention Priority, Seen, and home presentation-state contracts, as data. The rank and seen sections run in three languages — attention.ts (bun test), AttentionRank.kt (JVM test), AttentionPolicy.swift + SeenPolicy.swift (swift test in apps/ios/PolicyTests). The homeState sections run in the two that render a home deck — HomePolicy.kt (mobile JVM test) and HomePolicy.swift (swift test); no TypeScript surface renders one. Extend this file, never one implementation.",
+  "comment": "The Attention Priority, Seen, and home presentation-state contracts, as data. The rank and seen sections run in three languages — attention.ts (bun test), AttentionRank.kt (JVM test), AttentionPolicy.swift + SeenPolicy.swift (swift test in apps/ios/PolicyTests). The homeState sections run in the two that render a home deck — HomePolicy.kt (mobile JVM test) and HomePolicy.swift (swift test); no TypeScript surface renders one. The timeline section pins chatTimeline — how raw events become one conversation of messages and activity clusters — across ChatTimeline.kt and ChatTimeline.swift. Extend this file, never one implementation.",
   "rank": [
     {
       "case": "the stuck one is always first",
@@ -312,6 +312,167 @@
         "seen": true,
         "lastSeenAt": "2026-08-30T11:55:00Z",
         "expect": "history"
+      }
+    ]
+  },
+  "timeline": {
+    "cases": [
+      {
+        "case": "words stay messages; the work between them is one cluster",
+        "events": [
+          {
+            "id": "e0",
+            "kind": "user",
+            "summary": "Message",
+            "createdAt": "2026-08-31T10:00:00Z",
+            "detail": "Fix the flaky test"
+          },
+          {
+            "id": "e1",
+            "kind": "thought",
+            "summary": "Reasoning",
+            "createdAt": "2026-08-31T10:00:01Z",
+            "detail": "Reading the test first"
+          },
+          {
+            "id": "e2",
+            "kind": "tool",
+            "summary": "Edit",
+            "createdAt": "2026-08-31T10:00:02Z",
+            "tool": "Edit"
+          },
+          {
+            "id": "e3",
+            "kind": "tool",
+            "summary": "Bash",
+            "createdAt": "2026-08-31T10:00:03Z",
+            "tool": "Bash"
+          },
+          {
+            "id": "e4",
+            "kind": "output",
+            "summary": "Response",
+            "createdAt": "2026-08-31T10:00:04Z",
+            "detail": "Done — the test is fixed."
+          }
+        ],
+        "expect": ["message:user", "activity:3", "message:agent"]
+      },
+      {
+        "case": "a completion reporting itself done is work, not words",
+        "events": [
+          {
+            "id": "e0",
+            "kind": "user",
+            "summary": "Message",
+            "createdAt": "2026-08-31T10:00:00Z",
+            "detail": "Tidy the docs"
+          },
+          {
+            "id": "e1",
+            "kind": "output",
+            "summary": "Edit completed",
+            "createdAt": "2026-08-31T10:00:01Z",
+            "detail": "docs/a.md · +18 −6"
+          },
+          {
+            "id": "e2",
+            "kind": "output",
+            "summary": "Edit completed",
+            "createdAt": "2026-08-31T10:00:02Z",
+            "detail": "docs/b.md · +2 −2"
+          },
+          {
+            "id": "e3",
+            "kind": "output",
+            "summary": "Response",
+            "createdAt": "2026-08-31T10:00:03Z",
+            "detail": "Docs tidied."
+          }
+        ],
+        "expect": ["message:user", "activity:2", "message:agent"]
+      },
+      {
+        "case": "the untagged instruction is the person speaking; raw plumbing is nothing",
+        "events": [
+          {
+            "id": "e0",
+            "kind": "thought",
+            "summary": "Received instruction",
+            "createdAt": "2026-08-31T10:00:00Z",
+            "detail": "Fix the tests"
+          },
+          {
+            "id": "e1",
+            "kind": "user",
+            "summary": "Message",
+            "createdAt": "2026-08-31T10:00:01Z",
+            "detail": "<task-notification>machinery</task-notification>"
+          },
+          {
+            "id": "e2",
+            "kind": "tool",
+            "summary": "Bash",
+            "createdAt": "2026-08-31T10:00:02Z",
+            "tool": "Bash"
+          }
+        ],
+        "expect": ["message:user", "activity:1"]
+      },
+      {
+        "case": "two exchanges keep their work apart",
+        "events": [
+          {
+            "id": "e0",
+            "kind": "user",
+            "summary": "Message",
+            "createdAt": "2026-08-31T10:00:00Z",
+            "detail": "First"
+          },
+          {
+            "id": "e1",
+            "kind": "tool",
+            "summary": "Bash",
+            "createdAt": "2026-08-31T10:00:01Z",
+            "tool": "Bash"
+          },
+          {
+            "id": "e2",
+            "kind": "output",
+            "summary": "Response",
+            "createdAt": "2026-08-31T10:00:02Z",
+            "detail": "First done."
+          },
+          {
+            "id": "e3",
+            "kind": "user",
+            "summary": "Message",
+            "createdAt": "2026-08-31T10:00:03Z",
+            "detail": "Second"
+          },
+          {
+            "id": "e4",
+            "kind": "tool",
+            "summary": "Edit",
+            "createdAt": "2026-08-31T10:00:04Z",
+            "tool": "Edit"
+          },
+          {
+            "id": "e5",
+            "kind": "output",
+            "summary": "Response",
+            "createdAt": "2026-08-31T10:00:05Z",
+            "detail": "Second done."
+          }
+        ],
+        "expect": [
+          "message:user",
+          "activity:1",
+          "message:agent",
+          "message:user",
+          "activity:1",
+          "message:agent"
+        ]
       }
     ]
   }

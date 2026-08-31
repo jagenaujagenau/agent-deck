@@ -101,11 +101,15 @@ private func isAgentResponse(_ event: AgentEvent) -> Bool {
     guard event.kind == "output",
           !event.summary.hasPrefix("Remote command:"),
           event.tool == nil,
-          event.command == nil
+          event.command == nil,
+          // "X completed" is work reporting itself done, not the agent
+          // speaking — whatever detail rides along. It belongs with the
+          // activity between messages, never in a bubble.
+          !event.summary.hasSuffix(" completed")
     else { return false }
     if event.summary == "Response" { return true }
     if !(event.detail ?? "").trimmed.isEmpty { return true }
-    return event.summary != "Activity" && !event.summary.hasSuffix(" completed")
+    return event.summary != "Activity"
 }
 
 private func isSubagentMessage(_ event: AgentEvent) -> Bool {

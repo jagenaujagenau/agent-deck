@@ -52,10 +52,6 @@ private func lastResponse(_ agent: Agent) -> String? {
         .nonEmpty
 }
 
-extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
-}
-
 /// `Claude · orbital-api · 4f2a` ends in a short session hash. Kept as a
 /// suffix on the title so two sessions in one project are told apart.
 func sessionSuffix(_ agent: Agent) -> String {

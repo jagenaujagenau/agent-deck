@@ -82,3 +82,47 @@ class AttentionParityTest {
         }
     }
 }
+
+class TimelineParityTest {
+    private fun fixture(): java.io.File {
+        var dir: java.io.File? = java.io.File(System.getProperty("user.dir")!!)
+        while (dir != null) {
+            val candidate = java.io.File(dir, "packages/bridge-client/fixtures/attention-parity.json")
+            if (candidate.exists()) return candidate
+            dir = dir.parentFile
+        }
+        error("attention-parity.json not found")
+    }
+
+    @Test
+    fun `every timeline case folds as the corpus says`() {
+        val corpus = kotlinx.serialization.json.Json.parseToJsonElement(fixture().readText())
+            .jsonObject["timeline"]!!.jsonObject["cases"]!!.jsonArray
+        assertTrue(corpus.isNotEmpty())
+        for (entry in corpus.map { it.jsonObject }) {
+            val events = entry["events"]!!.jsonArray.map { raw ->
+                val fields = raw.jsonObject
+                AgentEvent(
+                    id = fields["id"]!!.jsonPrimitive.contentOrNull!!,
+                    kind = fields["kind"]!!.jsonPrimitive.contentOrNull!!,
+                    summary = fields["summary"]!!.jsonPrimitive.contentOrNull!!,
+                    detail = fields["detail"]?.jsonPrimitive?.contentOrNull,
+                    tool = fields["tool"]?.jsonPrimitive?.contentOrNull,
+                    createdAt = fields["createdAt"]!!.jsonPrimitive.contentOrNull!!,
+                )
+            }
+            val folded = chatTimeline(events).map { item ->
+                when (item) {
+                    is TimelineItem.Message ->
+                        "message:${if (item.entry.role == ConversationRole.User) "user" else "agent"}"
+                    is TimelineItem.Activity -> "activity:${item.events.size}"
+                }
+            }
+            assertEquals(
+                entry["case"]!!.jsonPrimitive.contentOrNull,
+                entry["expect"]!!.jsonArray.map { it.jsonPrimitive.contentOrNull },
+                folded,
+            )
+        }
+    }
+}

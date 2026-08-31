@@ -23,13 +23,12 @@ struct SessionView: View {
     /// into its own, so "what is it doing" had no answer smaller than all of it.
     @State private var lens: String?
     @State private var lensPickerOpen = false
-    /// Which of the four faces of a session is being read.
-    @State private var mode: SessionTab = .chat
-    /// Opening a session is a request to read it, not to write to it. Switching
-    /// *to* a typing surface is the deliberate act, so only that arms the focus
-    /// — otherwise the keyboard covers the lower half of a conversation nobody
-    /// has seen yet.
-    @State private var tabChosen = false
+    /// The step opened for its depth — command, output, or diff — as a sheet
+    /// over the conversation rather than somewhere else to be.
+    @State private var openActivity: AgentEvent?
+    @State private var changesOpen = false
+    /// Clusters the reader has opened into their steps, by lead event id.
+    @State private var expandedClusters: Set<String> = []
     @FocusState private var composerFocused: Bool
     /// The live-window signature the fetched history was current for.
     @State private var fetchedActivity = ""
@@ -44,22 +43,21 @@ struct SessionView: View {
             if let agent {
                 let runs = subagentRuns(sessionEvents(agent))
                 VStack(spacing: 0) {
-                    // Only worth a banner from a tab that cannot see the thing.
-                    // On Chat the approval card is already on screen, and
-                    // "Review in Chat" would point at itself.
-                    if wantsPerson(agent), mode != .chat { attentionBanner(agent) }
-                    SessionTabBar(
-                        mode: $mode,
-                        tabChosen: $tabChosen,
-                        attention: wantsPerson(agent),
-                        reasoning: reasoning(for: agent).count,
-                        changes: fileChanges.count,
-                        terminal: shell(for: agent).count
-                    )
-                    tab(for: agent)
+                    // The session is one conversation. Everything the agent
+                    // did reads inline as work between the words; depth opens
+                    // as a sheet over the same screen.
+                    conversation(for: agent)
+                    composer(for: agent)
                 }
                 .sheet(isPresented: $lensPickerOpen) {
                     SubagentPicker(runs: runs, selected: $lens)
+                }
+                .sheet(item: $openActivity) { event in
+                    ActivityDetailSheet(event: event)
+                }
+                .sheet(isPresented: $changesOpen) {
+                    DiffView(files: fileChanges, loaded: store.changesLoaded(agentId: agentId))
+                        .background(Palette.surface)
                 }
                 // A subagent that has left the retained window is no longer a lens.
                 .onChange(of: runs) { _, current in
@@ -183,49 +181,6 @@ struct SessionView: View {
         }
     }
 
-    // MARK: - Tabs
-
-    /// The tabs are handed a session narrowed to one subagent's work, so chat,
-    /// reasoning, changes and terminal all read as that subagent without a
-    /// second set of screens existing.
-    @ViewBuilder private func tab(for agent: Agent) -> some View {
-        switch mode {
-        case .chat:
-            conversation(for: agent)
-            // The composer stays under a lens. A subagent has no inbox — it is
-            // spawned with a prompt and returns once — so a message can only go
-            // to the session. Hiding the field said "you cannot reply" instead,
-            // which is a bigger lie than the one it was avoiding; the
-            // placeholder names where the message goes.
-            composer(for: agent)
-        case .reasoning:
-            ReasoningView(events: reasoning(for: agent))
-        case .changes:
-            DiffView(files: fileChanges, loaded: store.changesLoaded(agentId: agentId))
-        case .terminal:
-            // The terminal is scrollback first: the keyboard rises only when
-            // the prompt itself is tapped, never on opening the tab.
-            TerminalView(
-                agent: lensedAgent(agent),
-                events: shell(for: agent),
-                busy: $busy,
-                failure: $failure
-            )
-        }
-    }
-
-    /// The session with its events narrowed to the current lens, so a view that
-    /// reads `agent.events` for itself sees the same slice the tab does.
-    private func lensedAgent(_ agent: Agent) -> Agent {
-        var copy = agent
-        copy.events = viewedEvents(agent)
-        return copy
-    }
-
-    private func reasoning(for agent: Agent) -> [AgentEvent] { reasoningEvents(viewedEvents(agent)) }
-
-    private func shell(for agent: Agent) -> [AgentEvent] { terminalEvents(viewedEvents(agent)) }
-
     /// Prefer the bridge's full record of what was changed: the live snapshot
     /// drops a diff off an edit as its window rolls, so the events already in
     /// hand are a worse answer than the ones fetched for this.
@@ -242,52 +197,47 @@ struct SessionView: View {
         agent.state == "waiting" && (agent.pendingApproval != nil || openQuestion(agent) != nil)
     }
 
-    private func attentionBanner(_ agent: Agent) -> some View {
-        Button { mode = .chat } label: {
-            HStack(spacing: 8) {
-                Image(systemName: agent.pendingApproval != nil ? "checkmark.shield" : "questionmark.circle")
-                    .font(.system(size: 14))
-                Text(agent.pendingApproval != nil ? "Approval required" : "Question waiting")
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer(minLength: 0)
-                Text("Review in Chat")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-            }
-            .foregroundStyle(Palette.amber)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Palette.amber.opacity(0.10)))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.amber.opacity(0.22), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 3)
-    }
-
     // MARK: - Conversation
 
     private func conversation(for agent: Agent) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if !loadedHistory, entries(for: agent).isEmpty {
+                    if !loadedHistory, chatTimeline(viewedEvents(agent)).isEmpty {
                         ProgressView().tint(Palette.muted).frame(maxWidth: .infinity).padding(.vertical, 40)
-                    } else if entries(for: agent).isEmpty {
+                    } else if chatTimeline(viewedEvents(agent)).isEmpty {
                         EmptyConversation(agent: agent, lensed: lens != nil)
                     }
-                    let conversation = entries(for: agent)
-                    ForEach(Array(conversation.enumerated()), id: \.element.id) { index, entry in
+                    let timeline = chatTimeline(viewedEvents(agent))
+                    ForEach(Array(timeline.enumerated()), id: \.element.id) { index, item in
                         // A hairline where an exchange opens — never before the
                         // first entry, which opens nothing.
-                        if index > 0, startsNewTurn(previous: conversation[index - 1].event, current: entry.event) {
+                        if index > 0, startsNewTurn(previous: timeline[index - 1].newestEvent, current: item.leadEvent) {
                             TurnHairline()
                         }
-                        ConversationBubble(entry: entry, harness: agent.harness, model: agent.model)
-                            .id(entry.id)
+                        switch item {
+                        case .message(let entry):
+                            ConversationBubble(entry: entry, harness: agent.harness, model: agent.model)
+                                .id(item.id)
+                        case .activity(let events):
+                            ActivityClusterView(
+                                events: events,
+                                // The last run of a working session is the one
+                                // being written; it arrives open at its tail so
+                                // the work is watchable.
+                                live: agent.state == "running" && index == timeline.count - 1,
+                                expanded: expandedClusters.contains(item.id),
+                                onToggle: {
+                                    if expandedClusters.contains(item.id) {
+                                        expandedClusters.remove(item.id)
+                                    } else {
+                                        expandedClusters.insert(item.id)
+                                    }
+                                },
+                                onOpen: { openActivity = $0 }
+                            )
+                            .id(item.id)
+                        }
                     }
                     if lens != nil {
                         // Nothing to answer here: a subagent does not hold the
@@ -299,6 +249,30 @@ struct SessionView: View {
                     } else if let question = openQuestion(agent) {
                         QuestionCard(agent: agent, question: question, busy: $busy, failure: $failure)
                             .id("pending")
+                    }
+                    if !fileChanges.isEmpty {
+                        // The session's receipt: what all that work touched,
+                        // one quiet line where a conversation would leave one.
+                        Button { changesOpen = true } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: "plusminus")
+                                    .font(.system(size: 12))
+                                Text(fileChanges.count == 1 ? "1 file changed" : "\(fileChanges.count) files changed")
+                                    .font(.system(size: 12))
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Palette.muted.opacity(0.7))
+                            }
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if agent.state == "running" {
+                        WorkingIndicatorView(task: agent.task)
+                            .id("working")
                     }
                     if let failure {
                         Text(failure)
@@ -321,9 +295,13 @@ struct SessionView: View {
     }
 
     private func scrollToEnd(_ proxy: ScrollViewProxy, agent: Agent) {
-        let target = agent.pendingApproval != nil || openQuestion(agent) != nil
-            ? "pending"
-            : entries(for: agent).last?.id
+        let target: String? = if agent.pendingApproval != nil || openQuestion(agent) != nil {
+            "pending"
+        } else if agent.state == "running" {
+            "working"
+        } else {
+            chatTimeline(viewedEvents(agent)).last?.id
+        }
         guard let target else { return }
         DispatchQueue.main.async { proxy.scrollTo(target, anchor: .bottom) }
     }
@@ -337,10 +315,6 @@ struct SessionView: View {
     private func viewedEvents(_ agent: Agent) -> [AgentEvent] {
         guard let lens else { return sessionEvents(agent) }
         return eventsOfSubagent(sessionEvents(agent), subagentId: lens)
-    }
-
-    private func entries(for agent: Agent) -> [ConversationEntry] {
-        conversationEntries(viewedEvents(agent))
     }
 
     /// The newest event is a question only while it is still the newest —
@@ -454,7 +428,7 @@ struct SessionView: View {
     /// so the placeholder names where the message actually goes.
     private func composerPlaceholder(action: String) -> String {
         if lens != nil { return "Message the session…" }
-        return action == "steer" ? "Reply or steer…" : "Message agent…"
+        return action == "steer" ? "Reply or steer…  / commands  ! shell" : "Message agent…  / commands  ! shell"
     }
 
     /// A message to a session that is not on a turn will not be seen until it
@@ -478,11 +452,10 @@ struct SessionView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 10) {
-                // Points at the pending card, which lives in the Chat
-                // transcript — the same place the attention banner sends people.
+                // The pending card is already on this screen, just above the
+                // composer; dismissing the notice returns the eye to it.
                 Button {
                     blockedNotice = nil
-                    mode = .chat
                 } label: {
                     Text(agent.pendingApproval != nil ? "Review the approval" : "Answer the question")
                         .font(.system(size: 12, weight: .semibold))
@@ -505,8 +478,15 @@ struct SessionView: View {
     }
 
     private func send(action: String, force: Bool = false) async {
-        let message = draft.trimmed
+        var message = draft.trimmed
         guard !message.isEmpty else { return }
+        // `!` is the terminal living in the composer: the rest of the line
+        // goes to the runtime as an exact shell command.
+        if message.hasPrefix("!") {
+            let command = String(message.dropFirst()).trimmed
+            guard !command.isEmpty else { return }
+            message = terminalCommandInstruction(command)
+        }
         busy = true
         failure = nil
         defer { busy = false }
@@ -530,93 +510,6 @@ struct SessionView: View {
 
 /// The four faces of a session. The icons are the ones the views themselves
 /// use, so the tab and the thing it opens agree about what they are.
-enum SessionTab: CaseIterable {
-    case chat, reasoning, changes, terminal
-
-    var label: String {
-        switch self {
-        case .chat: "Chat"
-        case .reasoning: "Reasoning"
-        case .changes: "Changes"
-        case .terminal: "Terminal"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .chat: "bubble.left.and.bubble.right"
-        case .reasoning: "brain"
-        case .changes: "plusminus"
-        case .terminal: "terminal"
-        }
-    }
-}
-
-private struct SessionTabBar: View {
-    @Binding var mode: SessionTab
-    @Binding var tabChosen: Bool
-    var attention: Bool
-    var reasoning: Int
-    var changes: Int
-    var terminal: Int
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(SessionTab.allCases, id: \.self) { tab in
-                Button {
-                    mode = tab
-                    tabChosen = true
-                } label: {
-                    VStack(spacing: 5) {
-                        // An icon rather than a word: four labels sharing the
-                        // width truncate to names that name nothing. The dot is
-                        // what a count used to be — a busy session reads "99+"
-                        // on every tab, which says only that there is a lot of
-                        // everything.
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: tab.icon)
-                                .font(.system(size: 19, weight: mode == tab ? .semibold : .regular))
-                                .foregroundStyle(mode == tab ? Palette.text : Palette.muted)
-                            if badge(for: tab) {
-                                Circle()
-                                    // Amber is reserved for something wanting a
-                                    // person; anything else is content waiting
-                                    // to be read.
-                                    .fill(tab == .chat ? Palette.amber : Palette.muted.opacity(0.7))
-                                    .frame(width: tab == .chat ? 7 : 5, height: tab == .chat ? 7 : 5)
-                                    .offset(x: 5, y: -3)
-                            }
-                        }
-                        .frame(height: 24)
-                        Rectangle()
-                            .fill(mode == tab ? Palette.signal : .clear)
-                            .frame(height: 2)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tab.label)
-            }
-        }
-        .background(Palette.ink)
-    }
-
-    /// True when this tab has content worth marking, as a dot rather than a
-    /// number.
-    private func badge(for tab: SessionTab) -> Bool {
-        switch tab {
-        case .chat: attention
-        case .reasoning: reasoning > 0
-        case .changes: changes > 0
-        case .terminal: terminal > 0
-        }
-    }
-}
-
-/// The `/` commands this runtime advertises, offered while the caret is still
-/// in the command token.
 struct SlashCommandPicker: View {
     var matches: [SlashCommand]
     var onPick: (SlashCommand) -> Void
