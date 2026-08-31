@@ -200,6 +200,53 @@ export const pendingBlockFrom = (
       ? { kind: "question", question: question.question }
       : undefined;
 
+/** Why the deck believes what it believes about one session. */
+export interface AgentExplanation {
+  identity: { source: "session.registered" | "heartbeat"; confidence: "registered" | "reported" };
+  state: {
+    /** Who the current state comes from: a claim holder, the event log, or the heartbeat. */
+    source: string;
+    confidence: "claimed" | "projected" | "reported";
+    authority?: StateAuthority;
+  };
+  projectionSequence?: number;
+}
+
+/**
+ * Provenance for a derived session, stated instead of guessed at.
+ *
+ * Debugging a multi-adapter deck starts with "why does the deck say this" —
+ * whose claim is being honoured, whether identity came from the runtime
+ * registering itself or only ever rode a heartbeat, and whether state is the
+ * folded event log or the legacy document. This answers that in one read,
+ * with a confidence word per fact rather than a judgement call per debugger.
+ */
+export const explainAgent = (
+  agent: Pick<AgentRecord, "runtimeProtocol">,
+  projection: RuntimeProjection | undefined,
+  now: number,
+): AgentExplanation => {
+  const authority =
+    projection?.stateAuthority !== undefined &&
+    Date.parse(projection.stateAuthority.expiresAt) > now
+      ? projection.stateAuthority
+      : undefined;
+  const explanation: AgentExplanation = {
+    identity:
+      projection?.identity !== undefined
+        ? { source: "session.registered", confidence: "registered" }
+        : { source: "heartbeat", confidence: "reported" },
+    state:
+      authority !== undefined
+        ? { source: authority.source, confidence: "claimed", authority }
+        : agent.runtimeProtocol === "canonical-v1" && projection !== undefined
+          ? { source: "runtime-events", confidence: "projected" }
+          : { source: "heartbeat", confidence: "reported" },
+  };
+  if (projection !== undefined) explanation.projectionSequence = projection.sequence;
+  return explanation;
+};
+
 /**
  * Rate limits as the snapshot renders them: what the runtime's own events
  * reported when they have said anything, otherwise what the heartbeat
@@ -295,6 +342,7 @@ export class BridgeState extends Context.Service<
       status: RuntimeRequestStatus,
       value?: JsonValue,
     ) => Effect.Effect<boolean>;
+    readonly explain: (agentId: string) => Effect.Effect<AgentExplanation | undefined>;
     /** The one owner of durable Requests; see RequestLedger. */
     readonly requests: RequestLedger;
     readonly setSlashCommands: (
@@ -982,6 +1030,13 @@ export class BridgeState extends Context.Service<
 
       const resolveRuntimeRequest = requests.resolve;
 
+      const explain = Effect.fn("BridgeState.explain")(function* (agentId: string) {
+        const agent = (yield* Ref.get(agentsRef)).get(agentId);
+        if (agent === undefined) return undefined;
+        const stored = yield* log.projection(agentId);
+        return explainAgent(agent, stored?.projection, Date.now());
+      });
+
       const setSlashCommands = Effect.fn("BridgeState.setSlashCommands")(
         function* (agentId: string, commands: ReadonlyArray<JsonValue>) {
           yield* sql`INSERT INTO bridge_slash_commands (agent_id, commands, updated_at)
@@ -1175,6 +1230,7 @@ export class BridgeState extends Context.Service<
         markViewed,
         requestStatus,
         resolveRuntimeRequest,
+        explain,
         requests,
         setSlashCommands,
         commandReceipt,

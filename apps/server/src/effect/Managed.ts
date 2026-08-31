@@ -121,13 +121,17 @@ export class ManagedRuntime extends Context.Service<
           );
         },
         waitForResolution: async (requestId, signal) => {
+          const agentId = await run(state.requests.agentFor(requestId));
           while (!signal.aborted) {
-            // Expiry is the ledger's to settle — settled here on read, and
-            // published as a resolution fact like any other.
-            const standing = await run(state.requests.status(requestId));
+            // Parked on the same revision bump as every other semantic wait;
+            // expiry is the ledger's to settle on read, published as a
+            // resolution fact like any other. Short windows keep the abort
+            // signal honest — a cancelled session waits out at most one park.
+            const standing = agentId
+              ? await run(state.requestStatus(agentId, requestId, 5_000))
+              : await run(state.requests.status(requestId));
             if (!standing) throw new Error(`Managed request disappeared: ${requestId}`);
             if (standing.status !== "pending") return standing;
-            await Bun.sleep(250);
           }
           throw new Error("Managed request aborted");
         },

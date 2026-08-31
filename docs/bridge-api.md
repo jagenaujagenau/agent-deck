@@ -204,6 +204,12 @@ BeforeTool/AfterTool/BeforeAgent/AfterAgent names to the canonical lifecycle —
 in-process for OpenCode and Pi, terminal-driven for herdr) and are
 held to a parity matrix: `apps/server/scripts/parity.ts`.
 
+- `GET /agents/:id/explain` — provenance for a derived session: whose word
+  identity is (`session.registered` vs `heartbeat`) and whose word the state
+  is (a live claim holder, the folded event log, or the heartbeat), each with
+  a confidence — `registered`/`claimed`/`projected`/`reported`. The first
+  question a multi-adapter disagreement raises, answered in one read.
+
 ## Diagnostics
 
 `GET /` (the server root, outside `/bridge/v1` and outside auth) — liveness,

@@ -144,6 +144,17 @@ export const BridgeRoutes = HttpRouter.addAll([
   ),
   route(
     "GET",
+    "/agents/:agentId/explain",
+    Effect.gen(function* () {
+      const state = yield* BridgeState;
+      const explanation = yield* state.explain(yield* param("agentId"));
+      return explanation === undefined
+        ? yield* error("Agent not found", 404)
+        : yield* HttpServerResponse.json(explanation);
+    }),
+  ),
+  route(
+    "GET",
     "/agents/:agentId/requests/:requestId",
     Effect.gen(function* () {
       const state = yield* BridgeState;

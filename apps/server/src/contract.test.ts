@@ -25,8 +25,38 @@ const at = new Date().toISOString();
 let port = 0;
 let base = "";
 let pairingCode = "";
+let databaseUrl = "";
 let bridge: Bun.Subprocess<"ignore", "pipe", "pipe">;
 let master: BridgeClient;
+
+/** One bridge subprocess on the suite's port and database — restartable. */
+const spawnBridge = () =>
+  Bun.spawn(["bun", "src/effect/main.ts"], {
+    cwd: join(import.meta.dir, ".."),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DATABASE_URL: databaseUrl,
+      BRIDGE_REQUIRE_AUTH: "true",
+      BRIDGE_TOKEN: MASTER,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+const waitAlive = async () => {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    try {
+      const alive = await fetch(`${base}/`);
+      if (alive.ok) return;
+    } catch {
+      /* not up yet */
+    }
+    if (Date.now() > deadline) throw new Error("bridge did not come up in 15s");
+    await Bun.sleep(100);
+  }
+};
 
 /** What an adapter puts on the wire: JSON, shaped by the route it is aimed at. */
 type WireValue = string | number | boolean | null | ReadonlyArray<WireValue> | WirePayload;
@@ -65,19 +95,8 @@ beforeAll(async () => {
   probe.stop(true);
   base = `http://127.0.0.1:${port}`;
 
-  const serverDir = join(import.meta.dir, "..");
-  bridge = Bun.spawn(["bun", "src/effect/main.ts"], {
-    cwd: serverDir,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      DATABASE_URL: `file:${join(mkdtempSync(join(tmpdir(), "bridge-contract-")), "contract.db")}`,
-      BRIDGE_REQUIRE_AUTH: "true",
-      BRIDGE_TOKEN: MASTER,
-    },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  databaseUrl = `file:${join(mkdtempSync(join(tmpdir(), "bridge-contract-")), "contract.db")}`;
+  bridge = spawnBridge();
 
   // The pairing code is issued once at startup and printed, which is the only
   // place a device ever learns it.
@@ -91,17 +110,7 @@ beforeAll(async () => {
     throw new Error(`bridge exited before printing a pairing code:\n${seen}`);
   })();
 
-  const deadline = Date.now() + 15_000;
-  for (;;) {
-    try {
-      const alive = await fetch(`${base}/`);
-      if (alive.ok) break;
-    } catch {
-      /* not up yet */
-    }
-    if (Date.now() > deadline) throw new Error("bridge did not come up in 15s");
-    await Bun.sleep(100);
-  }
+  await waitAlive();
   pairingCode = await logged;
   master = new BridgeClient(base, MASTER);
 });
@@ -387,6 +396,56 @@ describe("the wire contract, executed", () => {
     expect(elapsed).toBeLessThan(8_000);
   });
 
+  test("explain says whose word each fact is", async () => {
+    // codex-contract-proj registered itself and holds a canonical projection;
+    // codex-contract-1 only ever heartbeated its identity.
+    const explain = async (id: string) =>
+      // SAFETY: the route answers the documented explanation shape.
+      (await (
+        await fetch(`${base}/bridge/v1/agents/${id}/explain`, {
+          headers: { Authorization: `Bearer ${MASTER}` },
+        })
+      ).json()) as {
+        identity?: { source: string; confidence: string };
+        state?: { source: string; confidence: string };
+      };
+
+    const registered = await explain("codex-contract-proj");
+    expect(registered.identity).toEqual({ source: "session.registered", confidence: "registered" });
+    expect(registered.state).toEqual({ source: "runtime-events", confidence: "projected" });
+
+    const legacy = await explain("codex-contract-1");
+    expect(legacy.identity).toEqual({ source: "heartbeat", confidence: "reported" });
+    expect(legacy.state?.source).toBe("heartbeat");
+  });
+
+  test("a malformed runtime event is refused with its reason, not swallowed", async () => {
+    const refused = await publish("/agents/codex-contract-1/runtime-events", {
+      id: "contract-malformed-1",
+      agentId: "codex-contract-1",
+      type: "session.exploded",
+      createdAt: at,
+      payload: {},
+    });
+    expect(refused.status).toBe(400);
+    expect(String(refused.body.error ?? refused.body.reason ?? "")).toContain("event type");
+  });
+
+  test("a replayed event id collapses onto its first landing", async () => {
+    const event = {
+      id: "contract-replay-1",
+      agentId: "codex-contract-1",
+      type: "item.completed",
+      createdAt: at,
+      payload: { kind: "tool", summary: "Bash" },
+    };
+    const first = await publish("/agents/codex-contract-1/runtime-events", event);
+    const again = await publish("/agents/codex-contract-1/runtime-events", event);
+    expect(first.status).toBe(201);
+    expect(again.status).toBe(201);
+    expect(again.body.sequence).toBe(first.body.sequence);
+  });
+
   test("marking seen is shared state, and unknown sessions are 404", async () => {
     const viewedAt = await master.markSeen("codex-contract-1");
     const agent = await master.agent("codex-contract-1");
@@ -479,5 +538,28 @@ describe("the wire contract, executed", () => {
         .find((agent) => agent.id === "codex-contract-1")
         ?.events.some((event) => event.id === "contract-stream-1"),
     ).toBe(true);
+  });
+
+  test("a restarted bridge keeps its deck, its sequence, and its credentials", async () => {
+    // The failure every durable claim exists for: kill the process outright
+    // and bring a fresh one up on the same database.
+    const before = await master.snapshot();
+    bridge.kill();
+    await bridge.exited;
+    bridge = spawnBridge();
+    await waitAlive();
+
+    const after = await master.snapshot();
+    // The Snapshot Sequence is durable: a client holding `before` never sees
+    // a lower number, so nothing it applied rolls back.
+    expect(after.sequence).toBeGreaterThanOrEqual(before.sequence);
+    expect(after.agents.some((agent) => agent.id === "codex-contract-1")).toBe(true);
+    // A settled request stays settled across the restart.
+    const standing = await fetch(
+      `${base}/bridge/v1/agents/codex-contract-ledger/requests/contract-ledger-r1`,
+      { headers: { Authorization: `Bearer ${MASTER}` } },
+    );
+    // SAFETY: the route answers the documented `{status}` shape.
+    expect(((await standing.json()) as { status?: string }).status).toBe("approved");
   });
 });
