@@ -204,33 +204,34 @@ struct SessionView: View {
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
+            // One button, holding what the row used to show: a header is a
+            // place to read, and the actions were crowding the name that
+            // matters. The menu carries them, each exactly as it was.
             if let agent {
-                // The conversation map: a long chat's table of contents. Only
-                // offered once there are exchanges to jump between.
                 let markers = conversationMarkers(viewedEvents(agent))
-                if markers.count > 1 {
-                    Button {
-                        mapOpen = true
-                    } label: {
-                        Image(systemName: "list.bullet")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Palette.muted)
-                    }
-                    .accessibilityLabel("Conversation map")
-                }
-            }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            if let agent {
                 let archived = store.isArchived(agent)
-                Button {
-                    if archived { store.restore(agent) } else { store.archive(agent) }
+                Menu {
+                    if markers.count > 1 {
+                        Button {
+                            mapOpen = true
+                        } label: {
+                            Label("Conversation map", systemImage: "list.bullet")
+                        }
+                    }
+                    Button {
+                        if archived { store.restore(agent) } else { store.archive(agent) }
+                    } label: {
+                        Label(
+                            archived ? "Restore session" : "Archive session",
+                            systemImage: archived ? "tray.and.arrow.up" : "archivebox"
+                        )
+                    }
                 } label: {
-                    Image(systemName: archived ? "tray.and.arrow.up" : "archivebox")
+                    Image(systemName: "ellipsis")
                         .font(.system(size: 15))
                         .foregroundStyle(Palette.muted)
                 }
-                .accessibilityLabel(archived ? "Restore session" : "Archive session")
+                .accessibilityLabel("Session actions")
             }
         }
     }

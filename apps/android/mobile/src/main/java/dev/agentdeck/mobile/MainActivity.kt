@@ -1862,27 +1862,55 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                             }
                         }
                     }
+                    // One button, holding what the row of four used to show:
+                    // a header is a place to read, and the actions were
+                    // crowding the name that matters. The menu carries them —
+                    // map, pause, stop, archive — each exactly as it was.
                     HeaderPill {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // The conversation map: a long chat's table of
-                            // contents. Only offered once there are exchanges
-                            // to jump between.
-                            if (markers.size > 1) IconButton(onClick = { mapOpen = true }, modifier = Modifier.size(40.dp)) {
-                                Icon(Icons.AutoMirrored.Rounded.Toc, "Conversation map", tint = Text, modifier = Modifier.size(20.dp))
+                        Box {
+                            var actionsOpen by remember { mutableStateOf(false) }
+                            IconButton(onClick = { actionsOpen = true }, modifier = Modifier.size(44.dp)) {
+                                Icon(Icons.Rounded.MoreVert, "Session actions", tint = Text, modifier = Modifier.size(20.dp))
                             }
-                            val pauseAction = if (isPaused) "resume" else "pause"
-                            if (supports(pauseAction)) IconButton(onClick = { onControl(pauseAction, null) }, enabled = !busy, modifier = Modifier.size(40.dp)) {
-                                Icon(if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, if (isPaused) "Resume agent" else "Pause agent", tint = Text, modifier = Modifier.size(20.dp))
-                            }
-                            if (supports("stop")) IconButton(onClick = { confirmingStop = true }, enabled = !busy, modifier = Modifier.size(40.dp)) {
-                                Icon(Icons.Rounded.Stop, "Stop agent", tint = Danger, modifier = Modifier.size(20.dp))
-                            }
-                            IconButton(onClick = onArchiveToggle, modifier = Modifier.size(40.dp)) {
-                                Icon(
-                                    if (archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
-                                    if (archived) "Restore session" else "Archive session",
-                                    tint = Muted,
-                                    modifier = Modifier.size(19.dp),
+                            DropdownMenu(
+                                expanded = actionsOpen,
+                                onDismissRequest = { actionsOpen = false },
+                                containerColor = SurfaceRaised,
+                            ) {
+                                if (markers.size > 1) DropdownMenuItem(
+                                    text = { Text("Conversation map", color = Text, fontSize = 13.sp) },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Toc, null, tint = Muted, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        actionsOpen = false
+                                        mapOpen = true
+                                    },
+                                )
+                                val pauseAction = if (isPaused) "resume" else "pause"
+                                if (supports(pauseAction)) DropdownMenuItem(
+                                    text = { Text(if (isPaused) "Resume agent" else "Pause agent", color = Text, fontSize = 13.sp) },
+                                    leadingIcon = { Icon(if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, null, tint = Muted, modifier = Modifier.size(18.dp)) },
+                                    enabled = !busy,
+                                    onClick = {
+                                        actionsOpen = false
+                                        onControl(pauseAction, null)
+                                    },
+                                )
+                                if (supports("stop")) DropdownMenuItem(
+                                    text = { Text("Stop agent", color = Danger, fontSize = 13.sp) },
+                                    leadingIcon = { Icon(Icons.Rounded.Stop, null, tint = Danger, modifier = Modifier.size(18.dp)) },
+                                    enabled = !busy,
+                                    onClick = {
+                                        actionsOpen = false
+                                        confirmingStop = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(if (archived) "Restore session" else "Archive session", color = Text, fontSize = 13.sp) },
+                                    leadingIcon = { Icon(if (archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive, null, tint = Muted, modifier = Modifier.size(18.dp)) },
+                                    onClick = {
+                                        actionsOpen = false
+                                        onArchiveToggle()
+                                    },
                                 )
                             }
                         }
