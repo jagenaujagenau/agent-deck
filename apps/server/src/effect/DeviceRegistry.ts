@@ -29,7 +29,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 export const PAIRING_FAILURE_LIMIT = 10;
 
 /** How long a minted code stands before it is nobody's. */
-export const PAIRING_CODE_TTL_MS = 10 * 60_000;
+const PAIRING_CODE_TTL_MS = 10 * 60_000;
 
 /**
  * How recently a device must have called for the desk to show it as here.
