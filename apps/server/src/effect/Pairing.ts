@@ -303,9 +303,10 @@ export const pairingPage = (bridgeName: string): string => `<!doctype html>
         }
         devices.forEach(function (device) {
           var item = document.createElement("li");
-          // Presence: a device token touches last_seen_at on every call it
-          // makes, so under two minutes of silence means the app is live.
-          var live = Date.now() - Date.parse(device.lastSeenAt) < 120000;
+          // Presence is the registry's answer, not this page's arithmetic:
+          // the rule that a device token touches last_seen_at on every call
+          // belongs where the touching happens.
+          var live = device.present === true;
           var dot = document.createElement("span");
           dot.className = live ? "presence live" : "presence";
           dot.title = live ? "Connected now" : "Not connected";

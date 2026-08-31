@@ -1,9 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Ref } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { BridgeConfig } from "./Config";
-
-const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
+import { makeDeviceRegistry } from "./DeviceRegistry";
 
 /**
  * Whether the caller presented the master runtime credential.
@@ -80,19 +79,25 @@ export class Authorizer extends Context.Service<
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const config = yield* BridgeConfig;
+      // Its own counter: this registry only recognises credentials, and a
+      // lockout belongs to the one that mints them.
+      const registry = makeDeviceRegistry(
+        { sql, now: () => new Date().toISOString() },
+        yield* Ref.make(0),
+      );
 
+      /**
+       * Whether a paired device holds this scope. Recognition — and the
+       * last-seen touch that comes with it — belongs to the registry; what
+       * is decided here is whether the scopes it holds cover the route.
+       */
       const authorizeDevice = Effect.fn("Authorizer.device")(function* (
         token: string,
         scope: Scope,
       ) {
-        const rows = yield* sql<{ id: string; scopes: string }>`
-          SELECT id, scopes FROM bridge_devices
-          WHERE token_hash = ${tokenHash(token)} AND revoked_at IS NULL`;
-        const device = rows[0];
-        if (device === undefined || !device.scopes.split(",").includes(scope)) return false;
-        yield* sql`UPDATE bridge_devices SET last_seen_at = ${new Date().toISOString()} WHERE id = ${device.id}`;
-        return true;
-      }, Effect.orDie);
+        const device = yield* registry.recognise(token);
+        return device !== undefined && device.scopes.includes(scope);
+      });
 
       const authorize = Effect.fn("Authorizer.authorize")(function* (
         method: string,

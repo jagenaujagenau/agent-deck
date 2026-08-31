@@ -39,13 +39,11 @@ import type {
 } from "./Domain";
 import { StoredAgent, StoredCommand } from "./Domain";
 import { isMessageAction, makeCommandQueue } from "./CommandQueue";
+import { makeDeviceRegistry, type PairedDevice } from "./DeviceRegistry";
 import { makeRequestLedger } from "./RequestLedger";
 import type { PendingQuestion, RequestLedger } from "./RequestLedger";
 import { makeRuntimeEventLog } from "./RuntimeEventLog";
 
-import { createHash, randomBytes, randomInt } from "node:crypto";
-
-const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 const now = () => new Date().toISOString();
 const makeId = () => crypto.randomUUID();
 
@@ -468,9 +466,7 @@ export class BridgeState extends Context.Service<
     readonly revokeDevice: (token: string) => Effect.Effect<boolean>;
     readonly revokeDeviceById: (id: string) => Effect.Effect<boolean>;
     /** The devices holding a live credential, newest activity first. */
-    readonly devices: Effect.Effect<
-      ReadonlyArray<{ id: string; name: string; createdAt: string; lastSeenAt: string }>
-    >;
+    readonly devices: Effect.Effect<ReadonlyArray<PairedDevice>>;
     readonly createPairingCode: Effect.Effect<{ code: string; expiresAt: string }>;
   }
 >()("agent-deck/server/BridgeState") {
@@ -1199,76 +1195,17 @@ export class BridgeState extends Context.Service<
         return out;
       });
 
-      const pairingFailuresRef = yield* Ref.make(0);
-
       /**
-       * Pairing consumes a one-time code. Repeated failures lock pairing until
-       * a new code is issued, so a six-digit code cannot be brute-forced.
+       * The one owner of paired devices and the codes that mint them. Built
+       * here so the failure counter lives as long as the bridge does: a
+       * lockout that reset on every call would not be one.
        */
-      const pair = Effect.fn("BridgeState.pair")(function* (code: string, deviceName: string) {
-        if ((yield* Ref.get(pairingFailuresRef)) >= 10) return undefined;
-        const codeHash = tokenHash(code);
-        const rows = yield* sql<{ expires_at: string; consumed_at: string | null }>`
-          SELECT expires_at, consumed_at FROM bridge_pairing_codes WHERE code_hash = ${codeHash}`;
-        const pairing = rows[0];
-        if (!pairing || pairing.consumed_at || Date.parse(pairing.expires_at) < Date.now()) {
-          yield* Ref.update(pairingFailuresRef, (count) => count + 1);
-          return undefined;
-        }
-        yield* Ref.set(pairingFailuresRef, 0);
-        const id = makeId();
-        const token = `${randomBytes(24).toString("base64url")}.${id}`;
-        const timestamp = now();
-        yield* sql`UPDATE bridge_pairing_codes SET consumed_at = ${timestamp} WHERE code_hash = ${codeHash}`;
-        yield* sql`INSERT INTO bridge_devices (id, name, token_hash, created_at, last_seen_at)
-                   VALUES (${id}, ${deviceName}, ${tokenHash(token)}, ${timestamp}, ${timestamp})`;
-        return { id, token, name: deviceName, createdAt: timestamp };
-      }, Effect.orDie);
-
-      const revokeDevice = Effect.fn("BridgeState.revokeDevice")(function* (token: string) {
-        const before = yield* sql<{ n: number }>`
-          SELECT COUNT(*) AS n FROM bridge_devices WHERE token_hash = ${tokenHash(token)} AND revoked_at IS NULL`;
-        if ((before[0]?.n ?? 0) === 0) return false;
-        yield* sql`UPDATE bridge_devices SET revoked_at = ${now()}
-                   WHERE token_hash = ${tokenHash(token)} AND revoked_at IS NULL`;
-        return true;
-      }, Effect.orDie);
-
-      const revokeDeviceById = Effect.fn("BridgeState.revokeDeviceById")(function* (id: string) {
-        const before = yield* sql<{ n: number }>`
-          SELECT COUNT(*) AS n FROM bridge_devices WHERE id = ${id} AND revoked_at IS NULL`;
-        if ((before[0]?.n ?? 0) === 0) return false;
-        yield* sql`UPDATE bridge_devices SET revoked_at = ${now()}
-                   WHERE id = ${id} AND revoked_at IS NULL`;
-        return true;
-      }, Effect.orDie);
-
-      const devices = Effect.gen(function* () {
-        const rows = yield* sql<{
-          id: string;
-          name: string;
-          created_at: string;
-          last_seen_at: string;
-        }>`
-          SELECT id, name, created_at, last_seen_at FROM bridge_devices
-          WHERE revoked_at IS NULL ORDER BY last_seen_at DESC`;
-        return rows.map((row) => ({
-          id: row.id,
-          name: row.name,
-          createdAt: row.created_at,
-          lastSeenAt: row.last_seen_at,
-        }));
-      }).pipe(Effect.orDie);
-
-      const createPairingCode = Effect.gen(function* () {
-        yield* sql`DELETE FROM bridge_pairing_codes WHERE consumed_at IS NULL`;
-        const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
-        const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
-        yield* sql`INSERT INTO bridge_pairing_codes (code_hash, expires_at) VALUES (${tokenHash(code)}, ${expiresAt})`;
-        yield* Ref.set(pairingFailuresRef, 0);
-        yield* Effect.log(`Pairing code: ${code} (expires in 10 minutes)`);
-        return { code, expiresAt };
-      }).pipe(Effect.orDie);
+      const devices = makeDeviceRegistry({ sql, now }, yield* Ref.make(0));
+      const pair = devices.pair;
+      const revokeDevice = devices.revokeByToken;
+      const revokeDeviceById = devices.revokeById;
+      const createPairingCode = devices.issueCode();
+      const deviceList = devices.list();
 
       // A bridge with no paired device is unreachable from a phone, so a code
       // is issued on every start — the same as the deployed bridge.
@@ -1301,7 +1238,7 @@ export class BridgeState extends Context.Service<
         pair,
         revokeDevice,
         revokeDeviceById,
-        devices,
+        devices: deviceList,
         createPairingCode,
       });
     }),
