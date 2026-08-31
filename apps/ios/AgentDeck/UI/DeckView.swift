@@ -116,52 +116,60 @@ struct DeckView: View {
     private var list: some View {
         @Bindable var store = store
         return ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8, pinnedViews: []) {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
                 DeckHeader(now: now)
                 FilterChips(filter: $store.filter, attention: store.attentionCount(now: now))
-                    .padding(.bottom, 4)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
 
                 if let failure = store.failure, store.snapshot != nil {
                     StaleBanner(failure: failure)
+                        .padding(.bottom, 8)
                 }
 
-                let groups = store.groups(now: now)
-                if groups.isEmpty {
+                // A chat list, not a dashboard: one flat run of sessions in
+                // the deck's own priority order, each reading as a
+                // conversation — who, the last thing said, when. The state
+                // taxonomy still orders the list; the rows wear it as colour
+                // and badges instead of section furniture.
+                let rows = store.groups(now: now).flatMap { group in
+                    group.agents.map { (agent: $0, state: group.state) }
+                }
+                if rows.isEmpty {
                     Text("No agents in this view")
                         .font(.system(size: 14))
                         .foregroundStyle(Palette.muted)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 32)
                 } else {
-                    ForEach(sections(of: groups), id: \.state) { section in
-                        StateHeader(state: section.state, count: section.count)
-                        ForEach(section.groups) { group in
-                            ProjectHeader(project: group.project, count: group.agents.count)
-                            ForEach(group.agents) { agent in
-                                CardSwipe(
-                                    // History is already the shelf things end up
-                                    // on; archiving from it has nowhere to put them.
-                                    onArchive: store.filter == .history ? nil : {
-                                        withAnimation(.easeOut(duration: 0.2)) { store.archive(agent) }
-                                    },
-                                    // Dismiss asks the bridge itself to drop the
-                                    // card. Offline sessions only: the bridge
-                                    // resurrects a live one on its next beat,
-                                    // which would read as a broken gesture.
-                                    onDismiss: agent.state == "offline" ? {
-                                        withAnimation(.easeOut(duration: 0.2)) { store.dismiss(agentId: agent.id) }
-                                    } : nil
-                                ) {
-                                    Button { selected = agent.id } label: {
-                                        AgentCard(agent: agent, state: group.state)
-                                    }
-                                    .buttonStyle(PressableCard())
-                                }
-                                // Identity per session, so a row's swipe state
-                                // belongs to the session and not to the slot it
-                                // happened to occupy.
-                                .id(agent.id)
+                    ForEach(Array(rows.enumerated()), id: \.element.agent.id) { index, row in
+                        CardSwipe(
+                            // History is already the shelf things end up
+                            // on; archiving from it has nowhere to put them.
+                            onArchive: store.filter == .history ? nil : {
+                                withAnimation(.easeOut(duration: 0.2)) { store.archive(row.agent) }
+                            },
+                            // Dismiss asks the bridge itself to drop the
+                            // card. Offline sessions only: the bridge
+                            // resurrects a live one on its next beat,
+                            // which would read as a broken gesture.
+                            onDismiss: row.agent.state == "offline" ? {
+                                withAnimation(.easeOut(duration: 0.2)) { store.dismiss(agentId: row.agent.id) }
+                            } : nil
+                        ) {
+                            Button { selected = row.agent.id } label: {
+                                ChatRow(agent: row.agent, state: row.state)
                             }
+                            .buttonStyle(PressableCard())
+                        }
+                        // Identity per session, so a row's swipe state
+                        // belongs to the session and not to the slot it
+                        // happened to occupy.
+                        .id(row.agent.id)
+                        if index < rows.count - 1 {
+                            Divider()
+                                .overlay(Palette.line)
+                                .padding(.leading, 68)
                         }
                     }
                 }
@@ -174,24 +182,6 @@ struct DeckView: View {
         .scrollIndicators(.hidden)
     }
 
-    private struct Section {
-        var state: HomeAgentState
-        var groups: [DeckGroup]
-        var count: Int
-    }
-
-    private func sections(of groups: [DeckGroup]) -> [Section] {
-        var sections: [Section] = []
-        for group in groups {
-            if let last = sections.indices.last, sections[last].state == group.state {
-                sections[last].groups.append(group)
-                sections[last].count += group.agents.count
-            } else {
-                sections.append(Section(state: group.state, groups: [group], count: group.agents.count))
-            }
-        }
-        return sections
-    }
 }
 
 enum DeckDestination { case agents, usage }
@@ -404,49 +394,6 @@ private struct FilterChips: View {
             }
             Spacer(minLength: 0)
         }
-    }
-}
-
-private struct StateHeader: View {
-    var state: HomeAgentState
-    var count: Int
-
-    var body: some View {
-        HStack {
-            Text(state.sectionLabel)
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.1)
-                .foregroundStyle(state.color)
-            Spacer()
-            Text("\(count)")
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.muted)
-        }
-        .padding(.top, 10)
-        .padding(.bottom, 1)
-    }
-}
-
-private struct ProjectHeader: View {
-    var project: String
-    var count: Int
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "folder")
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.muted)
-            Text(project)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Palette.muted)
-                .lineLimit(1)
-            Spacer(minLength: 6)
-            Text(count == 1 ? "1 session" : "\(count) sessions")
-                .font(.system(size: 11))
-                .foregroundStyle(Palette.muted)
-        }
-        .padding(.top, 7)
-        .padding(.bottom, 1)
     }
 }
 

@@ -61,175 +61,121 @@ func sessionSuffix(_ agent: Agent) -> String {
     return " \u{00B7} \(last)"
 }
 
-/// The card, in the two densities the deck uses: full for anything live or
-/// waiting, compact for what has already settled.
-struct AgentCard: View {
+/// The chat's name. The project is the conversation a person recognises; the
+/// short session suffix keeps two sessions in one project tellable apart, and
+/// the harness only names the row when the session has no project at all.
+func chatTitle(_ agent: Agent) -> String {
+    (agent.project.isEmpty ? agent.harness.label : agent.project) + sessionSuffix(agent)
+}
+
+/// The preview line: the last thing said in this conversation. A session that
+/// is asking shows its question; a running one shows what it is doing — the
+/// "typing…" of an agent; otherwise the newest message speaks, prefixed
+/// "You:" when the person spoke last, exactly as a chat list would.
+/// Mirrored from `chatPreview` in the Android `MainActivity`.
+func chatPreview(_ agent: Agent, state: HomeAgentState) -> String {
+    // The old card wore a status chip that said "Approval required"; without
+    // it, a bare command in amber would not say what is being asked of you.
+    if state == .approvalRequired { return "Approve? \(usefulTask(agent))" }
+    if state.attention || state == .failed { return usefulTask(agent) }
+    if state == .running { return latestReasoningPreview(agent) ?? agentCardActivity(agent) }
+    guard let last = conversationEntries(agent.events).last,
+          let line = last.content
+              .split(separator: "\n", omittingEmptySubsequences: true)
+              .map({ String($0).trimmed })
+              .first(where: { !$0.isEmpty })
+    else { return usefulTask(agent) }
+    return last.role == .user ? "You: \(line)" : line
+}
+
+/// The current train of thought of a running session, clipped for a preview
+/// line. Mirrored (loosely — the markdown stripping is lighter) from
+/// `latestReasoningPreview` in the Android `AgentCardPolicy`.
+func latestReasoningPreview(_ agent: Agent, limit: Int = 120) -> String? {
+    guard agent.state == "running" else { return nil }
+    guard let thought = agent.events
+        .filter({ $0.kind == "thought" && $0.summary != "Received instruction" })
+        .max(by: { $0.createdAt < $1.createdAt }),
+        let reasoning = thought.detail?
+            .replacingOccurrences(of: "`", with: "")
+            .replacingOccurrences(of: "**", with: "")
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map({ String($0).trimmed })
+            .first(where: { !$0.isEmpty && !$0.hasPrefix("#") })
+    else { return nil }
+    if reasoning.count <= limit { return reasoning }
+    return String(reasoning.prefix(limit - 1)).trimmed + "…"
+}
+
+/// One session as a chat: who, the last thing said, and when.
+///
+/// The deck used to be a dashboard of cards under section headings; a person
+/// scanning for "does anything need me" had to read furniture before rows.
+/// A chat list answers the same question the way every messaging app has
+/// trained a thumb to read it — avatar, name, preview, time, badge — and the
+/// session states become the colours of the preview line: amber when the
+/// session is asking, signal while it types, quiet when it is done and read.
+struct ChatRow: View {
     var agent: Agent
     var state: HomeAgentState
 
-    private var harness: Harness { agent.harness }
+    /// Unread, in this deck's terms: the session wants a person, or finished
+    /// and nobody has looked. Both earn the bold title and the badge.
+    private var unread: Bool { state.attention || state == .done }
+
+    private var previewColor: Color {
+        switch state {
+        case .failed: Palette.danger
+        case _ where state.attention: Palette.amber
+        case .running: Palette.signal
+        case .done: Palette.text.opacity(0.87)
+        default: Palette.muted
+        }
+    }
 
     var body: some View {
-        if state.isCompact {
-            compact
-        } else {
-            full
-        }
-    }
-
-    // MARK: - Full
-
-    private var full: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                HarnessMark(harness: harness, status: state.color, running: agent.state == "running", diameter: 44)
-                Text(harness.label + sessionSuffix(agent))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Spacer(minLength: 6)
-                // The status never truncates: "Approval requir…" is the one
-                // word on the card that must survive a narrow screen.
-                StatusLabel(label: state.label, color: state.color)
-                    .fixedSize()
-            }
-
-            Text(usefulTask(agent))
-                .font(.system(size: 14))
-                .lineSpacing(4)
-                .foregroundStyle(state.attention ? state.color : Palette.text.opacity(0.9))
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, minHeight: 36, alignment: .topLeading)
-
-            if let activity = activityLine {
-                HStack(spacing: 7) {
-                    Image(systemName: state.symbol)
-                        .font(.system(size: 12))
-                        .foregroundStyle(state.color)
-                    Text(activity)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
-                }
-                .frame(height: 18)
-            }
-
-            HStack(spacing: 7) {
-                ProviderMark(model: agent.model, harness: harness)
-                Text(humanizeModelId(agent.model))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
-                Spacer(minLength: 3)
-                Text(Timestamps.freshness(agent.lastSeenAt))
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted.opacity(0.8))
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.muted.opacity(0.7))
-            }
-        }
-        .padding(17)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 22).fill(state.attention ? Palette.surfaceRaised : Palette.surface))
-        .overlay {
-            if state.attention {
-                RoundedRectangle(cornerRadius: 22).stroke(state.color.opacity(0.28), lineWidth: 1)
-            }
-        }
-    }
-
-    // MARK: - Compact
-
-    private var compact: some View {
-        HStack(spacing: 11) {
-            HarnessMark(harness: harness, status: state.color, running: false, diameter: 40)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 7) {
-                    Text(harness.label + sessionSuffix(agent))
-                        .font(.system(size: 14, weight: .semibold))
+        HStack(spacing: 12) {
+            HarnessMark(harness: agent.harness, status: state.color, running: agent.state == "running", diameter: 52)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 0) {
+                    Text(chatTitle(agent))
+                        .font(.system(size: 15, weight: unread ? .bold : .semibold))
                         .foregroundStyle(Palette.text)
                         .lineLimit(1)
-                    Text(Timestamps.freshness(agent.lastSeenAt))
+                    Spacer(minLength: 8)
+                    // The read receipt: finished work someone has already seen.
+                    // SF Symbols has no double check, so this draws the pair.
+                    if agent.state == "idle", !unread {
+                        ZStack {
+                            Image(systemName: "checkmark").offset(x: -3)
+                            Image(systemName: "checkmark").offset(x: 3)
+                        }
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Palette.blue.opacity(0.75))
+                        .padding(.trailing, 7)
+                    }
+                    Text(Timestamps.freshness(SeenPolicy.activityAt(agent)))
                         .font(.system(size: 11))
-                        .foregroundStyle(Palette.muted)
+                        .foregroundStyle(unread ? state.color : Palette.muted)
                 }
-                Text(usefulTask(agent))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(chatPreview(agent, state: state))
+                        .font(.system(size: 13))
+                        .foregroundStyle(previewColor)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if unread {
+                        Circle().fill(state.color).frame(width: 9, height: 9)
+                    }
+                }
             }
-            Spacer(minLength: 8)
-            // The one compact card that carries a status: an unseen finish is
-            // the compact shelf's only news, and it should read as news until
-            // the session is opened.
-            if state == .done {
-                StatusLabel(label: "Done", color: Palette.blue)
-                    .fixedSize()
-            }
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Palette.muted.opacity(0.7))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 18).fill(state == .done ? Palette.surfaceRaised : Palette.surface))
-        .overlay {
-            if state == .done {
-                RoundedRectangle(cornerRadius: 18).stroke(Palette.blue.opacity(0.28), lineWidth: 1)
-            }
-        }
-    }
-
-    /// Nothing is reserved for absent content, and nothing restates the
-    /// headline: a card that says the same thing twice has wasted the only two
-    /// lines it gets.
-    private var activityLine: String? {
-        let activity = agentCardActivity(agent)
-        return normalize(activity) == normalize(usefulTask(agent)) ? nil : activity
-    }
-
-    private func normalize(_ value: String) -> String {
-        var text = value.lowercased()
-        for prefix in ["running ", "using "] where text.hasPrefix(prefix) { text = String(text.dropFirst(prefix.count)) }
-        for suffix in [" finished", " completed"] where text.hasSuffix(suffix) { text = String(text.dropLast(suffix.count)) }
-        return text.trimmed
-    }
-}
-
-struct StatusLabel: View {
-    var label: String
-    var color: Color
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(color).frame(width: 7, height: 7)
-            Text(label)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(color)
-                .lineLimit(1)
-        }
-    }
-}
-
-extension HomeAgentState {
-    var isCompact: Bool {
-        switch self {
-        case .done, .paused, .recentlyCompleted, .history: true
-        default: false
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .approvalRequired: "checkmark.shield"
-        case .question: "questionmark.circle"
-        case .inputRequired: "keyboard"
-        case .failed: "exclamationmark.triangle"
-        case .done: "checkmark.circle"
-        default: "bolt.fill"
-        }
+        .contentShape(Rectangle())
+        // Opaque on purpose: the swipe reveal underneath must only show while
+        // a swipe is actually uncovering it.
+        .background(Palette.ink)
     }
 }

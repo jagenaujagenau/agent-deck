@@ -632,16 +632,14 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                 val deckAgents = data.agents.filterNot { it.id in dismissedAgents }
                 val homeNow = Instant.now()
                 val deck = homeDeck(deckAgents, archivedAgents, seenMarks, homeNow)
-                val sections = deck.sections(filter)
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = DeckNavSpace),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item { AgentsHeader(deck, connected = state is BridgeState.Ready, bridgeName = data.bridge.name) }
                     item {
                         Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp).horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             val attention = deck.attention
@@ -662,34 +660,40 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
                         }
                     }
                     if (state is BridgeState.Failed) {
-                        item { OfflineBanner((state as BridgeState.Failed).message) }
+                        item { Box(Modifier.padding(vertical = 4.dp)) { OfflineBanner((state as BridgeState.Failed).message) } }
                     }
                     // A refused dismissal already put the card back; this says why.
                     dismissError?.let { message ->
-                        item { Text("Dismiss failed · $message", color = Danger, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        item { Text("Dismiss failed · $message", color = Danger, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(vertical = 4.dp)) }
                     }
-                    sections.forEach { section ->
-                        val homeState = section.state
-                        run {
-                            item(key = "state:${homeState.name}") { HomeStateHeader(homeState, section.count) }
-                            section.projects.forEach { group ->
-                                item(key = "${homeState.name}:project:${group.project}") { ProjectGroupHeader(group.project, group.cards.map { it.agent }, showAttention = false) }
-                                items(group.cards, key = { "${homeState.name}:${it.agent.id}" }) { card ->
-                                    val agent = card.agent
-                                    ArchivableAgentCard(
-                                        agent = agent,
-                                        homeState = homeState,
-                                        busy = busyAgent == agent.id,
-                                        archiveEnabled = filter != HomeFilter.History,
-                                        onArchive = { vm.archive(agent) },
-                                        onDismissSession = { vm.dismiss(agent) },
-                                        onClick = { selectedAgent = agent },
-                                    )
-                                }
+                    // A chat list, not a dashboard: one flat run of sessions in
+                    // the deck's own priority order, each reading as a
+                    // conversation — who, the last thing said, when. The state
+                    // taxonomy still orders the list; the rows wear it as
+                    // colour and badges instead of section furniture.
+                    val rows = deck.cards.filter { filter.includes(it.state) }
+                    itemsIndexed(rows, key = { _, card -> card.agent.id }) { index, card ->
+                        val agent = card.agent
+                        Column {
+                            ArchivableAgentCard(
+                                agent = agent,
+                                homeState = card.state,
+                                busy = busyAgent == agent.id,
+                                archiveEnabled = filter != HomeFilter.History,
+                                onArchive = { vm.archive(agent) },
+                                onDismissSession = { vm.dismiss(agent) },
+                                onClick = { selectedAgent = agent },
+                            )
+                            if (index < rows.lastIndex) {
+                                HorizontalDivider(
+                                    color = Line,
+                                    thickness = 0.6.dp,
+                                    modifier = Modifier.padding(start = 68.dp),
+                                )
                             }
                         }
                     }
-                    if (sections.isEmpty()) {
+                    if (rows.isEmpty()) {
                         item { Text("No agents in this view", color = Muted, modifier = Modifier.padding(vertical = 32.dp)) }
                     }
                 }
@@ -1146,24 +1150,6 @@ private fun AgentsHeader(deck: HomeDeck, connected: Boolean, bridgeName: String)
     }
 }
 
-@Composable
-private fun HomeStateHeader(state: HomeAgentState, count: Int) {
-    val color = when {
-        state == HomeAgentState.Failed -> Danger
-        state.attention -> Amber
-        state == HomeAgentState.Running -> Signal
-        // Done shares completion's blue: it is the same news, just unread.
-        state == HomeAgentState.Done -> Blue
-        state == HomeAgentState.RecentlyCompleted -> Blue
-        else -> Muted
-    }
-    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(state.sectionLabel, color = color, fontSize = 10.sp, letterSpacing = 1.1.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.weight(1f))
-        Text(count.toString(), color = Muted, fontSize = 11.sp)
-    }
-}
-
 /**
  * A runtime, with its own mark where one exists.
  *
@@ -1272,43 +1258,10 @@ private fun usefulTask(agent: Agent): String {
     return agent.task
 }
 
-/**
- * Whether the activity row would only say the headline again.
- *
- * Both are derived from `agent.task` whenever there is no instruction to show,
- * and they dress it differently - "Running Read" over "Using Read", "Grep
- * finished · continuing" over "Grep finished". Comparing the strings misses
- * that; comparing what they are about catches it.
- */
-private fun restatesHeadline(headline: String, activity: String): Boolean {
-    fun core(value: String) = value.lowercase()
-        .substringBefore(" · ")
-        .removePrefix("running ")
-        .removePrefix("using ")
-        .removeSuffix(" finished")
-        .removeSuffix(" completed")
-        .trim()
-    return core(headline) == core(activity)
-}
-
-@Composable
-private fun ProjectGroupHeader(project: String, agents: List<Agent>, showAttention: Boolean = true) {
-    val waiting = if (showAttention) agents.count { it.state == "waiting" || it.state == "error" } else 0
-    Row(Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Rounded.FolderOpen, null, tint = Muted, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(7.dp))
-        Text(project, color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        Text(if (waiting > 0) "$waiting need you" else "${agents.size} session${if (agents.size == 1) "" else "s"}", color = if (waiting > 0) Amber else Muted, fontSize = 11.sp)
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ArchivableAgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, archiveEnabled: Boolean, onArchive: () -> Unit, onDismissSession: () -> Unit, onClick: () -> Unit) {
-    val content: @Composable () -> Unit = {
-        if (homeState.compact) CompactAgentCard(agent, homeState, busy, onClick)
-        else AgentCard(agent, homeState, busy, onClick)
-    }
+    val content: @Composable () -> Unit = { ChatRow(agent, homeState, busy, onClick) }
     // Only an ended session can be dismissed from the bridge: a live one would
     // reappear on its next heartbeat, which reads as the gesture failing.
     val dismissible = agent.state == "offline"
@@ -1333,7 +1286,7 @@ private fun ArchivableAgentCard(agent: Agent, homeState: HomeAgentState, busy: B
             // Archive hides locally, dismiss removes from every surface - the
             // reveal says which one this swipe is before the hand commits.
             if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
-                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp)).background(Danger.copy(alpha = 0.14f)).padding(start = 22.dp), contentAlignment = Alignment.CenterStart) {
+                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(Danger.copy(alpha = 0.14f)).padding(start = 22.dp), contentAlignment = Alignment.CenterStart) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.DeleteOutline, "Dismiss", tint = Danger)
                         Spacer(Modifier.width(8.dp))
@@ -1341,7 +1294,7 @@ private fun ArchivableAgentCard(agent: Agent, homeState: HomeAgentState, busy: B
                     }
                 }
             } else {
-                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp)).background(Blue.copy(alpha = 0.14f)).padding(end = 22.dp), contentAlignment = Alignment.CenterEnd) {
+                Box(Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(Blue.copy(alpha = 0.14f)).padding(end = 22.dp), contentAlignment = Alignment.CenterEnd) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Archive", color = Blue, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.width(8.dp))
@@ -1363,133 +1316,112 @@ private fun homeStateColor(state: HomeAgentState) = when {
     else -> Muted
 }
 
+/**
+ * One session as a chat: who, the last thing said, and when.
+ *
+ * The deck used to be a dashboard of cards under section headings; a person
+ * scanning for "does anything need me" had to read furniture before rows.
+ * A chat list answers the same question the way every messaging app has
+ * trained a thumb to read it — avatar, name, preview, time, badge — and the
+ * session states become the colours of the preview line: amber when the
+ * session is asking, signal while it types, quiet when it is done and read.
+ */
 @Composable
-private fun AgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, onClick: () -> Unit) {
-    val statusColor = homeStateColor(homeState)
+private fun ChatRow(agent: Agent, homeState: HomeAgentState, busy: Boolean, onClick: () -> Unit) {
     val harness = remember(agent.name) { harnessFor(agent) }
-    val provider = remember(agent.name, agent.model) { providerFor(agent) }
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.96f else 1f, tween(120), label = "card-press")
-    val progress by animateFloatAsState((agent.progress ?: 0.0).toFloat(), label = "agent-progress")
-    val activity = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { agentCardActivity(agent) }
-    val headline = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { usefulTask(agent) }
-    // With no instruction to show, the headline falls back to describing the
-    // current step - which is what the activity row underneath already says.
-    // Show the row only when it adds something.
-    val showActivity = !restatesHeadline(headline, activity)
-    val reasoningPreview = remember(agent.state, agent.events) { latestReasoningPreview(agent) }
-    Surface(
-        modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(22.dp))
-            .clickable(interactionSource = interaction, indication = LocalIndication.current, onClick = onClick),
-        shape = RoundedCornerShape(22.dp),
-        color = if (homeState.attention) SurfaceRaised else Surface,
-        border = if (homeState.attention) BorderStroke(1.dp, statusColor.copy(alpha = 0.28f)) else null,
-        tonalElevation = 0.dp,
+    val statusColor = homeStateColor(homeState)
+    // Unread, in this deck's terms: the session wants a person, or finished
+    // and nobody has looked. Both earn the bold title and the badge.
+    val unread = homeState.attention || homeState == HomeAgentState.Done
+    val preview = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) {
+        chatPreview(agent, homeState)
+    }
+    val previewColor = when {
+        homeState == HomeAgentState.Failed -> Danger
+        homeState.attention -> Amber
+        homeState == HomeAgentState.Running -> Signal
+        homeState == HomeAgentState.Done -> Text.copy(alpha = 0.87f)
+        else -> Muted
+    }
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            // Opaque on purpose: the swipe reveal underneath must only show
+            // while a swipe is actually uncovering it.
+            .background(Ink)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                HarnessMark(harness, running = agent.state == "running", statusColor = statusColor)
-                Spacer(Modifier.width(13.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(harness.label + sessionSuffix(agent), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else StatusLabel(homeState.label, statusColor)
-            }
-            Column(Modifier.heightIn(min = 40.dp)) {
+        HarnessMark(harness, running = agent.state == "running", statusColor = statusColor, diameter = 52.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    headline,
-                    color = if (homeState.attention) statusColor else Text.copy(alpha = 0.9f),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    maxLines = if (reasoningPreview == null) 2 else 1,
+                    chatTitle(agent, harness),
+                    fontSize = 15.sp,
+                    fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
+                    color = Text,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                reasoningPreview?.let {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Psychology, "Current reasoning", tint = Blue, modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text(it, color = Blue.copy(alpha = 0.9f), fontSize = 12.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                Spacer(Modifier.width(8.dp))
+                // The read receipt: finished work someone has already seen.
+                if (agent.state == "idle" && !unread) {
+                    Icon(Icons.Rounded.DoneAll, "Seen", tint = Blue.copy(alpha = 0.75f), modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(3.dp))
                 }
+                Text(
+                    cardFreshness(latestActivityAt(agent)),
+                    color = if (unread) statusColor else Muted,
+                    fontSize = 11.sp,
+                )
             }
-            // Nothing reserved when there is nothing to draw: an empty row of
-            // reserved height reads as a missing element rather than a shorter card.
-            if (agent.progress != null || showActivity) Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterStart) {
-                if (agent.progress != null) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier.weight(1f).height(4.dp).clip(CircleShape),
-                            color = statusColor,
-                            trackColor = Line,
-                            drawStopIndicator = {},
-                        )
-                        Spacer(Modifier.width(9.dp))
-                        Text("${(progress * 100).roundToInt()}%", color = Muted, fontSize = 11.sp)
-                    }
-                } else if (showActivity) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            when (homeState) {
-                                HomeAgentState.ApprovalRequired -> Icons.Rounded.VerifiedUser
-                                HomeAgentState.Question -> Icons.AutoMirrored.Rounded.HelpOutline
-                                HomeAgentState.InputRequired -> Icons.Rounded.Keyboard
-                                HomeAgentState.Failed -> Icons.Rounded.ErrorOutline
-                                else -> Icons.Rounded.Bolt
-                            },
-                            null,
-                            tint = statusColor,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Spacer(Modifier.width(7.dp))
-                        Text(activity, color = Muted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    preview,
+                    color = previewColor,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                } else if (unread) {
+                    Box(Modifier.size(9.dp).clip(CircleShape).background(statusColor))
                 }
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                ProviderMark(provider)
-                Spacer(Modifier.width(7.dp))
-                Text(provider.model, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Spacer(Modifier.width(3.dp))
-                Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(17.dp).offset(x = 1.dp))
             }
         }
     }
 }
 
-@Composable
-private fun CompactAgentCard(agent: Agent, homeState: HomeAgentState, busy: Boolean, onClick: () -> Unit) {
-    val harness = remember(agent.name) { harnessFor(agent) }
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, tween(120), label = "compact-card-press")
-    val color = homeStateColor(homeState)
-    Surface(
-        modifier = Modifier.fillMaxWidth().graphicsLayer { scaleX = scale; scaleY = scale }
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(interactionSource = interaction, indication = LocalIndication.current, onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
-        color = Surface,
-    ) {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            HarnessMark(harness, running = false, statusColor = color, diameter = 40.dp)
-            Spacer(Modifier.width(11.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(harness.label + sessionSuffix(agent), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                    Spacer(Modifier.width(7.dp))
-                    Text(cardFreshness(agent.lastSeenAt), color = Muted, fontSize = 11.sp)
-                }
-                Text(usefulTask(agent), color = Muted, fontSize = 12.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.width(8.dp))
-            if (busy) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
-            else Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(17.dp))
-        }
-    }
+/**
+ * The chat's name. The project is the conversation a person recognises; the
+ * short session suffix keeps two sessions in one project tellable apart, and
+ * the harness only names the row when the session has no project at all.
+ */
+private fun chatTitle(agent: Agent, harness: AgentHarness): String =
+    (agent.project.ifBlank { harness.label }) + sessionSuffix(agent)
+
+/**
+ * The preview line: the last thing said in this conversation. A session that
+ * is asking shows its question; a running one shows what it is doing — the
+ * "typing…" of an agent; otherwise the newest message speaks, prefixed
+ * "You:" when the person spoke last, exactly as a chat list would.
+ */
+private fun chatPreview(agent: Agent, state: HomeAgentState): String {
+    // The old card wore a status chip that said "Approval required"; without
+    // it, a bare command in amber would not say what is being asked of you.
+    if (state == HomeAgentState.ApprovalRequired) return "Approve? ${usefulTask(agent)}"
+    if (state.attention || state == HomeAgentState.Failed) return usefulTask(agent)
+    if (state == HomeAgentState.Running) return latestReasoningPreview(agent) ?: agentCardActivity(agent)
+    val last = conversationEntries(agent.events).lastOrNull() ?: return usefulTask(agent)
+    val line = last.content.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return usefulTask(agent)
+    return if (last.role == ConversationRole.User) "You: $line" else line
 }
 
 @Composable
