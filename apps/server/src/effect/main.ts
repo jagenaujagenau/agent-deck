@@ -26,7 +26,11 @@ const AuthMiddleware = HttpRouter.use(
         const path = new URL(request.url, "http://bridge").pathname;
         // Pairing is how a device obtains a credential; it cannot present one,
         // and liveness is polled by the service wrapper, which has none either.
-        if (path === "/" || path.endsWith("/pair")) return yield* httpApp;
+        // The /pair page and its endpoints answer only to loopback — each
+        // handler checks the peer itself — so bearer auth stands aside here.
+        if (path === "/" || path.endsWith("/pair") || path.startsWith("/pair/")) {
+          return yield* httpApp;
+        }
         const allowed = yield* auth.authorize(
           request.method,
           path,

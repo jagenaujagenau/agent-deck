@@ -62,14 +62,34 @@ struct DeckView: View {
         // session it is about, so the deck answers the same link the Android
         // app does: agentdeck://agent/<id>.
         .onOpenURL { url in
-            guard url.scheme == "agentdeck", url.host == "agent" else { return }
-            let id = url.pathComponents.dropFirst().joined(separator: "/")
-            // A notification about an archived session still opens it. Being
-            // told about something and then not finding it is worse than the
-            // archive briefly not holding.
-            if !id.isEmpty {
+            guard url.scheme == "agentdeck" else { return }
+            if url.host == "agent" {
+                let id = url.pathComponents.dropFirst().joined(separator: "/")
+                // A notification about an archived session still opens it. Being
+                // told about something and then not finding it is worse than the
+                // archive briefly not holding.
+                if !id.isEmpty {
+                    destination = .agents
+                    selected = id
+                }
+            }
+            // A scanned pairing QR is the whole ceremony: address and one-time
+            // code arrive together, so connect without anyone typing either. A
+            // code that failed (expired, already used) opens the connect sheet
+            // so the person only has to mint a fresh one.
+            if url.host == "pair", let link = parsePairingLink(url.absoluteString) {
                 destination = .agents
-                selected = id
+                Task {
+                    do {
+                        try await store.connect(
+                            baseURL: link.url,
+                            pairingCode: link.code,
+                            deviceName: store.connection.deviceName
+                        )
+                    } catch {
+                        showConnect = true
+                    }
+                }
             }
         }
         .task {

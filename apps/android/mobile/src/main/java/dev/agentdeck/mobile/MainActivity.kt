@@ -147,13 +147,20 @@ private val Blue = Color(0xFF8CB7FF)
 class MainActivity : ComponentActivity() {
     private val deckViewModel by viewModels<DeckViewModel>()
     private var targetAgentId by mutableStateOf<String?>(null)
+    private var targetPairing by mutableStateOf<PairingLink?>(null)
+
+    private fun consumeLink(intent: Intent) {
+        targetAgentId = intent.data?.takeIf { it.scheme == "agentdeck" && it.host == "agent" }?.lastPathSegment
+        targetPairing = intent.data?.takeIf { it.scheme == "agentdeck" && it.host == "pair" }
+            ?.let { parsePairingLink(it.toString()) }
+    }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startBridgeMonitor()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        targetAgentId = intent.data?.takeIf { it.scheme == "agentdeck" && it.host == "agent" }?.lastPathSegment
+        consumeLink(intent)
         // Both system bars belong to the app's world, and that world is a
         // single committed dark one. The argument-less call takes its icon
         // colour from the *system* theme instead, so a phone set to light drew
@@ -170,7 +177,17 @@ class MainActivity : ComponentActivity() {
         }
         WearCredentialSync.send(this, SecureTokenStore(this).get())
         RecoveryWorkScheduler.schedule(this)
-        setContent { AgentDeckTheme { AgentDeckApp(targetAgentId, onTargetConsumed = { targetAgentId = null }, vm = deckViewModel) } }
+        setContent {
+            AgentDeckTheme {
+                AgentDeckApp(
+                    targetAgentId,
+                    onTargetConsumed = { targetAgentId = null },
+                    pairing = targetPairing,
+                    onPairingConsumed = { targetPairing = null },
+                    vm = deckViewModel,
+                )
+            }
+        }
     }
 
     override fun onResume() {
@@ -189,7 +206,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        targetAgentId = intent.data?.takeIf { it.scheme == "agentdeck" && it.host == "agent" }?.lastPathSegment
+        consumeLink(intent)
     }
 
     private fun startBridgeMonitor() {
@@ -528,7 +545,13 @@ private fun AgentDeckTheme(content: @Composable () -> Unit) {
 private enum class DeckDestination { Agents, Usage }
 
 @Composable
-private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> Unit = {}, vm: DeckViewModel = viewModel()) {
+private fun AgentDeckApp(
+    targetAgentId: String? = null,
+    onTargetConsumed: () -> Unit = {},
+    pairing: PairingLink? = null,
+    onPairingConsumed: () -> Unit = {},
+    vm: DeckViewModel = viewModel(),
+) {
     val state by vm.state.collectAsStateWithLifecycle()
     val busyAgent by vm.commandInFlight.collectAsStateWithLifecycle()
     val commandError by vm.commandError.collectAsStateWithLifecycle()
@@ -554,6 +577,18 @@ private fun AgentDeckApp(targetAgentId: String? = null, onTargetConsumed: () -> 
         if (targetAgentId != null) snapshot?.agents?.firstOrNull { it.id == targetAgentId }?.let {
             selectedAgent = it
             onTargetConsumed()
+        }
+    }
+    // A scanned pairing QR is the whole ceremony: address and one-time code
+    // arrive together, so connect without anyone typing either. A code that
+    // failed (expired, already used) opens the connection dialog with the
+    // address kept, so the person only has to mint a fresh code.
+    LaunchedEffect(pairing) {
+        if (pairing != null) {
+            onPairingConsumed()
+            vm.saveConnection(pairing.url, pairing.code) { success, _ ->
+                if (!success) settingsOpen = true
+            }
         }
     }
 

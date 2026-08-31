@@ -1,5 +1,6 @@
-import { Effect, Schema, Stream, SubscriptionRef } from "effect";
+import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { isLoopback, pairingPage, pairingPayload } from "./Pairing";
 import {
   AgentEventInput,
   ControlCommand,
@@ -495,6 +496,68 @@ export const BridgeRoutes = HttpRouter.addAll([
       return yield* HttpServerResponse.json({ agents: yield* state.projectionParity });
     }),
   ),
+  // ---- the pairing surface ----------------------------------------------
+  /**
+   * The pairing page and its endpoints answer only to this machine. The trust
+   * model has always been "whoever can read the log may pair" — the code is
+   * printed there — and serving it to the LAN would widen that to "whoever
+   * can reach the port". See Pairing.ts.
+   */
+  HttpRouter.route(
+    "GET",
+    "/pair",
+    Effect.gen(function* () {
+      const config = yield* BridgeConfig;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
+        return yield* error("The pairing page answers only on the bridge's own machine", 403);
+      }
+      return HttpServerResponse.html(pairingPage(config.name));
+    }),
+  ),
+  HttpRouter.route(
+    "POST",
+    "/pair/code",
+    Effect.gen(function* () {
+      const config = yield* BridgeConfig;
+      const state = yield* BridgeState;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
+        return yield* error("Pairing codes are minted only on the bridge's own machine", 403);
+      }
+      const minted = yield* state.createPairingCode;
+      return yield* HttpServerResponse.json(
+        pairingPayload(minted.code, minted.expiresAt, config.port, config.name),
+      );
+    }),
+  ),
+  HttpRouter.route(
+    "GET",
+    "/pair/devices",
+    Effect.gen(function* () {
+      const state = yield* BridgeState;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
+        return yield* error("The device list answers only on the bridge's own machine", 403);
+      }
+      return yield* HttpServerResponse.json(yield* state.devices);
+    }),
+  ),
+  HttpRouter.route(
+    "DELETE",
+    "/pair/devices/:deviceId",
+    Effect.gen(function* () {
+      const state = yield* BridgeState;
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      if (!isLoopback(Option.getOrUndefined(request.remoteAddress))) {
+        return yield* error("Devices are revoked only on the bridge's own machine", 403);
+      }
+      return (yield* state.revokeDeviceById(yield* param("deviceId")))
+        ? yield* HttpServerResponse.json({ revoked: true })
+        : yield* error("Device not found", 404);
+    }),
+  ),
+
   /** Pairing is the one route that runs before a credential exists. */
   route(
     "POST",

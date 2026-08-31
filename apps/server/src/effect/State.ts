@@ -361,7 +361,12 @@ export class BridgeState extends Context.Service<
       deviceName: string,
     ) => Effect.Effect<{ id: string; token: string; name: string; createdAt: string } | undefined>;
     readonly revokeDevice: (token: string) => Effect.Effect<boolean>;
-    readonly createPairingCode: Effect.Effect<void>;
+    readonly revokeDeviceById: (id: string) => Effect.Effect<boolean>;
+    /** The devices holding a live credential, newest activity first. */
+    readonly devices: Effect.Effect<
+      ReadonlyArray<{ id: string; name: string; createdAt: string; lastSeenAt: string }>
+    >;
+    readonly createPairingCode: Effect.Effect<{ code: string; expiresAt: string }>;
   }
 >()("agent-deck/server/BridgeState") {
   static readonly layer = Layer.effect(
@@ -1201,6 +1206,32 @@ export class BridgeState extends Context.Service<
         return true;
       }, Effect.orDie);
 
+      const revokeDeviceById = Effect.fn("BridgeState.revokeDeviceById")(function* (id: string) {
+        const before = yield* sql<{ n: number }>`
+          SELECT COUNT(*) AS n FROM bridge_devices WHERE id = ${id} AND revoked_at IS NULL`;
+        if ((before[0]?.n ?? 0) === 0) return false;
+        yield* sql`UPDATE bridge_devices SET revoked_at = ${now()}
+                   WHERE id = ${id} AND revoked_at IS NULL`;
+        return true;
+      }, Effect.orDie);
+
+      const devices = Effect.gen(function* () {
+        const rows = yield* sql<{
+          id: string;
+          name: string;
+          created_at: string;
+          last_seen_at: string;
+        }>`
+          SELECT id, name, created_at, last_seen_at FROM bridge_devices
+          WHERE revoked_at IS NULL ORDER BY last_seen_at DESC`;
+        return rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          createdAt: row.created_at,
+          lastSeenAt: row.last_seen_at,
+        }));
+      }).pipe(Effect.orDie);
+
       const createPairingCode = Effect.gen(function* () {
         yield* sql`DELETE FROM bridge_pairing_codes WHERE consumed_at IS NULL`;
         const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
@@ -1208,7 +1239,8 @@ export class BridgeState extends Context.Service<
         yield* sql`INSERT INTO bridge_pairing_codes (code_hash, expires_at) VALUES (${tokenHash(code)}, ${expiresAt})`;
         yield* Ref.set(pairingFailuresRef, 0);
         yield* Effect.log(`Pairing code: ${code} (expires in 10 minutes)`);
-      }).pipe(Effect.orDie, Effect.asVoid);
+        return { code, expiresAt };
+      }).pipe(Effect.orDie);
 
       // A bridge with no paired device is unreachable from a phone, so a code
       // is issued on every start — the same as the deployed bridge.
@@ -1238,6 +1270,8 @@ export class BridgeState extends Context.Service<
         projectionParity,
         pair,
         revokeDevice,
+        revokeDeviceById,
+        devices,
         createPairingCode,
       });
     }),
