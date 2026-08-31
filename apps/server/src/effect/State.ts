@@ -222,16 +222,112 @@ export interface AgentExplanation {
  * folded event log or the legacy document. This answers that in one read,
  * with a confidence word per fact rather than a judgement call per debugger.
  */
+/**
+ * Whether a State Authority claim is still live.
+ *
+ * ADR-0002 makes a claim a time-boxed lease: the holder's clock releases it
+ * whether or not the holder ever says so. Both the snapshot fold and the
+ * explanation asked this question with their own inline comparison; asking
+ * it in one place is what keeps the two from drifting apart on a rule an
+ * ADR spells out.
+ */
+export const authorityLive = (
+  authority: StateAuthority | undefined,
+  now: number,
+): StateAuthority | undefined =>
+  authority !== undefined && Date.parse(authority.expiresAt) > now ? authority : undefined;
+
+/**
+ * How long a session may say nothing before the deck calls it offline.
+ *
+ * An idle session legitimately goes quiet — nobody is asking it anything —
+ * so it is given minutes; a session that claimed to be working owes a
+ * heartbeat far sooner, and silence past that is the deck no longer
+ * vouching for it.
+ */
+export const OFFLINE_AFTER_IDLE_MS = 10 * 60_000;
+export const OFFLINE_AFTER_ACTIVE_MS = 45_000;
+
+/**
+ * One agent as a device renders it: the stored record, corrected by its
+ * runtime projection where one exists.
+ *
+ * The deck's most-read derivation — usage precedence, the offline decay,
+ * whose identity wins, whether a claim still stands — used to live as an
+ * anonymous closure inside `snapshot`, where only its two smallest slices
+ * had been pulled out as pure functions and were, not coincidentally, the
+ * only parts with tests. It is a function now, so the precedence questions
+ * that keep arriving can be answered against a table of cases rather than a
+ * running bridge.
+ */
+export const renderSnapshotAgent = (
+  agent: AgentRecord,
+  projection: RuntimeProjection | undefined,
+  pending: { approval?: PendingApproval; question?: PendingQuestion },
+  now: number,
+): SnapshotAgent => {
+  /**
+   * The projection is believed, not checked against the heartbeat.
+   *
+   * It used to be discarded wholesale unless its state already matched the
+   * stored document, which made it incapable of ever correcting one — an
+   * adapter could publish a perfectly ordered event and see nothing change.
+   * Measured across this bridge, that gate was also throwing away the better
+   * number: heartbeats reported 0 tokens for sessions whose projection had
+   * counted 220,100. The heartbeat still supplies identity and liveness,
+   * which is what ADR-0001 keeps it for until every runtime registers itself.
+   */
+  const active = agent.runtimeProtocol === "canonical-v1" ? projection : undefined;
+  const finite = (value: number | undefined, fallback: number) =>
+    value !== undefined && Number.isFinite(value) ? value : fallback;
+  const projectedState = active?.state ?? agent.state;
+  const silence = now - Date.parse(agent.lastSeenAt);
+  const grace = projectedState === "idle" ? OFFLINE_AFTER_IDLE_MS : OFFLINE_AFTER_ACTIVE_MS;
+  // Sanitised once, so the fallback chain cannot end on the value it was
+  // guarding against: a heartbeat reporting NaN for both figures used to put
+  // NaN in the snapshot, which reaches a card as null.
+  const contextTokens = active?.usageKnown ? active.contextTokens : finite(agent.tokens, 0);
+  const item: SnapshotAgent = {
+    ...agent,
+    tokens: contextTokens,
+    processedTokens: active?.usageKnown
+      ? active.processedTokens
+      : finite(agent.processedTokens, contextTokens),
+    costUsd: finite(agent.costUsd, 0),
+    // A demo session is never called offline: nothing is heartbeating it.
+    state: !agent.isDemo && silence > grace ? ("offline" as const) : projectedState,
+    rateLimits: snapshotRateLimits(active, agent.rateLimits),
+    pendingApproval: pending.approval,
+    pendingQuestion: pending.question,
+    events: agent.events.slice(-SNAPSHOT_EVENT_LIMIT).reverse().map(cardEvent),
+  };
+  if (active) {
+    item.projectionSequence = active.sequence;
+    // Retained as a migration signal: it now reports whether the two agree,
+    // rather than deciding whether to listen.
+    item.projectionParity = active.state === agent.state;
+    item.task = active.task;
+    // Provenance for a derived state: a surface (or a person debugging one)
+    // can see whose claim the deck is honouring instead of guessing why a
+    // report did not land.
+    const authority = authorityLive(active.stateAuthority, now);
+    if (authority) item.stateAuthority = authority;
+    if (active.identity) {
+      item.name = active.identity.name;
+      item.project = active.identity.project;
+      item.model = active.identity.model;
+      if (active.identity.capabilities) item.capabilities = active.identity.capabilities;
+    }
+  }
+  return item;
+};
+
 export const explainAgent = (
   agent: Pick<AgentRecord, "runtimeProtocol">,
   projection: RuntimeProjection | undefined,
   now: number,
 ): AgentExplanation => {
-  const authority =
-    projection?.stateAuthority !== undefined &&
-    Date.parse(projection.stateAuthority.expiresAt) > now
-      ? projection.stateAuthority
-      : undefined;
+  const authority = authorityLive(projection?.stateAuthority, now);
   const explanation: AgentExplanation = {
     identity:
       projection?.identity !== undefined
@@ -557,74 +653,17 @@ export class BridgeState extends Context.Service<
         // One query for every projection rather than one per agent.
         const projections = yield* log.projections();
         const { approvals, questions } = yield* requests.pendingByAgent();
-        const rendered = [...agents.values()].map((agent) => {
-          /**
-           * The projection is believed, not checked against the heartbeat.
-           *
-           * It used to be discarded wholesale unless its state already matched
-           * the stored document, which made it incapable of ever correcting
-           * one - an adapter could publish a perfectly ordered event and see
-           * nothing change. Measured across this bridge, that gate was also
-           * throwing away the better number: heartbeats reported 0 tokens for
-           * sessions whose projection had counted 220,100.
-           *
-           * The heartbeat still supplies identity and liveness, which is what
-           * ADR-0001 keeps it for until every runtime registers itself.
-           */
-          const activeProjection =
-            agent.runtimeProtocol === "canonical-v1" ? projections.get(agent.id) : undefined;
-          const item: SnapshotAgent = {
-            ...agent,
-            tokens: activeProjection?.usageKnown
-              ? activeProjection.contextTokens
-              : Number.isFinite(agent.tokens)
-                ? agent.tokens
-                : 0,
-            processedTokens: activeProjection?.usageKnown
-              ? activeProjection.processedTokens
-              : Number.isFinite(agent.processedTokens)
-                ? agent.processedTokens
-                : agent.tokens,
-            costUsd: Number.isFinite(agent.costUsd) ? agent.costUsd : 0,
-            // A session that stopped reporting is offline; idle sessions get a
-            // longer grace period because they legitimately go quiet.
-            state:
-              !agent.isDemo &&
-              timestamp - Date.parse(agent.lastSeenAt) >
-                ((activeProjection?.state ?? agent.state) === "idle" ? 10 * 60_000 : 45_000)
-                ? ("offline" as const)
-                : (activeProjection?.state ?? agent.state),
-            rateLimits: snapshotRateLimits(activeProjection, agent.rateLimits),
-            pendingApproval: approvals.get(agent.id),
-            pendingQuestion: questions.get(agent.id),
-            events: agent.events.slice(-SNAPSHOT_EVENT_LIMIT).reverse().map(cardEvent),
-          };
-          if (activeProjection) {
-            item.projectionSequence = activeProjection.sequence;
-            // Retained as a migration signal: it now reports whether the two
-            // agree, rather than deciding whether to listen.
-            item.projectionParity = activeProjection.state === agent.state;
-            item.task = activeProjection.task;
-            // Provenance for a derived state: a surface (or a person
-            // debugging one) can see whose claim the deck is honouring
-            // instead of guessing why a report did not land.
-            if (
-              activeProjection.stateAuthority &&
-              Date.parse(activeProjection.stateAuthority.expiresAt) > timestamp
-            ) {
-              item.stateAuthority = activeProjection.stateAuthority;
-            }
-          }
-          if (activeProjection?.identity) {
-            item.name = activeProjection.identity.name;
-            item.project = activeProjection.identity.project;
-            item.model = activeProjection.identity.model;
-            if (activeProjection.identity.capabilities) {
-              item.capabilities = activeProjection.identity.capabilities;
-            }
-          }
-          return item;
-        });
+        const rendered = [...agents.values()].map((agent) =>
+          renderSnapshotAgent(
+            agent,
+            projections.get(agent.id),
+            {
+              approval: approvals.get(agent.id),
+              question: questions.get(agent.id),
+            },
+            timestamp,
+          ),
+        );
         const usageRows = yield* sql<{ tokens: number; cost_usd: number }>`
           SELECT COALESCE(SUM(tokens), 0) AS tokens, COALESCE(SUM(cost_usd), 0) AS cost_usd
           FROM bridge_usage_deltas`.pipe(Effect.orDie);
