@@ -135,6 +135,8 @@ export const pairingPage = (bridgeName: string): string => `<!doctype html>
   ul.devices { list-style: none; margin: 0; padding: 0; }
   ul.devices li { display: flex; align-items: center; gap: 12px; padding: 12px 2px;
     border-bottom: 1px solid var(--line); }
+  ul.devices .presence { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+  ul.devices .presence.live { background: var(--signal); }
   ul.devices .name { font-weight: 600; }
   ul.devices .seen { color: var(--muted); font-size: 12px; flex: 1; }
   ul.devices button { border: 0; background: transparent; color: var(--muted); font: inherit;
@@ -285,6 +287,12 @@ export const pairingPage = (bridgeName: string): string => `<!doctype html>
         }
         devices.forEach(function (device) {
           var item = document.createElement("li");
+          // Presence: a device token touches last_seen_at on every call it
+          // makes, so under two minutes of silence means the app is live.
+          var live = Date.now() - Date.parse(device.lastSeenAt) < 120000;
+          var dot = document.createElement("span");
+          dot.className = live ? "presence live" : "presence";
+          dot.title = live ? "Connected now" : "Not connected";
           var name = document.createElement("span");
           name.className = "name";
           name.textContent = device.name;
@@ -297,6 +305,7 @@ export const pairingPage = (bridgeName: string): string => `<!doctype html>
             if (!confirm("Revoke " + device.name + "? It will need to pair again.")) return;
             fetch("/pair/devices/" + encodeURIComponent(device.id), { method: "DELETE" }).then(loadDevices);
           });
+          item.appendChild(dot);
           item.appendChild(name);
           item.appendChild(seen);
           item.appendChild(revoke);
