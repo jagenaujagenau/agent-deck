@@ -11,6 +11,8 @@ import dev.agentdeck.shared.SlashCommand
 import java.time.Duration
 import java.time.Instant
 
+
+/** The command-bearing events — what the activity detail opens as a terminal record. */
 internal fun terminalEvents(events: List<AgentEvent>): List<AgentEvent> =
     events.sortedBy { it.createdAt }.filter { !it.command.isNullOrBlank() }
 

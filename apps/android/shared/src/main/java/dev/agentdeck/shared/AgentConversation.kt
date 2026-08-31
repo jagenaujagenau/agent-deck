@@ -119,7 +119,11 @@ private fun isAgentResponse(event: AgentEvent) =
     isSubagentMessage(event) ||
         (
             event.kind == "output" && !event.summary.startsWith("Remote command:") && event.tool == null && event.command == null &&
-                (event.summary == "Response" || !event.detail.isNullOrBlank() || (event.summary != "Activity" && !event.summary.endsWith(" completed")))
+                // "X completed" is work reporting itself done, not the agent
+                // speaking — whatever detail rides along. It belongs with the
+                // activity between messages, never in a bubble.
+                !event.summary.endsWith(" completed") &&
+                (event.summary == "Response" || !event.detail.isNullOrBlank() || event.summary != "Activity")
             )
 
 private fun isSubagentMessage(event: AgentEvent) =

@@ -105,6 +105,15 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.font.FontStyle
 import java.time.format.DateTimeFormatter
 import kotlin.math.PI
 import kotlin.math.ceil
@@ -1662,37 +1671,6 @@ private fun screenCornerRadius(inset: Dp, fallback: Dp = 28.dp): Dp {
     return (radius - inset).coerceAtLeast(8.dp)
 }
 
-/**
- * A write to a file, drawn as the act rather than its payload.
- *
- * Set apart from the shell around it because it is not a command anyone reads:
- * the interesting half is which file, and the rest is the file's own contents.
- */
-@Composable
-private fun FileWriteLine(line: TerminalLine.FileWrite, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        color = Blue.copy(alpha = 0.12f),
-        border = BorderStroke(1.dp, Blue.copy(alpha = 0.3f)),
-    ) {
-        Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.EditNote, null, tint = Blue, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Row {
-                    Text(line.verb, color = Blue, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(6.dp))
-                    Text(line.name, color = Text, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (line.parent.isNotBlank()) {
-                    Text(line.parent, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-    }
-}
-
 /** The three dots that make a rectangle read as a window. */
 @Composable
 private fun WindowSemaphore() {
@@ -1712,16 +1690,14 @@ private fun StatusLabel(state: String, color: Color) {
     }
 }
 
-private enum class AgentViewMode { Responses, Reasoning, Diff, Terminal }
-
 @Composable
 private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit) {
-    var mode by rememberSaveable(agent.id) { mutableStateOf(AgentViewMode.Responses) }
-    // Opening a session is a request to read it, not to write to it. Focusing
-    // the composer on arrival raised the keyboard over the lower half of the
-    // conversation before anyone had seen it. Switching *to* a typing surface
-    // is the deliberate act, so only that arms the focus.
-    var tabChosen by rememberSaveable(agent.id) { mutableStateOf(false) }
+    // The session is one conversation. Everything the agent did reads inline
+    // as work between the words; depth — a command's output, a file's diff,
+    // the session's changed files — opens as a sheet over the same screen
+    // rather than as somewhere else to be.
+    var openActivity by remember(agent.id) { mutableStateOf<AgentEvent?>(null) }
+    var changesOpen by rememberSaveable(agent.id) { mutableStateOf(false) }
     var confirmingStop by rememberSaveable(agent.id) { mutableStateOf(false) }
     val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
     val pendingApproval = agent.pendingApproval?.takeIf { agent.state == "waiting" }
@@ -1752,10 +1728,8 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     val provider = providerFor(agent)
     val stateColor = statusColor(agent.state)
     val activity = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { agentCardActivity(agent) }
-    val reasoningCount = remember(viewedAgent.events) { reasoningEvents(viewedAgent.events).size }
     // Prefer the bridge's full history; fall back to whatever the live window still holds while it loads.
     val fileChanges = remember(sessionChanges) { agentFileChanges(sessionChanges) }
-    val terminalCount = remember(viewedAgent.events) { terminalEvents(viewedAgent.events).size }
     val hasAttention = pendingApproval != null || pendingQuestion != null
     val isPaused = agent.state == "paused"
     // Live events already merge over the fetched history, so a refetch is only needed to recover
@@ -1874,60 +1848,36 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                         }
                     }
                 }
-                    // Only worth a banner from a tab that cannot see the
-                    // thing. On Chat the approval card is already on screen,
-                    // and "Review in Chat" pointed at itself.
-                    if (hasAttention && mode != AgentViewMode.Responses) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).clip(RoundedCornerShape(12.dp)).clickable { mode = AgentViewMode.Responses },
-                            color = Amber.copy(alpha = 0.10f),
-                            border = BorderStroke(1.dp, Amber.copy(alpha = 0.22f)),
-                        ) {
-                            Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(if (pendingApproval != null) Icons.Rounded.VerifiedUser else Icons.AutoMirrored.Rounded.HelpOutline, null, tint = Amber, modifier = Modifier.size(17.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(if (pendingApproval != null) "Approval required" else "Question waiting", color = Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.weight(1f))
-                                Text("Review in Chat", color = Muted, fontSize = 11.sp)
-                                Spacer(Modifier.width(3.dp))
-                                Icon(Icons.Rounded.ChevronRight, null, tint = Muted, modifier = Modifier.size(17.dp))
-                            }
-                        }
-                    }
-                    PrimaryTabRow(selectedTabIndex = mode.ordinal, containerColor = Color.Transparent, divider = {}) {
-                        // The same icons the views themselves already use for
-                        // these ideas, so the tab and the thing it opens agree.
-                        Tab(selected = mode == AgentViewMode.Responses, onClick = { mode = AgentViewMode.Responses; tabChosen = true }, text = { SessionTabLabel(Icons.Rounded.Forum, "Chat", attention = hasAttention) })
-                        Tab(selected = mode == AgentViewMode.Reasoning, onClick = { mode = AgentViewMode.Reasoning; tabChosen = true }, text = { SessionTabLabel(Icons.Rounded.Psychology, "Reasoning", reasoningCount) })
-                        Tab(selected = mode == AgentViewMode.Diff, onClick = { mode = AgentViewMode.Diff; tabChosen = true }, text = { SessionTabLabel(Icons.Rounded.Difference, "Changes", fileChanges.size) })
-                        Tab(selected = mode == AgentViewMode.Terminal, onClick = { mode = AgentViewMode.Terminal; tabChosen = true }, text = { SessionTabLabel(Icons.Rounded.Terminal, "Terminal", terminalCount) })
-                    }
             }
-            when (mode) {
-                AgentViewMode.Responses -> ResponsesView(
-                    agent = viewedAgent,
-                    busy = busy,
-                    pendingApproval = pendingApproval,
-                    pendingQuestion = pendingQuestion,
-                    commandError = commandError,
-                    commandNotice = commandNotice,
-                    commandBlocked = commandBlocked,
-                    onSendAnyway = onSendAnyway,
-                    supports = supports,
-                    slashCommands = slashCommands,
-                    onControl = onControl,
-                    onQuestionAnswer = onQuestionAnswer,
-                    autoFocus = tabChosen,
-                    lensed = activeRun != null,
-                    modifier = Modifier.weight(1f),
-                )
-                AgentViewMode.Reasoning -> ReasoningView(viewedAgent, Modifier.weight(1f).navigationBarsPadding())
-                AgentViewMode.Diff -> DiffView(fileChanges, changesLoaded, Modifier.weight(1f).navigationBarsPadding())
-                // The terminal is scrollback first: the keyboard rises only
-                // when the prompt itself is tapped, never on opening the tab.
-                AgentViewMode.Terminal -> TerminalView(viewedAgent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, onControl, Modifier.weight(1f))
-            }
+            ResponsesView(
+                agent = viewedAgent,
+                busy = busy,
+                pendingApproval = pendingApproval,
+                pendingQuestion = pendingQuestion,
+                commandError = commandError,
+                commandNotice = commandNotice,
+                commandBlocked = commandBlocked,
+                onSendAnyway = onSendAnyway,
+                supports = supports,
+                slashCommands = slashCommands,
+                onControl = onControl,
+                onQuestionAnswer = onQuestionAnswer,
+                // Opening a session is a request to read it, not to write to
+                // it: the keyboard rises only when the composer is tapped.
+                autoFocus = false,
+                lensed = activeRun != null,
+                onOpenActivity = { openActivity = it },
+                changedFiles = fileChanges.size,
+                onOpenChanges = { changesOpen = true },
+                modifier = Modifier.weight(1f),
+            )
         }
+    }
+    openActivity?.let { event ->
+        ActivityDetailSheet(event, onDismiss = { openActivity = null })
+    }
+    if (changesOpen) {
+        ChangesSheet(fileChanges, changesLoaded, onDismiss = { changesOpen = false })
     }
     if (lensPickerOpen) SubagentPicker(
         runs = runs,
@@ -2167,36 +2117,6 @@ private fun BlockedSendNotice(detail: String, onSendAnyway: () -> Unit) {
 }
 
 @Composable
-private fun SessionTabLabel(
-    icon: ImageVector,
-    description: String,
-    count: Int = 0,
-    attention: Boolean = false,
-) {
-    // An icon rather than a word. Four labels sharing the width truncated to
-    // "Reaso…" and "Termi…", which name nothing; the icons are the ones these
-    // views already use for themselves, so the tab and its content agree.
-    //
-    // The dot is what a count used to be. In any working session every count
-    // read "99+", which says only that there is a lot of everything.
-    Box(contentAlignment = Alignment.Center) {
-        Icon(icon, description, modifier = Modifier.size(21.dp))
-        if (attention || count > 0) {
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = 5.dp, y = (-3).dp)
-                    .size(if (attention) 7.dp else 5.dp)
-                    .clip(CircleShape)
-                    // Amber is reserved for something wanting a person; anything
-                    // else is content waiting to be read.
-                    .background(if (attention) Amber else Muted.copy(alpha = 0.7f)),
-            )
-        }
-    }
-}
-
-@Composable
 private fun ResponsesView(
     agent: Agent,
     busy: Boolean,
@@ -2213,10 +2133,24 @@ private fun ResponsesView(
     autoFocus: Boolean,
     /** Reading one subagent rather than the session. */
     lensed: Boolean = false,
+    onOpenActivity: (AgentEvent) -> Unit = {},
+    changedFiles: Int = 0,
+    onOpenChanges: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val entries = remember(agent.events) { conversationEntries(agent.events) }
-    val initialLastItem = entries.size + listOfNotNull(pendingQuestion, pendingApproval).size - 1
+    val timeline = remember(agent.events) { chatTimeline(agent.events) }
+    val entries = timeline
+    val working = agent.state == "running"
+    // Everything below the timeline in list order: the pending cards, the
+    // changed-files line, and the working indicator. Counted once, because the
+    // follow-newest maths must agree with what the list actually renders.
+    val trailingRows = listOfNotNull(
+        pendingQuestion?.id,
+        pendingApproval?.id,
+        "changes".takeIf { changedFiles > 0 },
+        "working".takeIf { working },
+    ).size
+    val initialLastItem = entries.size + trailingRows - 1
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialLastItem.coerceAtLeast(0))
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -2239,14 +2173,20 @@ private fun ResponsesView(
             }
         }
     }
+    val newest = entries.lastOrNull()
     val newestContentKey = listOf(
-        entries.lastOrNull()?.event?.id,
-        entries.lastOrNull()?.content?.hashCode(),
+        newest?.newestEvent?.id,
+        when (newest) {
+            is TimelineItem.Message -> newest.entry.content.hashCode()
+            is TimelineItem.Activity -> newest.events.size
+            null -> null
+        },
         pendingQuestion?.id,
         pendingApproval?.id,
+        working,
     )
     LaunchedEffect(newestContentKey) {
-        val lastItem = entries.size + listOfNotNull(pendingQuestion, pendingApproval).size - 1
+        val lastItem = entries.size + trailingRows - 1
         if (lastItem < 0) return@LaunchedEffect
         if (!ResponseScrollPolicy.shouldMoveToNewest(initialPositionApplied, followNewest)) {
             newMessagesWaiting = initialPositionApplied
@@ -2256,10 +2196,10 @@ private fun ResponsesView(
         initialPositionApplied = true
         newMessagesWaiting = false
     }
-    LaunchedEffect(listState, entries.size, pendingQuestion?.id, pendingApproval?.id) {
+    LaunchedEffect(listState, entries.size, trailingRows) {
         snapshotFlow { listState.canScrollForward }.distinctUntilChanged().collect { canScrollForward ->
             if (!ResponseScrollPolicy.shouldCorrectLayoutGrowth(initialPositionApplied, followNewest, userDragging, canScrollForward)) return@collect
-            val lastItem = entries.size + listOfNotNull(pendingQuestion, pendingApproval).size - 1
+            val lastItem = entries.size + trailingRows - 1
             if (lastItem >= 0) listState.scrollToEnd(lastItem)
         }
     }
@@ -2280,17 +2220,26 @@ private fun ResponsesView(
                     lensed = lensed,
                 )
             }
-            itemsIndexed(entries, key = { _, entry -> "message:${entry.event.id}" }) { index, entry ->
+            itemsIndexed(entries, key = { _, item -> "item:${item.leadEvent.id}" }) { index, item ->
                 // A session open since yesterday reads as one unbroken run, and
                 // the stamps only give the hour - "09:14" under "23:47" looks
                 // like four minutes, not ten hours.
                 ConversationDays
-                    .separatorBefore(entries.getOrNull(index - 1)?.event?.createdAt, entry.event.createdAt)
+                    .separatorBefore(entries.getOrNull(index - 1)?.newestEvent?.createdAt, item.leadEvent.createdAt)
                     ?.let { DaySeparator(it) }
                 // A hairline where a new exchange begins, so a long session
                 // reads as threads rather than one unbroken run.
-                if (index > 0 && startsNewTurn(entries[index - 1].event, entry.event)) TurnSeparator()
-                ConversationBubble(entry, providerFor(agent))
+                if (index > 0 && startsNewTurn(entries[index - 1].newestEvent, item.leadEvent)) TurnSeparator()
+                when (item) {
+                    is TimelineItem.Message -> ConversationBubble(item.entry, providerFor(agent))
+                    is TimelineItem.Activity -> ActivityCluster(
+                        events = item.events,
+                        // The last run of a working session is the one being
+                        // written; it arrives open so the work is watchable.
+                        live = working && index == entries.lastIndex,
+                        onOpen = onOpenActivity,
+                    )
+                }
             }
             pendingQuestion?.let { question ->
                 item(key = "question:${question.id}") {
@@ -2313,12 +2262,37 @@ private fun ResponsesView(
                         }
                     }
                 }
+                if (changedFiles > 0) item(key = "changes") {
+                    // The session's receipt: what all that work touched, one
+                    // quiet line where a conversation would leave one.
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(onClick = onOpenChanges)
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.Difference, null, tint = Muted, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            if (changedFiles == 1) "1 file changed" else "$changedFiles files changed",
+                            color = Muted,
+                            fontSize = 12.sp,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                    }
+                }
+                if (working) item(key = "working") {
+                    WorkingIndicator(agent.task)
+                }
             }
             if (newMessagesWaiting) FilledTonalButton(
                 onClick = {
                     followNewest = true
                     newMessagesWaiting = false
-                    val lastItem = entries.size + listOfNotNull(pendingQuestion, pendingApproval).size - 1
+                    val lastItem = entries.size + trailingRows - 1
                     if (lastItem >= 0) scope.launch { listState.scrollToEnd(lastItem) }
                 },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp).heightIn(min = 44.dp),
@@ -2440,6 +2414,208 @@ private fun SlashCommandPicker(matches: List<SlashCommand>, onPick: (SlashComman
     }
 }
 
+/**
+ * A run of work between words, folded to one quiet line.
+ *
+ * Collapsed, it says what the run amounted to — "14 steps · Edit, Bash ·
+ * 3 files" — because the words around it are what a conversation is for.
+ * Tapped, it opens into the steps themselves, each one line, each openable
+ * where there is a command, a diff, or words behind it. The live run of a
+ * working session arrives already open at its tail, so the work is
+ * watchable as it happens without anyone asking.
+ */
+@Composable
+private fun ActivityCluster(events: List<AgentEvent>, live: Boolean, onOpen: (AgentEvent) -> Unit) {
+    var expanded by rememberSaveable(events.first().id) { mutableStateOf(false) }
+    val shown = when {
+        expanded -> events
+        live -> events.takeLast(3)
+        else -> emptyList()
+    }
+    Column(Modifier.fillMaxWidth().padding(end = 40.dp)) {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(9.dp))
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Bolt, null, tint = Muted, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(7.dp))
+            Text(activitySummary(events), color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                if (expanded) "Collapse steps" else "Expand steps",
+                tint = Muted.copy(alpha = 0.7f),
+                modifier = Modifier.size(15.dp),
+            )
+        }
+        if (shown.isNotEmpty()) Row(Modifier.padding(start = 12.dp)) {
+            Box(Modifier.width(1.dp).fillMaxHeight().background(Line))
+            Column(Modifier.padding(start = 10.dp)) {
+                if (!expanded && live && events.size > shown.size) {
+                    Text(
+                        "${events.size - shown.size} earlier steps",
+                        color = Muted.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(vertical = 3.dp),
+                    )
+                }
+                shown.forEach { event -> ActivityRow(event, onOpen) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityRow(event: AgentEvent, onOpen: (AgentEvent) -> Unit) {
+    val openable = !event.command.isNullOrBlank() || !event.diff.isNullOrBlank() || !event.detail.isNullOrBlank()
+    val failed = event.kind == "error"
+    val icon = when {
+        event.kind == "thought" -> Icons.Rounded.Psychology
+        failed || event.kind == "warning" -> Icons.Rounded.WarningAmber
+        !event.command.isNullOrBlank() -> Icons.Rounded.Terminal
+        !event.diff.isNullOrBlank() || event.path != null -> Icons.Rounded.Difference
+        else -> Icons.Rounded.Build
+    }
+    // A thought's first words are the row; everything else leads with what it did.
+    val line = if (event.kind == "thought") {
+        event.detail.orEmpty().lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: event.summary
+    } else {
+        event.summary
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(7.dp))
+            .clickable(enabled = openable) { onOpen(event) }
+            .padding(horizontal = 4.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = if (failed) Danger else Muted.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            line,
+            color = if (failed) Danger else Text.copy(alpha = 0.72f),
+            fontSize = 12.sp,
+            fontStyle = if (event.kind == "thought") FontStyle.Italic else FontStyle.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (openable) {
+            Spacer(Modifier.width(5.dp))
+            Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.55f), modifier = Modifier.size(13.dp))
+        }
+    }
+}
+
+/** The agent is typing — three quiet dots and what it is on, messaging's own idiom for "working". */
+@Composable
+private fun WorkingIndicator(task: String) {
+    val transition = rememberInfiniteTransition(label = "working")
+    Row(Modifier.padding(start = 6.dp, top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        repeat(3) { index ->
+            val alpha by transition.animateFloat(
+                initialValue = 0.25f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(700, delayMillis = index * 160, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "dot$index",
+            )
+            Box(Modifier.size(6.dp).clip(CircleShape).background(Signal.copy(alpha = alpha)))
+            Spacer(Modifier.width(4.dp))
+        }
+        Spacer(Modifier.width(7.dp))
+        Text(task, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** One step, in full: its command, its words, its diff — depth without leaving the conversation. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ActivityDetailSheet(event: AgentEvent, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(event.tool ?: event.summary, color = Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(formatMessageTime(event.createdAt), color = Muted, fontSize = 11.sp)
+            }
+            if (event.tool != null && event.summary != event.tool) {
+                Text(event.summary, color = Muted, fontSize = 12.sp)
+            }
+            event.command?.takeIf { it.isNotBlank() }?.let { command ->
+                Surface(shape = RoundedCornerShape(10.dp), color = Ink) {
+                    Text(
+                        command,
+                        color = Text.copy(alpha = 0.92f),
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    )
+                }
+            }
+            event.detail?.takeIf { it.isNotBlank() }?.let { detail ->
+                if (event.command != null) {
+                    Surface(shape = RoundedCornerShape(10.dp), color = Ink) {
+                        Text(
+                            detail,
+                            color = Muted,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        )
+                    }
+                } else {
+                    Text(detail, color = Text.copy(alpha = 0.88f), fontSize = 14.sp, lineHeight = 21.sp)
+                }
+            }
+            event.diff?.takeIf { it.isNotBlank() }?.let { diff ->
+                Surface(shape = RoundedCornerShape(10.dp), color = Ink) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        diff.lineSequence().forEach { lineText ->
+                            Text(
+                                lineText,
+                                color = when {
+                                    lineText.startsWith("+") -> Signal
+                                    lineText.startsWith("-") -> Danger.copy(alpha = 0.9f)
+                                    lineText.startsWith("@@") -> Blue
+                                    else -> Muted
+                                },
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Every file the session touched, as a sheet over the conversation. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChangesSheet(files: List<AgentFileChange>, loaded: Boolean, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface) {
+        DiffView(files, loaded, Modifier.fillMaxWidth().heightIn(max = 560.dp))
+    }
+}
+
 @Composable
 private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit, autoFocus: Boolean, lensed: Boolean = false) {
     var message by rememberSaveable(agent.id) { mutableStateOf("") }
@@ -2510,8 +2686,8 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
                         placeholder = when {
                             // Under a lens the field is still the session's.
                             lensed -> "Message the session…"
-                            action == "steer" -> "Reply or steer…"
-                            else -> "Message agent…"
+                            action == "steer" -> "Reply or steer…  / commands  ! shell"
+                            else -> "Message agent…  / commands  ! shell"
                         },
                         modifier = Modifier.weight(1f),
                         focusRequester = composerFocus,
@@ -2521,108 +2697,23 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
                     ComposerSendButton(
                         hasText = message.isNotBlank(),
                         busy = busy,
-                        onSend = { val content = message.trim(); onControl(action, content); message = "" },
+                        onSend = {
+                            val content = message.trim()
+                            // `!` is the terminal living in the composer: the
+                            // rest of the line goes to the runtime as an exact
+                            // shell command, the way the Terminal tab used to
+                            // send one.
+                            val shell = content.removePrefix("!").trim()
+                                .takeIf { content.startsWith("!") && it.isNotBlank() }
+                            onControl(action, shell?.let(::terminalCommandInstruction) ?: content)
+                            message = ""
+                        },
                     )
                 },
             )
         }
     }
 }
-}
-
-@Composable
-private fun ReasoningView(agent: Agent, modifier: Modifier = Modifier) {
-    val events = remember(agent.events) { reasoningEvents(agent.events) }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = events.lastIndex.coerceAtLeast(0))
-    val scope = rememberCoroutineScope()
-    var followNewest by remember(agent.id) { mutableStateOf(true) }
-    var userDragging by remember(agent.id) { mutableStateOf(false) }
-    var initialPositionApplied by remember(agent.id) { mutableStateOf(false) }
-    var newReasoningWaiting by remember(agent.id) { mutableStateOf(false) }
-    LaunchedEffect(listState) {
-        listState.interactionSource.interactions.collect { interaction ->
-            when (interaction) {
-                is DragInteraction.Start -> {
-                    userDragging = true
-                    followNewest = false
-                }
-                is DragInteraction.Stop, is DragInteraction.Cancel -> {
-                    userDragging = false
-                    followNewest = ResponseScrollPolicy.followNewestAfterUserDrag(listState.canScrollForward)
-                    if (followNewest) newReasoningWaiting = false
-                }
-            }
-        }
-    }
-    val newestKey = events.lastOrNull()?.let { it.id to it.detail.hashCode() }
-    LaunchedEffect(newestKey) {
-        if (events.isEmpty()) return@LaunchedEffect
-        if (!ResponseScrollPolicy.shouldMoveToNewest(initialPositionApplied, followNewest)) {
-            newReasoningWaiting = initialPositionApplied
-            return@LaunchedEffect
-        }
-        listState.scrollToEnd(events.lastIndex)
-        initialPositionApplied = true
-        newReasoningWaiting = false
-    }
-    LaunchedEffect(listState, events.size) {
-        snapshotFlow { listState.canScrollForward }.distinctUntilChanged().collect { canScrollForward ->
-            if (!ResponseScrollPolicy.shouldCorrectLayoutGrowth(initialPositionApplied, followNewest, userDragging, canScrollForward)) return@collect
-            if (events.isNotEmpty()) listState.scrollToEnd(events.lastIndex)
-        }
-    }
-    Column(modifier.fillMaxWidth().background(Ink)) {
-        Surface(color = Blue.copy(alpha = 0.08f)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Visibility, null, tint = Blue, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(9.dp))
-                Text("Only reasoning explicitly shared by the provider is shown.", color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
-            }
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (initialPositionApplied || events.isEmpty()) 1f else 0f },
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(events, key = { "reasoning:${it.id}" }) { event ->
-                    Surface(shape = RoundedCornerShape(16.dp), color = SurfaceRaised) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.Psychology, null, tint = Blue, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(if (event.summary.endsWith("…")) "Thinking" else "Reasoning", color = Blue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                Spacer(Modifier.weight(1f))
-                                Text(formatMessageTime(event.createdAt), color = Muted.copy(alpha = 0.72f), fontSize = 10.sp)
-                            }
-                            MarkdownResponse(event.detail.orEmpty())
-                        }
-                    }
-                }
-                if (events.isEmpty()) item {
-                    Column(Modifier.fillMaxWidth().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Rounded.Psychology, null, tint = Muted, modifier = Modifier.size(30.dp))
-                        Text("No shared reasoning", fontWeight = FontWeight.SemiBold)
-                        Text("This model has not exposed reasoning for this session.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 300.dp))
-                    }
-                }
-            }
-            if (newReasoningWaiting) FilledTonalButton(
-                onClick = {
-                    followNewest = true
-                    newReasoningWaiting = false
-                    if (events.isNotEmpty()) scope.launch { listState.scrollToEnd(events.lastIndex) }
-                },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp).heightIn(min = 44.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                Icon(Icons.Rounded.ArrowDownward, null, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(7.dp))
-                Text("New reasoning")
-            }
-        }
-    }
 }
 
 @Composable
@@ -2826,222 +2917,6 @@ private fun DiffLineRow(line: AgentDiffLine, showLineNumbers: Boolean) {
 }
 
 @Composable
-private fun TerminalView(
-    agent: Agent,
-    busy: Boolean,
-    commandError: String?,
-    commandNotice: String?,
-    commandBlocked: BlockedCommand?,
-    onSendAnyway: () -> Unit,
-    supports: (String) -> Boolean,
-    onControl: (String, String?) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val events = remember(agent.events) { terminalEvents(agent.events) }
-    var speed by rememberSaveable(agent.id) { mutableStateOf(TerminalTypeSpeed.Normal) }
-    // Everything already on screen when this tab opened is scrollback and is
-    // drawn whole. Only what arrives afterwards is typed, so re-entering a
-    // session does not replay an hour of shell.
-    val scrollback = remember(agent.id) { events.map { it.id }.toSet() }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = events.lastIndex.coerceAtLeast(0))
-    val scope = rememberCoroutineScope()
-    var followNewest by remember(agent.id) { mutableStateOf(true) }
-    var userDragging by remember(agent.id) { mutableStateOf(false) }
-    var initialPositionApplied by remember(agent.id) { mutableStateOf(false) }
-    var newCommandsWaiting by remember(agent.id) { mutableStateOf(false) }
-    LaunchedEffect(listState) {
-        listState.interactionSource.interactions.collect { interaction ->
-            when (interaction) {
-                is DragInteraction.Start -> {
-                    userDragging = true
-                    followNewest = false
-                }
-                is DragInteraction.Stop, is DragInteraction.Cancel -> {
-                    userDragging = false
-                    followNewest = !listState.canScrollForward
-                    if (followNewest) newCommandsWaiting = false
-                }
-            }
-        }
-    }
-    // Typing grows the last item a line at a time; without this correction the
-    // caret writes below the fold and the animation plays to nobody. Same rule
-    // the chat uses for streaming responses.
-    LaunchedEffect(listState, events.size) {
-        snapshotFlow { listState.canScrollForward }.distinctUntilChanged().collect { canScrollForward ->
-            if (!ResponseScrollPolicy.shouldCorrectLayoutGrowth(initialPositionApplied, followNewest, userDragging, canScrollForward)) return@collect
-            if (events.isNotEmpty()) listState.scrollToEnd(events.lastIndex)
-        }
-    }
-    val newestKey = events.lastOrNull()?.let { listOf(it.id, it.command.hashCode(), events.size) }
-    LaunchedEffect(newestKey) {
-        if (events.isEmpty()) return@LaunchedEffect
-        if (initialPositionApplied && !followNewest) {
-            newCommandsWaiting = true
-            return@LaunchedEffect
-        }
-        listState.scrollToEnd(events.lastIndex)
-        initialPositionApplied = true
-        newCommandsWaiting = false
-    }
-    val bottomRadius = screenCornerRadius(inset = 10.dp)
-    val windowShape = RoundedCornerShape(
-        topStart = 12.dp,
-        topEnd = 12.dp,
-        bottomStart = bottomRadius,
-        bottomEnd = bottomRadius,
-    )
-    // A window, because that is what it is: the terminal on the other end of
-    // this session, drawn with the chrome a person already reads as one. The
-    // same shape the home screen widget uses, so the two agree about what a
-    // terminal looks like.
-    Column(
-        modifier
-            .fillMaxWidth()
-            // Closed on all four sides, with air beneath it: a window that runs
-            // off the bottom of the screen is a panel, not a window, and the
-            // composer needs to read as sitting outside it. The lower corners
-            // follow the phone's own, so the window sits in the screen rather
-            // than on it.
-            .padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 4.dp)
-            .clip(windowShape)
-            .background(Color(0xFF050709))
-            .border(BorderStroke(1.dp, Line), windowShape),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(40.dp).background(Color(0xFF0C1014)).padding(start = 12.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Close, minimise, zoom - drawn, not wired. They are what makes a
-            // rectangle read as a window at a glance.
-            WindowSemaphore()
-            Spacer(Modifier.width(12.dp))
-            Text(agent.project, color = Text.copy(alpha = 0.7f), fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            // The follow-the-tail state moved onto the jump button, where the
-            // action that changes it already lives.
-            Text("${events.size}", color = Muted.copy(alpha = 0.72f), fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-            IconButton(
-                onClick = {
-                    followNewest = true
-                    newCommandsWaiting = false
-                    if (events.isNotEmpty()) scope.launch { listState.scrollToEnd(events.lastIndex) }
-                },
-                enabled = events.isNotEmpty(),
-                modifier = Modifier.size(44.dp),
-            ) { Icon(Icons.Rounded.VerticalAlignBottom, "Jump to latest command", tint = if (followNewest) Signal else Muted, modifier = Modifier.size(18.dp)) }
-        }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            SelectionContainer {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (initialPositionApplied || events.isEmpty()) 1f else 0f },
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    items(events, key = { "terminal:${it.id}" }) { event ->
-                        Column(Modifier.fillMaxWidth()) {
-                            Text(formatTerminalTime(event.createdAt), color = Muted.copy(alpha = 0.66f), fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 14.sp)
-                            Spacer(Modifier.height(3.dp))
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                                Text("\$", color = Signal, fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.width(10.dp))
-                                when (val line = remember(event.id, event.command) { terminalLine(event.command.orEmpty()) }) {
-                                    is TerminalLine.FileWrite -> FileWriteLine(line, Modifier.weight(1f))
-                                    is TerminalLine.Shell -> Column(Modifier.weight(1f)) {
-                                        // Only the newest command types; a
-                                        // burst arriving together should not
-                                        // put three carets on screen at once.
-                                        val output = typedOutput(
-                                            line.text,
-                                            animate = event.id !in scrollback && event.id == events.lastOrNull()?.id,
-                                            speed = speed,
-                                        )
-                                        // One Text per source line, so output
-                                        // arrives a line at a time instead of
-                                        // the whole block reflowing on every
-                                        // frame like a paragraph being written.
-                                        output.lines.forEachIndexed { index, text ->
-                                            // The caret is a character in the
-                                            // line, not a widget beside it, so
-                                            // it sits exactly after what has
-                                            // printed even when the line wraps.
-                                            // Solid while printing; blinking is
-                                            // for waiting.
-                                            val caretHere = output.typing && index == output.lines.lastIndex
-                                            Text(
-                                                if (caretHere) {
-                                                    buildAnnotatedString {
-                                                        append(text)
-                                                        withStyle(SpanStyle(color = Signal)) { append("\u258A") }
-                                                    }
-                                                } else {
-                                                    AnnotatedString(text)
-                                                },
-                                                color = Text.copy(alpha = 0.92f),
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 14.sp,
-                                                lineHeight = 21.sp,
-                                            )
-                                        }
-                                        // What the command was fed, counted
-                                        // rather than printed.
-                                        if (line.hiddenLines > 0) {
-                                            Text(
-                                                "+${line.hiddenLines} lines of input",
-                                                color = Muted.copy(alpha = 0.8f),
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 10.sp,
-                                                modifier = Modifier.padding(top = 2.dp),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (events.isEmpty()) item {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("\$", color = Signal, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-                            Spacer(Modifier.width(10.dp))
-                            Text("Waiting for the first shell command…", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-            if (newCommandsWaiting) FilledTonalButton(
-                onClick = {
-                    followNewest = true
-                    newCommandsWaiting = false
-                    scope.launch { listState.scrollToEnd(events.lastIndex) }
-                },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp).heightIn(min = 44.dp),
-            ) {
-                Icon(Icons.Rounded.ArrowDownward, null, modifier = Modifier.size(17.dp))
-                Spacer(Modifier.width(7.dp))
-                Text("New commands")
-            }
-        }
-        // The status line a terminal actually has, in the place it has it:
-        // under the scrollback, above the prompt. The speed segment is the
-        // control for the typing above - a terminal puts its settings in its
-        // status line rather than in a menu.
-        // The session's own header already names the project; the status line
-        // leads with the one fact that changes — what the agent is doing.
-        PowerlineBar(
-            segments = listOfNotNull(
-                PowerlineCell(agent.state.uppercase(), Signal, Ink),
-                PowerlineCell("${events.size} CMD", Surface, Muted),
-                PowerlineCell("TYPE ${speed.label}", Surface, if (speed == TerminalTypeSpeed.Off) Muted else Blue) {
-                    speed = speed.next()
-                },
-            ),
-            modifier = Modifier.padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
-        )
-        TerminalCommandComposer(agent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, onControl)
-    }
-}
-
-@Composable
 private fun TerminalCommandComposer(
     agent: Agent,
     busy: Boolean,
@@ -3116,9 +2991,7 @@ private suspend fun LazyListState.scrollToEnd(lastItem: Int) {
 }
 
 private val messageTimeFormatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
-private val terminalTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault())
 private fun formatMessageTime(value: String): String = runCatching { messageTimeFormatter.format(Instant.parse(value)) }.getOrDefault(value.substringAfter('T').take(5))
-private fun formatTerminalTime(value: String): String = runCatching { terminalTimeFormatter.format(Instant.parse(value)) }.getOrDefault(value.substringAfter('T').take(8))
 
 @Composable
 private fun QuestionCard(event: AgentEvent, answerable: Boolean, busy: Boolean, onAnswer: (String) -> Unit) {
