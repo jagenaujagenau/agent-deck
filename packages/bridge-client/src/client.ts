@@ -9,6 +9,7 @@ import type {
   ManagedRuntime,
   PairedDevice,
   QueuedCommand,
+  RuntimeModel,
   SlashCommand,
 } from "./types";
 
@@ -86,6 +87,24 @@ export class BridgeClient {
       `/agents/${encodeURIComponent(agentId)}/changes`,
     );
     return body.changes;
+  }
+
+  /**
+   * The models a bridge-hosted session will answer as, asked of the runtime.
+   * A session the bridge does not host has no list — its model belongs to the
+   * runtime that owns its terminal — and answers 404, which surfaces here as
+   * an empty list so a caller can simply not offer the control.
+   */
+  async models(agentId: string): Promise<RuntimeModel[]> {
+    try {
+      const body = await this.request<{ models: RuntimeModel[] }>(
+        "GET",
+        `/agents/${encodeURIComponent(agentId)}/models`,
+      );
+      return body.models;
+    } catch {
+      return [];
+    }
   }
 
   async slashCommands(agentId: string): Promise<SlashCommand[]> {

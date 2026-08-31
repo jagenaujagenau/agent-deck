@@ -279,6 +279,20 @@ class BridgeClient(
         }
     }
 
+    /**
+     * The models this session will answer as, asked of the runtime. A session
+     * the bridge does not host has no list — its model belongs to the runtime
+     * that owns its terminal — and answers 404, which is an empty list here so
+     * a surface can simply not offer the control.
+     */
+    suspend fun models(agentId: String): List<RuntimeModel> = withContext(Dispatchers.IO) {
+        val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/models").get().build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@withContext emptyList()
+            json.decodeFromString<RuntimeModels>(response.body.string()).models
+        }
+    }
+
     /** The message commands still queued for this session — the sender's to take back. */
     suspend fun queuedMessages(agentId: String): List<QueuedCommand> = withContext(Dispatchers.IO) {
         val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/queued").get().build()
@@ -398,6 +412,8 @@ class AgentRepository(private val client: BridgeClient) {
     }
 
     suspend fun changes(agentId: String): List<AgentEvent> = client.changes(agentId)
+
+    suspend fun models(agentId: String): List<RuntimeModel> = client.models(agentId)
 
     suspend fun queuedMessages(agentId: String): List<QueuedCommand> = client.queuedMessages(agentId)
 

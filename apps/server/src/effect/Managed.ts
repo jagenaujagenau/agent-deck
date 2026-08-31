@@ -7,6 +7,7 @@ import {
   type ManagedRequestStore,
   type ManagedRuntimeCapabilities,
   type ManagedSession,
+  type RuntimeModel,
   type RuntimeRequestStatus,
 } from "@agent-control-dashboard/agent-adapter";
 import type { AgentState, JsonObject, JsonValue } from "./Domain";
@@ -78,6 +79,12 @@ export class ManagedRuntime extends Context.Service<
       value?: JsonValue,
     ) => Effect.Effect<boolean>;
     readonly handle: (command: Command) => Effect.Effect<boolean>;
+    /**
+     * The models this hosted session will answer as, asked of the runtime.
+     * Undefined for a session the bridge does not host — a hook session's
+     * model belongs to the runtime that owns its terminal.
+     */
+    readonly models: (agentId: string) => Effect.Effect<ReadonlyArray<RuntimeModel> | undefined>;
   }
 >()("agent-deck/server/ManagedRuntime") {
   static readonly layer = Layer.effect(
@@ -137,6 +144,12 @@ export class ManagedRuntime extends Context.Service<
         },
       };
       const adapter = new ClaudeSdkManagedRuntimeAdapter(requests);
+
+      const models = Effect.fn("ManagedRuntime.models")(function* (agentId: string) {
+        const hosted = (yield* Ref.get(sessions)).get(agentId);
+        if (hosted === undefined || !adapter.models) return undefined;
+        return yield* Effect.promise(() => adapter.models!(hosted.session));
+      });
 
       const available = Effect.sync(() => [
         { runtime: "claude", capabilities: adapter.capabilities, managed: true },
@@ -296,6 +309,10 @@ export class ManagedRuntime extends Context.Service<
             "prompt",
             "steer",
             "follow_up",
+            // Advertised only when the runtime can really do it: a control a
+            // surface offers and the bridge then refuses is worse than one it
+            // never offered.
+            ...(adapter.capabilities.modelSwitch ? ["set_model" as const] : []),
             ...(unattended ? [] : ["approve" as const, "reject" as const]),
           ],
         };
@@ -349,6 +366,14 @@ export class ManagedRuntime extends Context.Service<
         const action = Effect.gen(function* () {
           if (["prompt", "steer", "follow_up"].includes(command.action) && command.value) {
             yield* Effect.promise(() => adapter.send(hosted.session, command.value!));
+          } else if (command.action === "set_model" && command.value && adapter.setModel) {
+            yield* Effect.promise(() => adapter.setModel!(hosted.session, command.value!));
+            // The deck says what the runtime is running only once it has
+            // accepted the switch; a refusal leaves the old model standing.
+            // The hosted record is updated too, or the next heartbeat — which
+            // sends the record, not the session — would put the old model back.
+            hosted.agent.model = hosted.session.model;
+            yield* state.heartbeat(hosted.agent);
           } else if (command.action === "pause") {
             yield* Effect.promise(() => adapter.interrupt(hosted.session));
           } else if (command.action === "stop") {
@@ -381,7 +406,7 @@ export class ManagedRuntime extends Context.Service<
         return true;
       });
 
-      return ManagedRuntime.of({ available, start, resolve, handle });
+      return ManagedRuntime.of({ available, start, resolve, handle, models });
     }),
   );
 }

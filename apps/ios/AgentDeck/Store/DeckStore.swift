@@ -405,6 +405,15 @@ final class DeckStore {
         }
     }
 
+    /// What each hosted session can be switched to; empty for a runtime-owned one.
+    var sessionModels: [String: [RuntimeModel]] = [:]
+
+    func loadModels(agentId: String) async {
+        if let models = try? await client.models(agentId: agentId) {
+            sessionModels[agentId] = models
+        }
+    }
+
     /// The message commands still queued per session, for the composer's dock.
     var queuedMessages: [String: [QueuedCommand]] = [:]
 

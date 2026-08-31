@@ -439,6 +439,20 @@ describe("the wire contract, executed", () => {
     expect(((await drained.json()) as { commands: unknown[] }).commands).toEqual([]);
   });
 
+  test("a model list belongs to a hosted session, and nobody else", async () => {
+    await heartbeat("codex-contract-models");
+    const hookSession = await fetch(`${base}/bridge/v1/agents/codex-contract-models/models`, {
+      headers: { Authorization: `Bearer ${MASTER}` },
+    });
+    // A terminal session's model is the runtime's, not the bridge's — and
+    // saying so is better than an empty list that reads as "no models".
+    expect(hookSession.status).toBe(404);
+    const unknown = await fetch(`${base}/bridge/v1/agents/nobody/models`, {
+      headers: { Authorization: `Bearer ${MASTER}` },
+    });
+    expect(unknown.status).toBe(404);
+  });
+
   test("explain says whose word each fact is", async () => {
     // codex-contract-proj registered itself and holds a canonical projection;
     // codex-contract-1 only ever heartbeated its identity.

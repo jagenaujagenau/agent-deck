@@ -36,7 +36,7 @@ internal fun latestEvent(agent: Agent, predicate: (AgentEvent) -> Boolean = { tr
     agent.events.filter(predicate).maxByOrNull { it.createdAt }
 
 @Composable
-internal fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit, queuedMessages: List<QueuedCommand> = emptyList(), onLoadQueued: () -> Unit = {}, onCancelQueued: (String) -> Unit = {}, seenUpTo: String? = null) {
+internal fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit, queuedMessages: List<QueuedCommand> = emptyList(), onLoadQueued: () -> Unit = {}, onCancelQueued: (String) -> Unit = {}, seenUpTo: String? = null, models: List<RuntimeModel> = emptyList(), onLoadModels: () -> Unit = {}) {
     // The session is one conversation. Everything the agent did reads inline
     // as work between the words; depth — a command's output, a file's diff,
     // the session's changed files — opens as a sheet over the same screen
@@ -44,6 +44,7 @@ internal fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?
     var openActivity by remember(agent.id) { mutableStateOf<AgentEvent?>(null) }
     var openSteps by remember(agent.id) { mutableStateOf<List<AgentEvent>?>(null) }
     var changesOpen by rememberSaveable(agent.id) { mutableStateOf(false) }
+    var modelsOpen by rememberSaveable(agent.id) { mutableStateOf(false) }
     var confirmingStop by rememberSaveable(agent.id) { mutableStateOf(false) }
     val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
     val pendingApproval = (openRequest(agent) as? OpenRequest.Approval)?.approval
@@ -118,6 +119,9 @@ internal fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?
         }
     }
     LaunchedEffect(agent.id) { onLoadSlashCommands() }
+    // Only a session the bridge hosts has a list to ask for; the rest answer
+    // with nothing and the menu simply does not offer the control.
+    LaunchedEffect(agent.id) { if (supports("set_model")) onLoadModels() }
     BackHandler { onDismiss() }
 
     Surface(Modifier.fillMaxSize(), color = Ink) {
@@ -258,6 +262,24 @@ internal fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?
                                         confirmingStop = true
                                     },
                                 )
+                                if (supports("set_model")) DropdownMenuItem(
+                                    text = { Text("Model", color = Text, fontSize = 13.sp) },
+                                    leadingIcon = { Icon(Icons.Rounded.Tune, null, tint = Muted, modifier = Modifier.size(18.dp)) },
+                                    trailingIcon = {
+                                        Text(
+                                            providerFor(agent).model,
+                                            color = Muted,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    enabled = !busy,
+                                    onClick = {
+                                        actionsOpen = false
+                                        modelsOpen = true
+                                    },
+                                )
                                 // The ledger again, where the actions live:
                                 // the header shows it, the menu opens it.
                                 remember(sessionChanges) { diffStat(sessionChanges) }?.let { stat ->
@@ -332,6 +354,17 @@ internal fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?
     }
     if (changesOpen) {
         ChangesSheet(fileChanges, changesLoaded, onDismiss = { changesOpen = false })
+    }
+    if (modelsOpen) {
+        ModelPicker(
+            models = models,
+            current = agent.model,
+            onPick = { model ->
+                modelsOpen = false
+                onControl("set_model", model.id)
+            },
+            onDismiss = { modelsOpen = false },
+        )
     }
     if (mapOpen) {
         ConversationMapSheet(

@@ -15,6 +15,23 @@ export type ManagedSession = {
 };
 
 /**
+ * One model a runtime will answer as, in the runtime's own words.
+ *
+ * The deck never invents this list: a model shipped after the phone was
+ * installed would be missing from any catalog compiled into the app, and a
+ * model the account cannot reach would be offered by any catalog we wrote
+ * ourselves. `id` is what a caller passes back to select it; `resolvedModel`
+ * is what an alias like "sonnet" actually resolves to, so a session started
+ * on an explicit id can still be matched to the row that covers it.
+ */
+export type RuntimeModel = {
+  id: string;
+  label: string;
+  description?: string;
+  resolvedModel?: string;
+};
+
+/**
  * Host-owned runtime seam. Native Claude/Codex/ACP implementations satisfy
  * this interface; externally launched sessions continue through hook adapters.
  */
@@ -42,6 +59,18 @@ export interface ManagedRuntimeAdapter {
   ): Promise<void>;
   stop(session: ManagedSession): Promise<void>;
   events(session: ManagedSession): AsyncIterable<CanonicalRuntimeEvent>;
+  /**
+   * The models this runtime will answer as, asked of the runtime rather than
+   * remembered. Only meaningful when `capabilities.modelSwitch` — an adapter
+   * that cannot switch has no list worth showing.
+   */
+  models?(session: ManagedSession): Promise<ReadonlyArray<RuntimeModel>>;
+  /**
+   * Switches the model of a live session. The session's `model` is updated by
+   * the caller only once this resolves, so a refused switch leaves the deck
+   * saying what the runtime is actually running.
+   */
+  setModel?(session: ManagedSession, model: string): Promise<void>;
 }
 
 export class ManagedRuntimeRegistry {

@@ -119,6 +119,10 @@ export const ControlAction = Schema.Literals([
   "prompt",
   "steer",
   "follow_up",
+  // Which model the session answers as. A Command rather than a setting:
+  // it is a change to a running session, it takes a receipt, and a runtime
+  // that cannot do it refuses like any other unsupported action.
+  "set_model",
 ]);
 export type ControlAction = typeof ControlAction.Type;
 

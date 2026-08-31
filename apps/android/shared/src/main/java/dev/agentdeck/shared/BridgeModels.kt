@@ -29,6 +29,18 @@ fun BridgeSnapshot.applyPatch(patch: BridgeSnapshotPatch): BridgeSnapshot {
     return BridgeSnapshot(patch.sequence, patch.bridge, patch.summary, kept + added)
 }
 
+/** One model a bridge-hosted session will answer as, in the runtime's own words. */
+@Serializable
+data class RuntimeModel(
+    val id: String,
+    val label: String,
+    val description: String? = null,
+    val resolvedModel: String? = null,
+)
+
+@Serializable
+internal data class RuntimeModels(val models: List<RuntimeModel> = emptyList())
+
 @Serializable
 data class SlashCommand(val name: String, val description: String? = null, val source: String = "user")
 

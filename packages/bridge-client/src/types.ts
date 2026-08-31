@@ -26,7 +26,8 @@ export type ControlAction =
   | "reject"
   | "prompt"
   | "steer"
-  | "follow_up";
+  | "follow_up"
+  | "set_model";
 
 export interface AgentEvent {
   id: string;
@@ -180,4 +181,12 @@ export interface ManagedRuntime {
   runtime: string;
   managed: boolean;
   capabilities?: Record<string, boolean>;
+}
+
+/** One model a bridge-hosted session will answer as, in the runtime's own words. */
+export interface RuntimeModel {
+  id: string;
+  label: string;
+  description?: string;
+  resolvedModel?: string;
 }

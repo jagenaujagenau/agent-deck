@@ -918,7 +918,10 @@ export class BridgeState extends Context.Service<
           id: makeId(),
           kind: ["prompt", "steer", "follow_up"].includes(action) ? "user" : "output",
           summary: `Remote command: ${action}`,
-          detail: value,
+          // A model id is not something a person said. Carrying it as the
+          // event's detail put "sonnet" in the conversation as the reader's
+          // own words; the summary already names what happened.
+          detail: action === "set_model" ? undefined : value,
           createdAt: now(),
         });
         yield* persistAgent(agent);

@@ -61,6 +61,19 @@ actor BridgeClient {
         return response.changes
     }
 
+    /// The models this session will answer as, asked of the runtime. A session
+    /// the bridge does not host has no list — its model belongs to the runtime
+    /// that owns its terminal — and answers 404, which is an empty list here so
+    /// a surface can simply not offer the control.
+    func models(agentId: String) async throws -> [RuntimeModel] {
+        do {
+            let response: RuntimeModels = try await get("/bridge/v1/agents/\(escape(agentId))/models")
+            return response.models
+        } catch BridgeError.http(404, _) {
+            return []
+        }
+    }
+
     /// The message commands still queued for this session — the sender's to
     /// take back until the runtime collects them.
     func queuedMessages(agentId: String) async throws -> [QueuedCommand] {

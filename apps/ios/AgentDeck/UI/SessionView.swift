@@ -30,6 +30,7 @@ struct SessionView: View {
     /// The conversation map and the pick it made; the timeline consumes the
     /// pick by scrolling to it once.
     @State private var mapOpen = false
+    @State private var modelsOpen = false
     @State private var mapTarget: String?
     /// Reading history after a map jump: the auto-scroll to the live edge
     /// stands down until the person speaks again or reopens the session.
@@ -68,6 +69,15 @@ struct SessionView: View {
                 }
                 .sheet(item: $openSteps) { selection in
                     StepsSheet(events: selection.events)
+                }
+                .sheet(isPresented: $modelsOpen) {
+                    ModelPicker(
+                        models: store.sessionModels[agentId] ?? [],
+                        current: agent.model
+                    ) { model in
+                        modelsOpen = false
+                        Task { try? await store.control(agentId: agentId, action: "set_model", value: model.id) }
+                    }
                 }
                 .sheet(isPresented: $mapOpen) {
                     ConversationMapSheet(markers: conversationMarkers(viewedEvents(agent))) { id in
@@ -141,6 +151,10 @@ struct SessionView: View {
         await loadHistory()
         await store.loadChanges(agentId: agentId)
         await store.loadQueued(agentId: agentId)
+        // Only a session the bridge hosts has a list to ask for.
+        if let agent, supportsCapability(agent.capabilities, "set_model") {
+            await store.loadModels(agentId: agentId)
+        }
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
@@ -230,6 +244,13 @@ struct SessionView: View {
                             changesOpen = true
                         } label: {
                             Label("Changes  +\(stat.added) −\(stat.removed)", systemImage: "plusminus")
+                        }
+                    }
+                    if supportsCapability(agent.capabilities, "set_model") {
+                        Button {
+                            modelsOpen = true
+                        } label: {
+                            Label("Model  \(humanizeModelId(agent.model))", systemImage: "slider.horizontal.3")
                         }
                     }
                     Button {

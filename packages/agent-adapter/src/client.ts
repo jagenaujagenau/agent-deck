@@ -29,7 +29,8 @@ export type ControlAction =
   | "reject"
   | "prompt"
   | "steer"
-  | "follow_up";
+  | "follow_up"
+  | "set_model";
 
 /**
  * The heartbeat as an adapter posts it — a deliberate restatement of the

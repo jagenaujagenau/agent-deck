@@ -127,7 +127,7 @@ event in place (a tool's diff arrives with its completion); order by
 
 `POST /agents/:id/control` with `{action, value?, commandId?, force?}`.
 Actions: `pause`, `resume`, `stop`, `approve`, `reject`, `prompt`, `steer`,
-`follow_up`. Answers: `202` with the queued command, `404` unknown agent,
+`follow_up`, `set_model`. Answers: `202` with the queued command, `404` unknown agent,
 `409` when the runtime does not support the action.
 
 **The blocked refusal.** A `prompt`/`steer`/`follow_up` aimed at a session
@@ -144,6 +144,15 @@ this way; they are how a blocked session gets unblocked.
 
 Delivery is observable: `GET /commands/:id/receipt` reports
 `{commandId, status, error?, resultSequence?, updatedAt}`.
+
+`GET /agents/:id/models` (read scope) lists the models a **bridge-hosted**
+session will answer as, asked of the runtime rather than compiled into a
+surface: `{models: [{id, label, description?, resolvedModel?}]}`. A session
+the bridge does not host answers 404 — a terminal session's model belongs to
+the runtime that owns it. Switch with the `set_model` control action, whose
+`value` is the `id`; a session advertises the `set_model` capability only
+when its runtime can really do it, and the deck reports the new model only
+once the runtime has accepted the switch.
 
 What a person queued is theirs to take back until the runtime collects it:
 `GET /agents/:id/queued` (read scope) lists the message commands — prompt,

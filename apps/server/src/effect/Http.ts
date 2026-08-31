@@ -424,6 +424,25 @@ export const BridgeRoutes = HttpRouter.addAll([
     }),
   ),
 
+  /**
+   * The models a hosted session will answer as, asked of the runtime rather
+   * than compiled into a surface: a model shipped after the phone was
+   * installed would be missing from any list the app carried, and a model
+   * the account cannot reach would be offered by any list we wrote. A
+   * session the bridge does not host answers 404 — a terminal session's
+   * model belongs to the runtime that owns it.
+   */
+  route(
+    "GET",
+    "/agents/:agentId/models",
+    Effect.gen(function* () {
+      const managed = yield* ManagedRuntime;
+      const models = yield* managed.models(yield* param("agentId"));
+      return models === undefined
+        ? yield* error("This session's model is the runtime's, not the bridge's", 404)
+        : yield* HttpServerResponse.json({ models });
+    }),
+  ),
   route(
     "GET",
     "/managed/runtimes",

@@ -9,7 +9,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { JsonObject, JsonValue } from "./json-value";
 import type { CanonicalRuntimeEvent, RuntimeRequestStatus } from "./runtime-events";
-import type { ManagedRuntimeAdapter, ManagedSession } from "./managed-runtime";
+import type { ManagedRuntimeAdapter, ManagedSession, RuntimeModel } from "./managed-runtime";
 
 export type DurableManagedRequest = {
   requestId: string;
@@ -140,6 +140,35 @@ export class ClaudeSdkManagedRuntimeAdapter implements ManagedRuntimeAdapter {
     runtime.events.push(
       this.#event(session, "session.state.changed", { state: "running", task: "Thinking" }),
     );
+  }
+
+  /**
+   * The models this account can actually reach, asked of the running query.
+   * A runtime that answers nothing (an older CLI, a transport that refuses)
+   * yields an empty list rather than a guess — the deck shows what it was
+   * told and nothing else.
+   */
+  async models(session: ManagedSession): Promise<ReadonlyArray<RuntimeModel>> {
+    // The SDK declares `supportedModels`; a transport that cannot answer it —
+    // an older CLI behind the same types — yields an empty list rather than a
+    // guess, because the deck shows what it was told and nothing else.
+    const models = await this.#runtime(session)
+      .query.supportedModels()
+      .catch(() => []);
+    return models.map((model) => ({
+      id: model.value,
+      label: model.displayName,
+      description: model.description,
+      resolvedModel: model.resolvedModel,
+    }));
+  }
+
+  async setModel(session: ManagedSession, model: string) {
+    const runtime = this.#runtime(session);
+    await runtime.query.setModel(model);
+    // The session's own word for what it is running, updated only once the
+    // runtime has accepted the switch.
+    runtime.session.model = model;
   }
 
   async interrupt(session: ManagedSession) {

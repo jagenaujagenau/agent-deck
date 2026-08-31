@@ -261,6 +261,16 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _sessionModels = MutableStateFlow<Map<String, List<RuntimeModel>>>(emptyMap())
+
+    /** What each hosted session can be switched to; empty for a runtime-owned one. */
+    internal val sessionModels = _sessionModels.asStateFlow()
+
+    fun loadModels(agentId: String) = viewModelScope.launch {
+        runCatching { repository.models(agentId) }
+            .onSuccess { models -> _sessionModels.value = _sessionModels.value + (agentId to models) }
+    }
+
     private val _queuedMessages = MutableStateFlow<Map<String, List<QueuedCommand>>>(emptyMap())
     val queuedMessages = _queuedMessages.asStateFlow()
 
@@ -639,6 +649,7 @@ internal fun AgentDeckApp(
 
     val sessionChanges by vm.sessionChanges.collectAsStateWithLifecycle()
     val queuedMessages by vm.queuedMessages.collectAsStateWithLifecycle()
+    val sessionModels by vm.sessionModels.collectAsStateWithLifecycle()
     val sessionHistory by vm.sessionHistory.collectAsStateWithLifecycle()
     val slashCommands by vm.slashCommands.collectAsStateWithLifecycle()
     val openAgent = selectedAgent?.let { selected -> snapshot?.agents?.firstOrNull { it.id == selected.id } }
@@ -681,6 +692,8 @@ internal fun AgentDeckApp(
             onLoadQueued = { vm.loadQueued(openAgent.id) },
             onCancelQueued = { commandId -> vm.cancelQueued(openAgent.id, commandId) },
             seenUpTo = seenUpTo,
+            models = sessionModels[openAgent.id].orEmpty(),
+            onLoadModels = { vm.loadModels(openAgent.id) },
         )
         return
     }

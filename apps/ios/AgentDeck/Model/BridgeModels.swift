@@ -433,3 +433,15 @@ struct QueuedCommand: Decodable, Identifiable, Equatable {
 struct QueuedCommands: Decodable {
     var commands: [QueuedCommand]
 }
+
+/// One model a bridge-hosted session will answer as, in the runtime's own words.
+struct RuntimeModel: Decodable, Identifiable, Equatable {
+    var id: String
+    var label: String
+    var description: String?
+    var resolvedModel: String?
+}
+
+struct RuntimeModels: Decodable {
+    var models: [RuntimeModel]
+}
