@@ -71,4 +71,23 @@ final class ChatSummaryTests: XCTestCase {
     func testDiffStatIsNilWithoutDiffs() throws {
         XCTAssertNil(diffStat([try event(id: "e1", tool: "Bash", command: "ls")]))
     }
+
+    func testASearchIsASearchNotAnEdit() throws {
+        let events = [
+            try event(id: "e1", tool: "Grep", path: "src"),
+            try event(id: "e2", tool: "Grep", path: "docs"),
+            try event(id: "e3", tool: "Edit", path: "a.ts"),
+        ]
+        XCTAssertEqual(activitySummary(events), "Edited 1 file, searched 2 times")
+    }
+
+    func testFailedStepsAreCountedForTheHeader() throws {
+        let events = [
+            try event(id: "e1", kind: "error", summary: "boom"),
+            try event(id: "e2", kind: "tool", summary: "ok"),
+            try event(id: "e3", kind: "error", summary: "boom again"),
+        ]
+        XCTAssertEqual(failedSteps(events), 2)
+        XCTAssertEqual(failedSteps(events.filter { $0.kind != "error" }), 0)
+    }
 }

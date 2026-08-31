@@ -82,9 +82,13 @@ fun diffStat(events: List<AgentEvent>): DiffStat? {
  * verbs come from what each step actually was; a run of nothing nameable
  * falls back to counting steps.
  */
+/** The tools that look things up rather than change them. A Grep hit carries a path, but nothing was edited. */
+private val searchTools = setOf("Grep", "Glob", "WebSearch", "WebFetch")
+
 fun activitySummary(events: List<AgentEvent>): String {
     val commands = events.count { !it.command.isNullOrBlank() || it.tool == "Bash" }
-    val paths = events.filter { !it.path.isNullOrBlank() }
+    val searches = events.count { it.tool in searchTools }
+    val paths = events.filter { !it.path.isNullOrBlank() && it.tool !in searchTools }
     val created = paths.filter { it.tool == "Write" }.map { it.path }.distinct().size
     val read = paths.filter { it.tool == "Read" }.map { it.path }.distinct().size
     val edited = paths.filter { it.tool != "Write" && it.tool != "Read" }.map { it.path }.distinct().size
@@ -95,6 +99,7 @@ fun activitySummary(events: List<AgentEvent>): String {
         if (edited > 0) add("edited ${files(edited)}")
         if (created > 0) add("created ${files(created)}")
         if (read > 0) add("read ${files(read)}")
+        if (searches > 0) add("searched ${if (searches == 1) "once" else "$searches times"}")
         if (isEmpty() && thoughts > 0) add(if (thoughts == 1) "thought once" else "thought $thoughts times")
     }
     val line = if (parts.isEmpty()) {
@@ -181,3 +186,6 @@ fun markerPreview(text: String, limit: Int = 96): String {
     val clipped = line.take(limit - 1).trimEnd()
     return clipped.substringBeforeLast(' ', clipped) + "…"
 }
+
+/** How many steps of a run failed — worn on the cluster header so triage needs no expansion. */
+fun failedSteps(events: List<AgentEvent>): Int = events.count { it.kind == "error" }

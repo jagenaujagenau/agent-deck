@@ -114,15 +114,27 @@ func homeAgentState(_ agent: Agent, seen: Bool = true, now: Date = Date()) -> Ho
 /// with the same identity.
 func homeAgentOrder(_ agents: [Agent], archived: Set<String> = [], seen: (Agent) -> Bool = { _ in true }, now: Date = Date()) -> [Agent] {
     agents.sorted { first, second in
-        let a = homeAgentState(first, archived: archived.contains(first.id), seen: seen(first), now: now).rawValue
-        let b = homeAgentState(second, archived: archived.contains(second.id), seen: seen(second), now: now).rawValue
-        if a != b { return a < b }
-        let pa = first.project.lowercased()
-        let pb = second.project.lowercased()
-        if pa != pb { return pa < pb }
+        let stateA = homeAgentState(first, archived: archived.contains(first.id), seen: seen(first), now: now)
+        let stateB = homeAgentState(second, archived: archived.contains(second.id), seen: seen(second), now: now)
+        if stateA != stateB { return stateA.rawValue < stateB.rawValue }
         let ra = attentionPriority(state: first.state, blocked: first.state == "waiting", seen: seen(first))
         let rb = attentionPriority(state: second.state, blocked: second.state == "waiting", seen: seen(second))
         if ra != rb { return ra > rb }
+        // Within the attention states the longest-stuck ask surfaces first —
+        // oldest activity on top — because the session that has been waiting
+        // an hour is the one being forgotten. Stable by construction: a
+        // waiting session's activity is frozen at the ask that stuck it.
+        // (Ordering matches Android's `homeDeck` exactly; the two used to
+        // disagree on the priority-vs-project order, which the old grouped
+        // layouts masked and the flat chat lists would not.)
+        if stateA.attention {
+            let sa = SeenPolicy.activityAt(first)
+            let sb = SeenPolicy.activityAt(second)
+            if sa != sb { return sa < sb }
+        }
+        let pa = first.project.lowercased()
+        let pb = second.project.lowercased()
+        if pa != pb { return pa < pb }
         return first.id < second.id
     }
 }

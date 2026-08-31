@@ -33,6 +33,13 @@ struct ActivityClusterView: View {
                         DiffStatLabel(stat: stat)
                             .padding(.leading, 6)
                     }
+                    // Failures ride the summary line so triage needs no expansion.
+                    if failedSteps(events) > 0 {
+                        Text("\(failedSteps(events)) failed")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.danger)
+                            .padding(.leading, 6)
+                    }
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10))
                         .foregroundStyle(Palette.muted.opacity(0.7))
@@ -101,6 +108,11 @@ struct StepsSheet: View {
                 Spacer()
                 if let stat = diffStat(events) {
                     DiffStatLabel(stat: stat)
+                }
+                if failedSteps(events) > 0 {
+                    Text("\(failedSteps(events)) failed")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.danger)
                 }
             }
             ScrollView {

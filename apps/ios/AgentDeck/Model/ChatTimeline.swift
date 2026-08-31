@@ -98,9 +98,14 @@ func diffStat(_ events: [AgentEvent]) -> DiffStat? {
 /// a person would — "Ran 11 commands, edited 2 files", not a tool census.
 /// The verbs come from what each step actually was; a run of nothing nameable
 /// falls back to counting steps. Mirrored from Android's `ChatTimeline.kt`.
+/// The tools that look things up rather than change them. A Grep hit carries
+/// a path, but nothing was edited.
+private let searchTools: Set<String> = ["Grep", "Glob", "WebSearch", "WebFetch"]
+
 func activitySummary(_ events: [AgentEvent]) -> String {
     let commands = events.filter { !($0.command ?? "").trimmed.isEmpty || $0.tool == "Bash" }.count
-    let paths = events.filter { !($0.path ?? "").trimmed.isEmpty }
+    let searches = events.filter { searchTools.contains($0.tool ?? "") }.count
+    let paths = events.filter { !($0.path ?? "").trimmed.isEmpty && !searchTools.contains($0.tool ?? "") }
     let created = Set(paths.filter { $0.tool == "Write" }.compactMap(\.path)).count
     let read = Set(paths.filter { $0.tool == "Read" }.compactMap(\.path)).count
     let edited = Set(paths.filter { $0.tool != "Write" && $0.tool != "Read" }.compactMap(\.path)).count
@@ -111,6 +116,7 @@ func activitySummary(_ events: [AgentEvent]) -> String {
     if edited > 0 { parts.append("edited \(files(edited))") }
     if created > 0 { parts.append("created \(files(created))") }
     if read > 0 { parts.append("read \(files(read))") }
+    if searches > 0 { parts.append("searched \(searches == 1 ? "once" : "\(searches) times")") }
     if parts.isEmpty, thoughts > 0 {
         parts.append(thoughts == 1 ? "thought once" : "thought \(thoughts) times")
     }
@@ -186,4 +192,10 @@ func markerPreview(_ text: String, limit: Int = 96) -> String {
     let clipped = String(line.prefix(limit - 1)).trimmed
     let atWord = clipped.range(of: " ", options: .backwards).map { String(clipped[..<$0.lowerBound]) } ?? clipped
     return atWord + "…"
+}
+
+/// How many steps of a run failed — worn on the cluster header so triage
+/// needs no expansion. Mirrored from `ChatTimeline.kt`.
+func failedSteps(_ events: [AgentEvent]) -> Int {
+    events.filter { $0.kind == "error" }.count
 }

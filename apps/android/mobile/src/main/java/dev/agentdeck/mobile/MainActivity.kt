@@ -2547,6 +2547,11 @@ private fun ActivityCluster(
                 Spacer(Modifier.width(6.dp))
                 DiffStatLabel(stat)
             }
+            // Failures ride the summary line so triage needs no expansion.
+            failedSteps(events).takeIf { it > 0 }?.let { failed ->
+                Spacer(Modifier.width(6.dp))
+                Text("$failed failed", color = Danger, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
             Spacer(Modifier.width(4.dp))
             Icon(Icons.Rounded.ChevronRight, "Open steps", tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
         }
@@ -2592,6 +2597,10 @@ private fun StepsSheet(events: List<AgentEvent>, onOpen: (AgentEvent) -> Unit, o
                     modifier = Modifier.weight(1f),
                 )
                 diffStat(events)?.let { DiffStatLabel(it) }
+                failedSteps(events).takeIf { it > 0 }?.let { failed ->
+                    Spacer(Modifier.width(8.dp))
+                    Text("$failed failed", color = Danger, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
             LazyColumn(Modifier.heightIn(max = 560.dp)) {
                 items(events, key = { "step:${it.id}" }) { event -> ActivityRow(event, onOpen) }

@@ -2,6 +2,7 @@ package dev.agentdeck.mobile
 
 import dev.agentdeck.shared.Agent
 import dev.agentdeck.shared.attentionPriority
+import dev.agentdeck.shared.latestActivityAt
 import java.time.Instant
 
 /**
@@ -61,10 +62,15 @@ internal fun homeDeck(
     // The same order homeAgentOrder produced, on states derived once: sections
     // carry the coarse order, the shared ranking breaks ties within one, and
     // mutable heartbeats never reorder cards while a person reads them.
+    // Within the attention states the longest-stuck ask surfaces first —
+    // oldest activity on top, not newest — because the session that has been
+    // waiting an hour is the one being forgotten. Stable by construction: a
+    // waiting session's activity is frozen at the ask that stuck it.
     return HomeDeck(
         cards.sortedWith(
             compareBy<DeckCard> { it.state.ordinal }
                 .thenByDescending { attentionPriority(it.agent.state, it.agent.state == "waiting", it.seen) }
+                .thenBy { if (it.state.attention) latestActivityAt(it.agent) else "" }
                 .thenBy { it.agent.project.lowercase() }
                 .thenBy { it.agent.id },
         ),

@@ -126,4 +126,25 @@ class CompletionIsActivityTest {
         )
         assertEquals(2, (timeline[1] as TimelineItem.Activity).events.size)
     }
+
+    @Test
+    fun `a search is a search, not an edit`() {
+        val events = listOf(
+            AgentEvent(id = "e1", kind = "tool", summary = "Grep", tool = "Grep", path = "src", createdAt = "2026-08-30T10:00:00Z"),
+            AgentEvent(id = "e2", kind = "tool", summary = "Grep", tool = "Grep", path = "docs", createdAt = "2026-08-30T10:00:01Z"),
+            AgentEvent(id = "e3", kind = "tool", summary = "Edit", tool = "Edit", path = "a.ts", createdAt = "2026-08-30T10:00:02Z"),
+        )
+        assertEquals("Edited 1 file, searched 2 times", activitySummary(events))
+    }
+
+    @Test
+    fun `failed steps are counted for the header`() {
+        val events = listOf(
+            AgentEvent(id = "e1", kind = "error", summary = "boom", createdAt = "2026-08-30T10:00:00Z"),
+            AgentEvent(id = "e2", kind = "tool", summary = "ok", createdAt = "2026-08-30T10:00:01Z"),
+            AgentEvent(id = "e3", kind = "error", summary = "boom again", createdAt = "2026-08-30T10:00:02Z"),
+        )
+        assertEquals(2, failedSteps(events))
+        assertEquals(0, failedSteps(events.filter { it.kind != "error" }))
+    }
 }

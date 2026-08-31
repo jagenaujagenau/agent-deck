@@ -77,4 +77,28 @@ class HomeDeckTest {
         assertTrue(deck.cards.first().state == HomeAgentState.Done)
         assertEquals("fresh", deck.cards.first().agent.id)
     }
+
+    @Test
+    fun `the longest-stuck ask surfaces first inside an attention state`() {
+        fun waiting(id: String, askedAt: String) = agent(id, "waiting").copy(
+            lastSeenAt = askedAt,
+            events = listOf(
+                dev.agentdeck.shared.AgentEvent(id = "$id-ask", kind = "question", summary = "Q", createdAt = askedAt),
+            ),
+        )
+        val deck = homeDeck(
+            listOf(
+                waiting("fresh", "2026-08-30T11:58:00Z"),
+                waiting("stuck-an-hour", "2026-08-30T11:00:00Z"),
+                waiting("stuck-a-while", "2026-08-30T11:30:00Z"),
+            ),
+            archivedKeys = emptySet(),
+            seenMarks = emptyMap(),
+            now = now,
+        )
+        assertEquals(
+            listOf("stuck-an-hour", "stuck-a-while", "fresh"),
+            deck.cards.map { it.agent.id },
+        )
+    }
 }
