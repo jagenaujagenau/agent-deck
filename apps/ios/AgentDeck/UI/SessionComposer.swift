@@ -182,16 +182,9 @@ struct SessionComposer: View {
     }
 
     private func send(action: String, force: Bool = false) async {
-        var message = draft.trimmed
-        guard !message.isEmpty else { return }
+        // What a draft becomes is one shared rule — see `composerSubmission`.
+        guard let message = composerSubmission(draft) else { return }
         onSpoke()
-        // `!` is the terminal living in the composer: the rest of the line
-        // goes to the runtime as an exact shell command.
-        if message.hasPrefix("!") {
-            let command = String(message.dropFirst()).trimmed
-            guard !command.isEmpty else { return }
-            message = terminalCommandInstruction(command)
-        }
         busy = true
         failure = nil
         defer { busy = false }

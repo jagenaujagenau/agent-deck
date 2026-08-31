@@ -1,0 +1,1 @@
+../../../AgentDeck/Model/ChatSummary.swift

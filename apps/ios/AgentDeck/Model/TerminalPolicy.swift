@@ -167,3 +167,18 @@ func terminalLine(_ command: String) -> TerminalLine {
     }
     return .shell(command)
 }
+
+/// What a typed draft becomes when the person sends it, or nil when it is
+/// nothing to send.
+///
+/// `!` is the terminal living in the composer: the rest of the line goes to
+/// the runtime as an exact shell command. A bare `!` with nothing after it is
+/// not a command — one phone used to send the literal "!" as a prompt while
+/// the other sent nothing. Mirrored from Android's `composerSubmission`.
+func composerSubmission(_ draft: String) -> String? {
+    let content = draft.trimmed
+    if content.isEmpty { return nil }
+    guard content.hasPrefix("!") else { return content }
+    let command = String(content.dropFirst()).trimmed
+    return command.isEmpty ? nil : terminalCommandInstruction(command)
+}

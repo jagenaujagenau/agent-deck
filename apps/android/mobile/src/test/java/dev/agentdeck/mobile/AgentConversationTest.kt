@@ -128,4 +128,15 @@ class TaskNotificationPlumbingTest {
         )
         org.junit.Assert.assertTrue(entries.isEmpty())
     }
+
+    @Test
+    fun `a draft becomes a prompt, a shell command, or nothing`() {
+        assertEquals("Fix the tests", composerSubmission("  Fix the tests  "))
+        assertEquals(null, composerSubmission("   "))
+        // A bare "!" is not a command: one phone used to send the literal
+        // character as a prompt while the other sent nothing.
+        assertEquals(null, composerSubmission("!"))
+        assertEquals(null, composerSubmission("!   "))
+        assertEquals(terminalCommandInstruction("bun test"), composerSubmission("!bun test"))
+    }
 }

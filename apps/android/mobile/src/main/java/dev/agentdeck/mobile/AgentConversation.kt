@@ -163,3 +163,21 @@ private fun restoreFlattenedHeadings(value: String): String =
 private fun closeInTime(first: String, second: String): Boolean = runCatching {
     Duration.between(Instant.parse(first), Instant.parse(second)).abs() < Duration.ofSeconds(10)
 }.getOrDefault(false)
+
+/**
+ * What a typed draft becomes when the person sends it, or null when it is
+ * nothing to send.
+ *
+ * `!` is the terminal living in the composer: the rest of the line goes to
+ * the runtime as an exact shell command. A bare `!` with nothing after it is
+ * not a command — one phone used to send the literal "!" as a prompt while
+ * the other sent nothing, which is the kind of disagreement a shared rule
+ * exists to end.
+ */
+internal fun composerSubmission(draft: String): String? {
+    val content = draft.trim()
+    if (content.isEmpty()) return null
+    if (!content.startsWith("!")) return content
+    val command = content.removePrefix("!").trim()
+    return command.takeIf { it.isNotBlank() }?.let(::terminalCommandInstruction)
+}

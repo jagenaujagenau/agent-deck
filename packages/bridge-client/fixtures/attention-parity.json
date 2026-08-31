@@ -568,5 +568,273 @@
         "expect": "none"
       }
     ]
+  },
+  "cardText": {
+    "comment": "The one-line strings a surface says about a session: the headline (usefulTask), the chat's name (chatTitle), and the reasoning preview. Each case carries a literal Agent, decoded through the shipping wire decoder \u2014 so this doubles as a decode-parity test. Every case below was a real divergence between the two apps before the functions moved into shared, tested files.",
+    "cases": [
+      {
+        "case": "a whitespace-only durable question still says something actionable",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "waiting",
+          "task": "",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [],
+          "pendingQuestion": {
+            "id": "q1",
+            "question": "   ",
+            "options": [],
+            "createdAt": "2026-08-31T11:00:00Z",
+            "expiresAt": "2026-08-31T23:00:00Z"
+          }
+        },
+        "usefulTask": "Agent has a question"
+      },
+      {
+        "case": "an approval's own detail is the headline",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "waiting",
+          "task": "",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [],
+          "pendingApproval": {
+            "id": "r1",
+            "tool": "Bash",
+            "detail": "rm -rf build",
+            "createdAt": "2026-08-31T11:00:00Z",
+            "expiresAt": "2026-08-31T23:00:00Z"
+          }
+        },
+        "usefulTask": "rm -rf build"
+      },
+      {
+        "case": "a blank instruction is noise in front of the real one, not the newest",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "running",
+          "task": "Using Edit",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [
+            {
+              "id": "e1",
+              "kind": "thought",
+              "summary": "Received instruction",
+              "detail": "Fix the flaky socket test",
+              "createdAt": "2026-08-31T10:00:00Z"
+            },
+            {
+              "id": "e2",
+              "kind": "thought",
+              "summary": "Received instruction",
+              "detail": "   ",
+              "createdAt": "2026-08-31T10:01:00Z"
+            }
+          ]
+        },
+        "usefulTask": "Fix the flaky socket test"
+      },
+      {
+        "case": "the session's own objective outranks any instruction report",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "running",
+          "task": "Using Edit",
+          "objective": "Audit the parser",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [
+            {
+              "id": "e1",
+              "kind": "thought",
+              "summary": "Received instruction",
+              "detail": "Fix the flaky socket test",
+              "createdAt": "2026-08-31T10:00:00Z"
+            }
+          ]
+        },
+        "usefulTask": "Audit the parser"
+      },
+      {
+        "case": "a running session with nothing else to say dresses its task",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "running",
+          "task": "Using Edit",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": []
+        },
+        "usefulTask": "Running Edit"
+      },
+      {
+        "case": "an idle session that finished quotes its last response",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "idle",
+          "task": "Turn completed",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [
+            {
+              "id": "e1",
+              "kind": "output",
+              "summary": "Response",
+              "detail": "All green.",
+              "createdAt": "2026-08-31T10:00:00Z"
+            }
+          ]
+        },
+        "usefulTask": "Last response \u00b7 All green."
+      },
+      {
+        "case": "the chat's name is its project and its short session hash",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "orbital-api",
+          "model": "claude",
+          "state": "idle",
+          "task": "",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": []
+        },
+        "chatTitle": "orbital-api \u00b7 4f2a"
+      },
+      {
+        "case": "a projectless session is named by its harness",
+        "agent": {
+          "id": "codex-abc",
+          "name": "Codex",
+          "project": "",
+          "model": "gpt",
+          "runtime": "codex",
+          "state": "idle",
+          "task": "",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": []
+        },
+        "chatTitle": "Codex"
+      },
+      {
+        "case": "a non-ASCII suffix is not a session hash",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 \uff14f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "idle",
+          "task": "",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": []
+        },
+        "chatTitle": "deck"
+      },
+      {
+        "case": "a reasoning preview is markdown reduced to its words",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "running",
+          "task": "Thinking",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [
+            {
+              "id": "e1",
+              "kind": "thought",
+              "summary": "Reasoning",
+              "detail": "## Plan\n- Check the **tokenizer** and `lexer.ts` first",
+              "createdAt": "2026-08-31T10:00:00Z"
+            }
+          ]
+        },
+        "latestReasoningPreview": "Plan Check the tokenizer and lexer.ts first"
+      },
+      {
+        "case": "a long preview clips at a word",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "running",
+          "task": "Thinking",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [
+            {
+              "id": "e1",
+              "kind": "thought",
+              "summary": "Reasoning",
+              "detail": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega and then some more words to overflow the limit",
+              "createdAt": "2026-08-31T10:00:00Z"
+            }
+          ]
+        },
+        "latestReasoningPreview": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi\u2026"
+      },
+      {
+        "case": "an idle session has no train of thought",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "idle",
+          "task": "",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [
+            {
+              "id": "e1",
+              "kind": "thought",
+              "summary": "Reasoning",
+              "detail": "still thinking",
+              "createdAt": "2026-08-31T10:00:00Z"
+            }
+          ]
+        },
+        "latestReasoningPreview": null
+      }
+    ]
   }
 }

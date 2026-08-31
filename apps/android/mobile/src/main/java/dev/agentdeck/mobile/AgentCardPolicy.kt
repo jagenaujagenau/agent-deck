@@ -1,7 +1,12 @@
 package dev.agentdeck.mobile
 
 import dev.agentdeck.shared.Agent
+import dev.agentdeck.shared.ConversationRole
+import dev.agentdeck.shared.agentCardActivity
+import dev.agentdeck.shared.conversationEntries
+import dev.agentdeck.shared.signalSilenceMinutes
 import dev.agentdeck.shared.supportsCapability
+import dev.agentdeck.shared.usefulTask
 
 internal fun latestReasoningPreview(agent: Agent, limit: Int = 120): String? {
     // Only a running agent has a current train of thought; a finished one shows its outcome instead.
@@ -62,4 +67,24 @@ internal fun cardFreshness(timestamp: String, now: java.time.Instant = java.time
         seconds < 86_400 -> "${seconds / 3_600}h ago"
         else -> "${seconds / 86_400}d ago"
     }
+}
+
+/**
+ * The preview line: the last thing said in this conversation. A session that
+ * is asking shows its question; a running one shows what it is doing — the
+ * "typing…" of an agent; otherwise the newest message speaks, prefixed
+ * "You:" when the person spoke last, exactly as a chat list would.
+ */
+internal fun chatPreview(agent: Agent, state: HomeAgentState): String {
+    // The old card wore a status chip that said "Approval required"; without
+    // it, a bare command in amber would not say what is being asked of you.
+    if (state == HomeAgentState.ApprovalRequired) return "Approve? ${usefulTask(agent)}"
+    if (state.attention || state == HomeAgentState.Failed) return usefulTask(agent)
+    // Silence outranks a stale train of thought: the newest reasoning of a
+    // runtime that has gone mute reads as live work that is not happening.
+    if (state == HomeAgentState.Running && signalSilenceMinutes(agent) != null) return agentCardActivity(agent)
+    if (state == HomeAgentState.Running) return latestReasoningPreview(agent) ?: agentCardActivity(agent)
+    val last = conversationEntries(agent.events).lastOrNull() ?: return usefulTask(agent)
+    val line = last.content.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return usefulTask(agent)
+    return if (last.role == ConversationRole.User) "You: $line" else line
 }

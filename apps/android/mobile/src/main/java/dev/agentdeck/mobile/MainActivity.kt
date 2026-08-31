@@ -1282,57 +1282,8 @@ private fun providerFor(agent: Agent): ProviderIdentity {
     return ProviderIdentity(provider.first, model, provider.second)
 }
 
-private fun sessionSuffix(agent: Agent): String {
-    val suffix = agent.name.substringAfterLast('·', "").trim()
-    return if (suffix.matches(Regex("[a-fA-F0-9]{4}"))) " · $suffix" else ""
-}
-
 private fun latestEvent(agent: Agent, predicate: (AgentEvent) -> Boolean = { true }) =
     agent.events.filter(predicate).maxByOrNull { it.createdAt }
-
-private fun usefulTask(agent: Agent): String {
-    if (agent.state == "waiting") {
-        // No "Approval · " or "Question · " prefix: the status chip in the
-        // card's own corner already says which of the two this is, and the
-        // prefix cost a third of the line that had the detail in it.
-        agent.pendingApproval?.let { return it.detail }
-        agent.pendingQuestion?.let { return it.question.takeIf(String::isNotBlank) ?: "Agent has a question" }
-        val latest = latestEvent(agent) { it.kind == "question" }
-        if (latest != null) {
-            // The summary is the question; the detail is the note explaining
-            // it. Reading the detail put "Stripe retries are idempotent by key"
-            // on the card and hid "Which payment provider should the retry
-            // path use?" - the only part anyone can act on.
-            return latest.summary.takeIf { it.isNotBlank() && !it.equals("Question", true) }
-                ?: latest.detail
-                ?: "Agent has a question"
-        }
-        return agent.task
-    }
-    if (agent.state == "running" || agent.state == "paused") {
-        val receivedInstruction = latestEvent(agent) {
-            it.kind == "thought" && it.summary == "Received instruction" && !it.detail.isNullOrBlank()
-        }?.detail
-        // Falling back to the last thing a person actually asked for. Without
-        // it the headline restated the activity row below it verbatim -
-        // "Edit finished · continuing" over "Edit finished" - and the card
-        // spent two lines saying one thing.
-        val lastInstruction = latestEvent(agent) { it.kind == "user" && !it.detail.isNullOrBlank() }?.detail
-        val objective = agent.objective?.takeIf { it.isNotBlank() } ?: receivedInstruction ?: lastInstruction
-        if (!objective.isNullOrBlank()) return objective
-    }
-    if (agent.state == "offline") {
-        val response = latestEvent(agent) { it.kind == "output" && it.summary == "Response" && !it.detail.isNullOrBlank() }
-        return response?.detail?.let { "Last response · $it" } ?: "Session ended"
-    }
-    if (agent.state == "idle" && agent.task.lowercase() in setOf("done", "turn completed", "ready for an instruction")) {
-        val response = latestEvent(agent) { it.kind == "output" && it.summary == "Response" && !it.detail.isNullOrBlank() }
-        return response?.detail?.let { "Last response · $it" } ?: "Turn completed"
-    }
-    if (agent.task.endsWith(" completed")) return "${agent.task.removeSuffix(" completed")} finished · continuing"
-    if (agent.task.startsWith("Using ")) return "Running ${agent.task.removePrefix("Using ")}"
-    return agent.task
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1436,7 +1387,7 @@ private fun ChatRow(agent: Agent, homeState: HomeAgentState, busy: Boolean, onCl
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    chatTitle(agent, harness),
+                    chatTitle(agent),
                     fontSize = 15.sp,
                     fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
                     color = Text,
@@ -1475,34 +1426,6 @@ private fun ChatRow(agent: Agent, homeState: HomeAgentState, busy: Boolean, onCl
             }
         }
     }
-}
-
-/**
- * The chat's name. The project is the conversation a person recognises; the
- * short session suffix keeps two sessions in one project tellable apart, and
- * the harness only names the row when the session has no project at all.
- */
-private fun chatTitle(agent: Agent, harness: AgentHarness): String =
-    (agent.project.ifBlank { harness.label }) + sessionSuffix(agent)
-
-/**
- * The preview line: the last thing said in this conversation. A session that
- * is asking shows its question; a running one shows what it is doing — the
- * "typing…" of an agent; otherwise the newest message speaks, prefixed
- * "You:" when the person spoke last, exactly as a chat list would.
- */
-private fun chatPreview(agent: Agent, state: HomeAgentState): String {
-    // The old card wore a status chip that said "Approval required"; without
-    // it, a bare command in amber would not say what is being asked of you.
-    if (state == HomeAgentState.ApprovalRequired) return "Approve? ${usefulTask(agent)}"
-    if (state.attention || state == HomeAgentState.Failed) return usefulTask(agent)
-    // Silence outranks a stale train of thought: the newest reasoning of a
-    // runtime that has gone mute reads as live work that is not happening.
-    if (state == HomeAgentState.Running && signalSilenceMinutes(agent) != null) return agentCardActivity(agent)
-    if (state == HomeAgentState.Running) return latestReasoningPreview(agent) ?: agentCardActivity(agent)
-    val last = conversationEntries(agent.events).lastOrNull() ?: return usefulTask(agent)
-    val line = last.content.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return usefulTask(agent)
-    return if (last.role == ConversationRole.User) "You: $line" else line
 }
 
 @Composable
@@ -3161,14 +3084,9 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
                         hasText = message.isNotBlank(),
                         busy = busy,
                         onSend = {
-                            val content = message.trim()
-                            // `!` is the terminal living in the composer: the
-                            // rest of the line goes to the runtime as an exact
-                            // shell command, the way the Terminal tab used to
-                            // send one.
-                            val shell = content.removePrefix("!").trim()
-                                .takeIf { content.startsWith("!") && it.isNotBlank() }
-                            onControl(action, shell?.let(::terminalCommandInstruction) ?: content)
+                            // What a draft becomes is one shared rule — see
+                            // `composerSubmission`; nothing to send sends nothing.
+                            composerSubmission(message)?.let { onControl(action, it) }
                             message = ""
                         },
                     )
