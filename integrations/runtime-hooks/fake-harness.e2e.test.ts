@@ -38,6 +38,8 @@ const snapshotAgent = async (): Promise<SnapshotAgent | undefined> => {
   const response = await fetch(`${base}/bridge/v1/snapshot`, {
     headers: { Authorization: `Bearer ${MASTER}`, Connection: "close" },
   });
+  // SAFETY: the bridge's own /snapshot answered this; the suite reads only
+  // the fields it asserts on, and a shape drift is exactly the finding.
   const body = (await response.json()) as { agents: SnapshotAgent[] };
   return body.agents.find((agent) => agent.id === AGENT_ID);
 };
@@ -57,7 +59,15 @@ const until = async (test: (agent: SnapshotAgent | undefined) => boolean) => {
  * One hook delivery, as production makes it: the real shim, spawned as its
  * own process with the payload on stdin, pointed at the real bridge.
  */
-const hook = async (event: string, payload: Record<string, unknown>) => {
+/** The fields of a Claude Code hook stdin payload this suite speaks. */
+type HookPayload = {
+  prompt?: string;
+  last_assistant_message?: string;
+  tool_name?: string;
+  tool_input?: { command?: string; file_path?: string };
+};
+
+const hook = async (event: string, payload: HookPayload) => {
   const child = Bun.spawn(["bun", join(import.meta.dir, "index.ts"), "claude", event], {
     cwd: workDir,
     env: {

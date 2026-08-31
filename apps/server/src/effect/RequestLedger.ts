@@ -120,18 +120,17 @@ export const toPendingQuestion = (
  * resolution leaves the real answer with nothing left to answer. A decision
  * carries no value at all: approve or reject is the whole of it.
  */
+const decodeBareAnswer = Schema.decodeUnknownOption(Schema.String);
+const decodeMappedAnswer = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.String));
+
 export const resolutionFitsKind = (
   status: RuntimeRequestStatus,
   value: JsonValue | undefined,
 ): boolean => {
   if (status === "answered") {
-    if (typeof value === "string") return value.trim().length > 0;
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value) &&
-      Object.values(value).every((entry) => typeof entry === "string")
-    );
+    const bare = decodeBareAnswer(value);
+    if (Option.isSome(bare)) return bare.value.trim().length > 0;
+    return Option.isSome(decodeMappedAnswer(value));
   }
   return value === undefined;
 };
