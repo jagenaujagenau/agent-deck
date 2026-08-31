@@ -81,12 +81,11 @@ func homeAgentState(_ agent: Agent, archived: Bool, seen: Bool = true, now: Date
 }
 
 func homeAgentState(_ agent: Agent, seen: Bool = true, now: Date = Date()) -> HomeAgentState {
-    if agent.state == "waiting", agent.pendingApproval != nil { return .approvalRequired }
-    // The durable request is authoritative; the event window is a fallback for
-    // a bridge that predates `pendingQuestion`.
-    if agent.state == "waiting",
-       agent.pendingQuestion != nil || agent.events.contains(where: { $0.kind == "question" }) {
-        return .question
+    // What the session is waiting on, asked once — see `openRequest`.
+    switch openRequest(agent, now: now) {
+    case .approval: return .approvalRequired
+    case .question: return .question
+    case nil: break
     }
     if agent.state == "waiting" { return .inputRequired }
     if agent.state == "error" { return .failed }

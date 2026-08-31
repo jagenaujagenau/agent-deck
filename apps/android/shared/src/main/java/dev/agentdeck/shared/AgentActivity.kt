@@ -10,8 +10,11 @@ package dev.agentdeck.shared
  */
 fun agentCardActivity(agent: Agent, nowMs: Long = System.currentTimeMillis()): String {
     if (agent.state == "waiting") {
-        if (agent.pendingApproval != null) return "Review required"
-        if (agent.pendingQuestion != null || agent.events.any { it.kind == "question" }) return "Awaiting your answer"
+        when (openRequest(agent)) {
+            is OpenRequest.Approval -> return "Review required"
+            is OpenRequest.Question -> return "Awaiting your answer"
+            null -> Unit
+        }
         val remotelyMessageable =
             listOf("prompt", "steer", "follow_up").any { supportsCapability(agent.capabilities, it) }
         return if (remotelyMessageable) "Open session to continue" else "Input required in host runtime"

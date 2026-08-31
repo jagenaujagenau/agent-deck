@@ -35,7 +35,12 @@ class AgentCardPolicyTest {
     fun attentionActivityExplainsTheRequiredHumanAction() {
         val question = AgentEvent("q", "question", "Choose", "Which option?", "2026-08-24T10:00:00Z")
         assertEquals("Awaiting your answer", agentCardActivity(agent(state = "waiting", events = listOf(question))))
-        val approval = PendingApproval("a", "bash", "Run command", "2026-08-24T10:00:00Z", "2026-08-24T10:10:00Z")
+        // A live approval: `openRequest` refuses an expired one, and an ask
+        // nobody can answer any more is not what the card should name.
+        val approval = PendingApproval(
+            "a", "bash", "Run command", "2026-08-24T10:00:00Z",
+            Instant.now().plusSeconds(600).toString(),
+        )
         assertEquals("Review required", agentCardActivity(agent(state = "waiting", approval = approval)))
         assertEquals("Input required in host runtime", agentCardActivity(agent(state = "waiting")))
         assertEquals("Open session to continue", agentCardActivity(agent(state = "waiting", capabilities = listOf("steer"))))

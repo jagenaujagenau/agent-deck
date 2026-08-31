@@ -7,9 +7,10 @@ import Foundation
 /// another is two answers to the same question.
 func agentCardActivity(_ agent: Agent) -> String {
     if agent.state == "waiting" {
-        if agent.pendingApproval != nil { return "Review required" }
-        if agent.pendingQuestion != nil || agent.events.contains(where: { $0.kind == "question" }) {
-            return "Awaiting your answer"
+        switch openRequest(agent) {
+        case .approval: return "Review required"
+        case .question: return "Awaiting your answer"
+        case nil: break
         }
         let remotelyMessageable = ["prompt", "steer", "follow_up"]
             .contains { supportsCapability(agent.capabilities, $0) }

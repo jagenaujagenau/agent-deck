@@ -11,9 +11,8 @@
  * path never pays for it.
  */
 
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { agentIdFor } from "../../packages/agent-adapter/src/agent-identity";
+import { sessionStatePath } from "./session-paths";
 import { callHookSocket } from "./hook-socket";
 import { asString, isJsonObject, parseJson } from "../../packages/agent-adapter/src/json-value";
 import type { JsonValue } from "../../packages/agent-adapter/src/json-value";
@@ -35,13 +34,7 @@ try {
 const field = (key: string) => (isJsonObject(payload) ? asString(payload[key]) : undefined);
 const cwd = field("cwd") ?? process.cwd();
 const sessionSeed = field("session_id") ?? `${cwd}:${field("transcript_path") ?? process.ppid}`;
-const statePath = join(
-  homedir(),
-  ".cache",
-  "agent-deck",
-  "runtime-hooks",
-  `${agentIdFor(runtime, sessionSeed)}.json`,
-);
+const statePath = sessionStatePath(agentIdFor(runtime, sessionSeed));
 
 const reply = await callHookSocket(`${statePath}.sock`, {
   runtime,

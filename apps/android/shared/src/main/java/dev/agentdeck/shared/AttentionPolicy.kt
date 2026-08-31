@@ -22,16 +22,16 @@ object AttentionPolicy {
         return "${agent.id}:${approval.id}"
     }
 
+    /**
+     * Which open Request a notification is about. Approvals additionally
+     * require the runtime to advertise approve/reject — a notification whose
+     * buttons cannot act is worse than none — so this asks `approvalKey`
+     * first and only then the shared derivation.
+     */
     private fun attentionKey(agent: Agent): String? {
         approvalKey(agent)?.let { return it }
-        if (agent.state != "waiting") return null
-        // The durable request carries an expiry the event window never had.
-        agent.pendingQuestion?.let { question ->
-            val valid = runCatching { Instant.parse(question.expiresAt).isAfter(Instant.now()) }
-                .getOrDefault(true)
-            return if (valid) "${agent.id}:${question.id}" else null
-        }
-        return agent.events.maxByOrNull { it.createdAt }?.takeIf { it.kind == "question" }?.let { "${agent.id}:${it.id}" }
+        val open = openRequest(agent) ?: return null
+        return if (open is OpenRequest.Question) "${agent.id}:${open.id}" else null
     }
 
     fun decide(agent: Agent, previousAt: String?, previousResolved: Boolean, previousKey: String?): Decision {

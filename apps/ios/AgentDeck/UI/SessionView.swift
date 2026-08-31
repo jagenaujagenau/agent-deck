@@ -264,7 +264,7 @@ struct SessionView: View {
     }
 
     private func wantsPerson(_ agent: Agent) -> Bool {
-        agent.state == "waiting" && (agent.pendingApproval != nil || openQuestion(agent) != nil)
+        openRequest(agent) != nil
     }
 
     // MARK: - Conversation
@@ -314,7 +314,7 @@ struct SessionView: View {
                         // Nothing to answer here: a subagent does not hold the
                         // session's approval.
                         EmptyView()
-                    } else if let approval = agent.pendingApproval {
+                    } else if case .approval(let approval) = openRequest(agent) {
                         ApprovalCard(agent: agent, approval: approval, busy: $busy, failure: $failure)
                             .id("pending")
                     } else if let question = openQuestion(agent) {
@@ -401,7 +401,7 @@ struct SessionView: View {
 
     private func scrollToEnd(_ proxy: ScrollViewProxy, agent: Agent) {
         if readingPast { return }
-        let target: String? = if agent.pendingApproval != nil || openQuestion(agent) != nil {
+        let target: String? = if openRequest(agent) != nil {
             "pending"
         } else if agent.state == "running" {
             "working"
@@ -426,14 +426,10 @@ struct SessionView: View {
     /// The newest event is a question only while it is still the newest —
     /// once the runtime moves on, the question was answered elsewhere. The
     /// durable request is preferred so a question survives past the live window.
+    /// What this session is waiting on, asked once — see `openRequest`.
     private func openQuestion(_ agent: Agent) -> PendingQuestion? {
-        guard agent.state == "waiting" else { return nil }
-        if let question = agent.pendingQuestion { return question }
-        guard let newest = agent.events.max(by: { $0.createdAt < $1.createdAt }), newest.kind == "question" else { return nil }
-        let text = !newest.summary.trimmed.isEmpty && newest.summary != "Question"
-            ? newest.summary
-            : (newest.detail?.trimmed.nonEmpty ?? "Agent has a question")
-        return PendingQuestion(id: newest.id, question: text, options: newest.options, createdAt: newest.createdAt, expiresAt: "")
+        guard case .question(let question, _) = openRequest(agent) else { return nil }
+        return question
     }
 
     /// A refetch is a top-up, not a reload: blanking the transcript back to a

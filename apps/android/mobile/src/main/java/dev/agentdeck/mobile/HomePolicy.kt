@@ -1,6 +1,8 @@
 package dev.agentdeck.mobile
 
 import dev.agentdeck.shared.Agent
+import dev.agentdeck.shared.OpenRequest
+import dev.agentdeck.shared.openRequest
 import dev.agentdeck.shared.sessionSeen
 import java.time.Duration
 import java.time.Instant
@@ -41,8 +43,9 @@ internal fun homeAgentState(
 ): HomeAgentState {
     if (archived) return HomeAgentState.History
     return when {
-        agent.state == "waiting" && agent.pendingApproval != null -> HomeAgentState.ApprovalRequired
-        agent.state == "waiting" && (agent.pendingQuestion != null || agent.events.any { it.kind == "question" }) -> HomeAgentState.Question
+        // What the session is waiting on, asked once — see `openRequest`.
+        openRequest(agent, now) is OpenRequest.Approval -> HomeAgentState.ApprovalRequired
+        openRequest(agent, now) is OpenRequest.Question -> HomeAgentState.Question
         agent.state == "waiting" -> HomeAgentState.InputRequired
         agent.state == "error" -> HomeAgentState.Failed
         agent.state == "running" -> HomeAgentState.Running

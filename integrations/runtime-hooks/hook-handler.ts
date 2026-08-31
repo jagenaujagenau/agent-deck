@@ -12,6 +12,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { sessionStateDirectory } from "./session-paths";
 import { join } from "node:path";
 import {
   AgentDeckClient,
@@ -256,8 +257,7 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
   // Overridable because homedir() answers from process start, which is what
   // lets a test point the whole handler at a scratch directory instead of
   // writing session state into the real deck's.
-  const stateDirectory =
-    process.env.AGENT_DECK_STATE_DIR ?? join(homedir(), ".cache", "agent-deck", "runtime-hooks");
+  const stateDirectory = sessionStateDirectory();
   const snapshotDirectory = join(stateDirectory, "snapshots");
   const statePath = join(stateDirectory, `${agentId}.json`);
   const client = new AgentDeckClient();

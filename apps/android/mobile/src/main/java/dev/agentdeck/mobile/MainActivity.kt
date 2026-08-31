@@ -225,6 +225,16 @@ private val MESSAGE_ACTIONS = setOf("prompt", "steer", "follow_up")
  * bridge's own sentence about what is pending. `at` exists so a second
  * identical refusal still reads as a new event to the composer.
  */
+/**
+ * What became of one Agent's last Command, and whose it was.
+ *
+ * The error and the notice used to be bare strings held for the whole deck,
+ * so a Command that failed on one Agent surfaced its line in whatever
+ * session was opened next. `BlockedCommand` already carried its `agentId`
+ * for exactly this reason; the other two feedback lines now do the same.
+ */
+internal data class CommandFeedback(val agentId: String, val message: String)
+
 internal data class BlockedCommand(
     val agentId: String,
     val action: String,
@@ -244,8 +254,8 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
     val state = repository.state
     private val _commandInFlight = MutableStateFlow<String?>(null)
     val commandInFlight = _commandInFlight.asStateFlow()
-    private val _commandError = MutableStateFlow<String?>(null)
-    val commandError = _commandError.asStateFlow()
+    private val _commandError = MutableStateFlow<CommandFeedback?>(null)
+    internal val commandError = _commandError.asStateFlow()
     private val _analyticsState = MutableStateFlow<AnalyticsState>(AnalyticsState.Loading)
     val analyticsState = _analyticsState.asStateFlow()
     private val storedArchivedAgents = preferences.getStringSet("archived_agents", emptySet())?.toSet() ?: emptySet()
@@ -340,10 +350,10 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
         loadQueued(agentId)
     }
 
-    private val _commandNotice = MutableStateFlow<String?>(null)
+    private val _commandNotice = MutableStateFlow<CommandFeedback?>(null)
 
     /** What became of the last message: set only when it did not simply go through. */
-    val commandNotice = _commandNotice.asStateFlow()
+    internal val commandNotice = _commandNotice.asStateFlow()
 
     private val _commandBlocked = MutableStateFlow<BlockedCommand?>(null)
 
@@ -363,8 +373,9 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
                 // The bridge accepting a message is not the session receiving
                 // it. Say which happened, rather than leaving silence to be
                 // read as delivery.
-                _commandNotice.value =
-                    if (action in MESSAGE_ACTIONS) deliveryNotice(agent.state) else null
+                _commandNotice.value = deliveryNotice(agent.state)
+                    ?.takeIf { action in MESSAGE_ACTIONS }
+                    ?.let { CommandFeedback(agent.id, it) }
                 if (action in MESSAGE_ACTIONS) loadQueued(agent.id)
             }
             .onFailure {
@@ -375,7 +386,8 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
                     _commandBlocked.value = BlockedCommand(agent.id, action, value, it.message ?: "This agent is waiting on an approval or question.")
                     _commandError.value = null
                 } else {
-                    _commandError.value = it.message ?: "Command delivery failed"
+                    _commandError.value =
+                        CommandFeedback(agent.id, it.message ?: "Command delivery failed")
                 }
                 _commandNotice.value = null
             }
@@ -632,8 +644,8 @@ private fun AgentDeckApp(
         AgentSessionView(
             agent = openAgent,
             busy = busyAgent == openAgent.id,
-            commandError = commandError,
-            commandNotice = commandNotice,
+            commandError = commandError?.takeIf { it.agentId == openAgent.id }?.message,
+            commandNotice = commandNotice?.takeIf { it.agentId == openAgent.id }?.message,
             commandBlocked = commandBlocked?.takeIf { it.agentId == openAgent.id },
             onSendAnyway = { vm.sendAnyway(openAgent) },
             onDismiss = { selectedAgent = null },
@@ -1702,7 +1714,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     var changesOpen by rememberSaveable(agent.id) { mutableStateOf(false) }
     var confirmingStop by rememberSaveable(agent.id) { mutableStateOf(false) }
     val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
-    val pendingApproval = agent.pendingApproval?.takeIf { agent.state == "waiting" }
+    val pendingApproval = (openRequest(agent) as? OpenRequest.Approval)?.approval
     // Tabs show whole histories, so they read the retained history merged with the live window
     // rather than the window alone, which a busy session overflows in minutes.
     val sessionAgent = remember(agent, sessionHistory) {
@@ -1725,7 +1737,17 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
         lens?.let { id -> sessionAgent.copy(events = eventsOfSubagent(sessionAgent.events, id)) }
             ?: sessionAgent
     }
-    val pendingQuestion = latestEvent(sessionAgent) { it.kind == "question" }?.takeIf { agent.state == "waiting" }
+    // What this session is waiting on, asked once — see `openRequest`. An
+    // approval outranks a question, so only one card ever shows.
+    val open = remember(agent.state, agent.pendingApproval, agent.pendingQuestion, sessionAgent.events) {
+        openRequest(sessionAgent)
+    }
+    val pendingQuestion = (open as? OpenRequest.Question)?.let { question ->
+        // The durable Request names its own event id; an event-derived one
+        // carries the event itself. Either way the card answers against the
+        // event the runtime is parked on.
+        question.event ?: latestEvent(sessionAgent) { it.id == question.id }
+    }
     // The conversation map and the pick it made; the timeline consumes the
     // pick by scrolling to it once.
     var mapOpen by rememberSaveable(agent.id) { mutableStateOf(false) }
