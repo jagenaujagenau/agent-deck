@@ -420,3 +420,16 @@ extension Sequence where Element: Hashable {
         return filter { seen.insert($0).inserted }
     }
 }
+
+/// One instruction still waiting for its runtime — listed so it can be taken back.
+struct QueuedCommand: Decodable, Identifiable, Equatable {
+    var id: String
+    var agentId: String
+    var action: String
+    var value: String?
+    var createdAt: String
+}
+
+struct QueuedCommands: Decodable {
+    var commands: [QueuedCommand]
+}

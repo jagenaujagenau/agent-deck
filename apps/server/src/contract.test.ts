@@ -396,6 +396,49 @@ describe("the wire contract, executed", () => {
     expect(elapsed).toBeLessThan(8_000);
   });
 
+  test("a queued instruction is the sender's to take back, until it is not", async () => {
+    await heartbeat("codex-contract-queue", { capabilities: ["prompt", "steer", "stop"] });
+    const first = await master.control("codex-contract-queue", "prompt", "do the first thing");
+    const second = await master.control("codex-contract-queue", "prompt", "then the second");
+
+    const listed = await fetch(`${base}/bridge/v1/agents/codex-contract-queue/queued`, {
+      headers: { Authorization: `Bearer ${MASTER}` },
+    });
+    // SAFETY: the route answers the documented `{commands}` shape.
+    const queue = (await listed.json()) as {
+      commands: Array<{ id: string; action: string; value?: string }>;
+    };
+    expect(queue.commands.map((command) => command.id)).toEqual([first.id, second.id]);
+
+    const withdraw = await fetch(
+      `${base}/bridge/v1/agents/codex-contract-queue/queued/${first.id}`,
+      { method: "DELETE", headers: { Authorization: `Bearer ${MASTER}` } },
+    );
+    expect(withdraw.status).toBe(200);
+    const receipt = await fetch(`${base}/bridge/v1/commands/${first.id}/receipt`, {
+      headers: { Authorization: `Bearer ${MASTER}` },
+    });
+    // SAFETY: the route answers the documented receipt shape.
+    expect(((await receipt.json()) as { status?: string }).status).toBe("canceled");
+
+    // Once the runtime collects an instruction it cannot be unsaid.
+    const collect = await fetch(
+      `${base}/bridge/v1/agents/codex-contract-queue/commands/${second.id}/ack`,
+      { method: "POST", headers: { Authorization: `Bearer ${MASTER}` } },
+    );
+    expect(collect.status).toBe(200);
+    const late = await fetch(`${base}/bridge/v1/agents/codex-contract-queue/queued/${second.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${MASTER}` },
+    });
+    expect(late.status).toBe(404);
+    const drained = await fetch(`${base}/bridge/v1/agents/codex-contract-queue/queued`, {
+      headers: { Authorization: `Bearer ${MASTER}` },
+    });
+    // SAFETY: the route answers the documented `{commands}` shape.
+    expect(((await drained.json()) as { commands: unknown[] }).commands).toEqual([]);
+  });
+
   test("explain says whose word each fact is", async () => {
     // codex-contract-proj registered itself and holds a canonical projection;
     // codex-contract-1 only ever heartbeated its identity.

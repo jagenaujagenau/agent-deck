@@ -279,6 +279,25 @@ class BridgeClient(
         }
     }
 
+    /** The message commands still queued for this session — the sender's to take back. */
+    suspend fun queuedMessages(agentId: String): List<QueuedCommand> = withContext(Dispatchers.IO) {
+        val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/queued").get().build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("Queue unavailable (${response.code})")
+            json.decodeFromString<QueuedCommands>(response.body.string()).commands
+        }
+    }
+
+    /** Withdraws a queued message before the runtime collects it. */
+    suspend fun cancelQueued(agentId: String, commandId: String): Unit = withContext(Dispatchers.IO) {
+        val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/queued/$commandId").delete().build()
+        http.newCall(request).execute().use { response ->
+            // 404 means the runtime already collected it — the dock refreshes
+            // and the row disappears either way, so both outcomes settle here.
+            if (!response.isSuccessful && response.code != 404) error("Cancel failed (${response.code})")
+        }
+    }
+
     /** Which runtimes the bridge can host and run itself. */
     suspend fun managedRuntimes(): List<ManagedRuntime> = withContext(Dispatchers.IO) {
         val request = requestBuilder("$baseUrl/bridge/v1/managed/runtimes").get().build()
@@ -379,6 +398,10 @@ class AgentRepository(private val client: BridgeClient) {
     }
 
     suspend fun changes(agentId: String): List<AgentEvent> = client.changes(agentId)
+
+    suspend fun queuedMessages(agentId: String): List<QueuedCommand> = client.queuedMessages(agentId)
+
+    suspend fun cancelQueued(agentId: String, commandId: String) = client.cancelQueued(agentId, commandId)
 
     suspend fun history(agentId: String, limit: Int? = null): List<AgentEvent> =
         client.history(agentId, limit)

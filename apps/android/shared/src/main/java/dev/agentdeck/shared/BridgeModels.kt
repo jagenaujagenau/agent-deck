@@ -182,6 +182,13 @@ data class ControlRefusal(val error: String? = null, val detail: String? = null)
 @Serializable
 data class ManagedResolutionRequest(val status: String, val value: Map<String, String>)
 
+/** One instruction still waiting for its runtime — listed so it can be taken back. */
+@Serializable
+data class QueuedCommand(val id: String, val agentId: String, val action: String, val value: String? = null, val createdAt: String)
+
+@Serializable
+internal data class QueuedCommands(val commands: List<QueuedCommand>)
+
 @Serializable
 data class CommandReceipt(val commandId: String, val status: String, val error: String? = null, val resultSequence: Long? = null, val updatedAt: String)
 

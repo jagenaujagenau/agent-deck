@@ -327,6 +327,19 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _queuedMessages = MutableStateFlow<Map<String, List<QueuedCommand>>>(emptyMap())
+    val queuedMessages = _queuedMessages.asStateFlow()
+
+    fun loadQueued(agentId: String) = viewModelScope.launch {
+        runCatching { repository.queuedMessages(agentId) }
+            .onSuccess { queue -> _queuedMessages.value = _queuedMessages.value + (agentId to queue) }
+    }
+
+    fun cancelQueued(agentId: String, commandId: String) = viewModelScope.launch {
+        runCatching { repository.cancelQueued(agentId, commandId) }
+        loadQueued(agentId)
+    }
+
     private val _commandNotice = MutableStateFlow<String?>(null)
 
     /** What became of the last message: set only when it did not simply go through. */
@@ -352,6 +365,7 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
                 // read as delivery.
                 _commandNotice.value =
                     if (action in MESSAGE_ACTIONS) deliveryNotice(agent.state) else null
+                if (action in MESSAGE_ACTIONS) loadQueued(agent.id)
             }
             .onFailure {
                 // A blocked refusal keeps the words: the draft goes back into
@@ -598,6 +612,7 @@ private fun AgentDeckApp(
     }
 
     val sessionChanges by vm.sessionChanges.collectAsStateWithLifecycle()
+    val queuedMessages by vm.queuedMessages.collectAsStateWithLifecycle()
     val sessionHistory by vm.sessionHistory.collectAsStateWithLifecycle()
     val slashCommands by vm.slashCommands.collectAsStateWithLifecycle()
     val openAgent = selectedAgent?.let { selected -> snapshot?.agents?.firstOrNull { it.id == selected.id } }
@@ -631,6 +646,9 @@ private fun AgentDeckApp(
             onLoadHistory = { vm.loadHistory(openAgent.id) },
             slashCommands = slashCommands[openAgent.id].orEmpty(),
             onLoadSlashCommands = { vm.loadSlashCommands(openAgent.id) },
+            queuedMessages = queuedMessages[openAgent.id].orEmpty(),
+            onLoadQueued = { vm.loadQueued(openAgent.id) },
+            onCancelQueued = { commandId -> vm.cancelQueued(openAgent.id, commandId) },
         )
         return
     }
@@ -1668,7 +1686,7 @@ private fun StatusLabel(state: String, color: Color) {
 }
 
 @Composable
-private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit) {
+private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit, queuedMessages: List<QueuedCommand> = emptyList(), onLoadQueued: () -> Unit = {}, onCancelQueued: (String) -> Unit = {}) {
     // The session is one conversation. Everything the agent did reads inline
     // as work between the words; depth — a command's output, a file's diff,
     // the session's changed files — opens as a sheet over the same screen
@@ -1726,6 +1744,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
             if (liveActivity != fetchedAt) {
                 onLoadHistory()
                 onLoadChanges()
+                onLoadQueued()
                 fetchedAt = liveActivity
             }
             delay(20_000)
@@ -1862,6 +1881,8 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                 onOpenChanges = { changesOpen = true },
                 scrollToId = mapTarget,
                 onScrolledToMarker = { mapTarget = null },
+                queuedMessages = queuedMessages,
+                onCancelQueued = onCancelQueued,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -2214,6 +2235,8 @@ private fun ResponsesView(
     /** A conversation-map pick: the timeline scrolls to this event once. */
     scrollToId: String? = null,
     onScrolledToMarker: () -> Unit = {},
+    queuedMessages: List<QueuedCommand> = emptyList(),
+    onCancelQueued: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val timeline = remember(agent.events) { chatTimeline(agent.events) }
@@ -2407,7 +2430,7 @@ private fun ResponsesView(
         // go to the session. Hiding the field said "you cannot reply" instead,
         // which is a bigger lie than the one it was avoiding; the placeholder
         // names where the message lands.
-        MessageComposer(agent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, slashCommands, onControl, autoFocus, lensed)
+        MessageComposer(agent, busy, commandError, commandNotice, commandBlocked, onSendAnyway, supports, slashCommands, onControl, autoFocus, lensed, queuedMessages, onCancelQueued)
     }
 }
 
@@ -2480,6 +2503,50 @@ private fun EmptyConversation(supportsMessaging: Boolean, lensed: Boolean = fals
             fontSize = 13.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
+    }
+}
+
+/**
+ * What was said before the runtime was ready to hear it, held where it can
+ * still be taken back. Each row is one queued instruction: the pencil pulls
+ * its words back into the composer (withdrawing the original), the cross
+ * withdraws it outright. Once the runtime collects a message its row
+ * disappears — a delivered instruction cannot be unsaid, only followed up.
+ */
+@Composable
+private fun QueuedMessageDock(
+    queued: List<QueuedCommand>,
+    onEdit: (QueuedCommand) -> Unit,
+    onCancel: (QueuedCommand) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Surface)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        queued.forEach { command ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Schedule, null, tint = Muted, modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    command.value.orEmpty().ifBlank { command.action },
+                    color = Text.copy(alpha = 0.85f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { onEdit(command) }, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Rounded.Edit, "Edit queued message", tint = Muted, modifier = Modifier.size(14.dp))
+                }
+                IconButton(onClick = { onCancel(command) }, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Rounded.Close, "Cancel queued message", tint = Muted, modifier = Modifier.size(14.dp))
+                }
+            }
+        }
     }
 }
 
@@ -2862,7 +2929,7 @@ private fun ChangesSheet(files: List<AgentFileChange>, loaded: Boolean, onDismis
 }
 
 @Composable
-private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit, autoFocus: Boolean, lensed: Boolean = false) {
+private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, supports: (String) -> Boolean, slashCommands: List<SlashCommand>, onControl: (String, String?) -> Unit, autoFocus: Boolean, lensed: Boolean = false, queuedMessages: List<QueuedCommand> = emptyList(), onCancelQueued: (String) -> Unit = {}) {
     var message by rememberSaveable(agent.id) { mutableStateOf("") }
     // A refused message is not a sent one: the words come back into the field
     // so the draft survives the refusal, exactly as typed.
@@ -2895,7 +2962,21 @@ private fun MessageComposer(agent: Agent, busy: Boolean, commandError: String?, 
             // Over the conversation now, so each notice carries its own ground.
             commandBlocked?.let { BlockedSendNotice(it.detail, onSendAnyway) }
             if (commandBlocked == null) commandError?.let { FloatingNotice(it, Danger) }
-            if (commandBlocked == null && commandError == null) commandNotice?.let { FloatingNotice(it, Muted) }
+            // The dock says "queued" better than the notice does, and adds the
+            // taking-back; the notice only speaks when the dock has nothing.
+            if (commandBlocked == null && commandError == null && queuedMessages.isEmpty()) {
+                commandNotice?.let { FloatingNotice(it, Muted) }
+            }
+            if (queuedMessages.isNotEmpty()) {
+                QueuedMessageDock(
+                    queuedMessages,
+                    onEdit = { queuedCommand ->
+                        onCancelQueued(queuedCommand.id)
+                        message = queuedCommand.value.orEmpty()
+                    },
+                    onCancel = { onCancelQueued(it.id) },
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,

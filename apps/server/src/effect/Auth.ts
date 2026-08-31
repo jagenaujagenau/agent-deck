@@ -49,8 +49,12 @@ export const routePolicy = (method: string, path: string) => {
   // Dismissing a session changes what every surface shows, so it takes the
   // same scope as steering one.
   const dismissal = method === "DELETE" && /^\/agents\/[^/]+$/.test(path);
+  // Withdrawing a queued instruction changes what the runtime will do next,
+  // so it takes the same scope as sending one. (A new route, not part of the
+  // reproduced deployed rules above.)
+  const queuedCancel = method === "DELETE" && /^\/agents\/[^/]+\/queued\/[^/]+$/.test(path);
   const requiredScope: Scope =
-    path.endsWith("/control") || managedResolution || requestResolution || dismissal
+    path.endsWith("/control") || managedResolution || requestResolution || dismissal || queuedCancel
       ? "control"
       : "read";
   return { runtimeOnly, requiredScope };

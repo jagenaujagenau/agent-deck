@@ -145,6 +145,15 @@ this way; they are how a blocked session gets unblocked.
 Delivery is observable: `GET /commands/:id/receipt` reports
 `{commandId, status, error?, resultSequence?, updatedAt}`.
 
+What a person queued is theirs to take back until the runtime collects it:
+`GET /agents/:id/queued` (read scope) lists the message commands — prompt,
+steer, follow_up — not yet acknowledged, oldest first, as
+`{commands: [{id, agentId, action, value?, createdAt}]}`.
+`DELETE /agents/:id/queued/:commandId` (control scope) withdraws one;
+it answers 404 once the runtime has acknowledged the command, because a
+delivered instruction cannot be unsaid, only followed up. A canceled
+command's receipt reads `status: "canceled"`.
+
 `DELETE /agents/:id` (control scope) dismisses a session from the deck. Its
 history, usage, and file changes are kept — this declutters the live list,
 it does not erase what the session did. A session still heartbeating simply

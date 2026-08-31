@@ -350,6 +350,14 @@ export class BridgeState extends Context.Service<
       commands: ReadonlyArray<JsonValue>,
     ) => Effect.Effect<void>;
     readonly commandReceipt: (commandId: string) => Effect.Effect<CommandReceiptRow | undefined>;
+    /** The message commands still waiting to be collected, oldest first. */
+    readonly queuedMessages: (agentId: string) => Effect.Effect<ReadonlyArray<Command>>;
+    /**
+     * Withdraws a queued command before the runtime collects it. False once
+     * the runtime has acknowledged it — a delivered instruction cannot be
+     * unsaid, only followed up.
+     */
+    readonly cancelCommand: (agentId: string, commandId: string) => Effect.Effect<boolean>;
     readonly analytics: (
       range: string,
       project?: string,
@@ -977,6 +985,44 @@ export class BridgeState extends Context.Service<
       const pendingCommands = (agentId: string, after?: string, waitMs = 0) =>
         awaitSettled(waitMs, pendingCommandsNow(agentId, after), (queued) => queued.length > 0);
 
+      /** The instruction-shaped actions a person can still take back. */
+      const messageActions: ReadonlyArray<string> = ["prompt", "steer", "follow_up"];
+
+      const queuedMessages = Effect.fn("BridgeState.queuedMessages")(function* (agentId: string) {
+        const commands = yield* Ref.get(commandsRef);
+        return [...commands.values()]
+          .filter(
+            (command) =>
+              command.agentId === agentId &&
+              !command.acknowledgedAt &&
+              messageActions.includes(command.action),
+          )
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      });
+
+      const cancelCommand = Effect.fn("BridgeState.cancelCommand")(function* (
+        agentId: string,
+        commandId: string,
+      ) {
+        const commands = yield* Ref.get(commandsRef);
+        const existing = commands.get(commandId);
+        // Once acknowledged the runtime holds it; withdrawing the record
+        // would only make the deck lie about what was delivered.
+        if (existing === undefined || existing.agentId !== agentId || existing.acknowledgedAt) {
+          return false;
+        }
+        yield* Ref.update(commandsRef, (map) => {
+          const next = new Map(map);
+          next.delete(commandId);
+          return next;
+        });
+        yield* sql`DELETE FROM bridge_commands WHERE id = ${commandId}`.pipe(Effect.orDie);
+        yield* sql`UPDATE bridge_command_receipts SET status = 'canceled', updated_at = ${now()}
+                   WHERE command_id = ${commandId}`.pipe(Effect.orDie);
+        yield* changed;
+        return true;
+      });
+
       const acknowledge = Effect.fn("BridgeState.acknowledge")(function* (
         agentId: string,
         commandId: string,
@@ -1266,6 +1312,8 @@ export class BridgeState extends Context.Service<
         requests,
         setSlashCommands,
         commandReceipt,
+        queuedMessages,
+        cancelCommand,
         analytics,
         projectionParity,
         pair,

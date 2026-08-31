@@ -61,6 +61,24 @@ actor BridgeClient {
         return response.changes
     }
 
+    /// The message commands still queued for this session — the sender's to
+    /// take back until the runtime collects them.
+    func queuedMessages(agentId: String) async throws -> [QueuedCommand] {
+        let response: QueuedCommands = try await get("/bridge/v1/agents/\(escape(agentId))/queued")
+        return response.commands
+    }
+
+    /// Withdraws a queued message. A 404 means the runtime already collected
+    /// it — the dock refreshes and the row disappears either way.
+    func cancelQueued(agentId: String, commandId: String) async throws {
+        do {
+            _ = try await checked(
+                try build("/bridge/v1/agents/\(escape(agentId))/queued/\(escape(commandId))", method: "DELETE"))
+        } catch BridgeError.http(404, _) {
+            // Already delivered; nothing left to withdraw.
+        }
+    }
+
     /// The `/` commands this runtime advertises. A runtime that publishes none
     /// answers with an empty catalog rather than a failure, so an empty list is
     /// an answer and not a swallowed error.

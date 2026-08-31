@@ -129,6 +129,7 @@ struct SessionView: View {
         fetchedActivity = liveActivity
         await loadHistory()
         await store.loadChanges(agentId: agentId)
+        await store.loadQueued(agentId: agentId)
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
@@ -407,7 +408,10 @@ struct SessionView: View {
                 if let blockedNotice {
                     blockedBanner(agent, detail: blockedNotice)
                 }
-                if let notice = deliveryNotice(agent) {
+                // The dock says "queued" better than the notice does, and
+                // adds the taking-back; the notice only speaks when the dock
+                // has nothing.
+                if let notice = deliveryNotice(agent), (store.queuedMessages[agentId] ?? []).isEmpty {
                     Text(notice)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
@@ -415,6 +419,18 @@ struct SessionView: View {
                         .padding(.vertical, 6)
                         .background(Capsule().fill(Palette.surfaceRaised))
                         .overlay(Capsule().stroke(Palette.line, lineWidth: 1))
+                }
+                if let queued = store.queuedMessages[agentId], !queued.isEmpty {
+                    QueuedMessageDock(
+                        queued: queued,
+                        onEdit: { command in
+                            Task { await store.cancelQueued(agentId: agentId, commandId: command.id) }
+                            draft = command.value ?? ""
+                        },
+                        onCancel: { command in
+                            Task { await store.cancelQueued(agentId: agentId, commandId: command.id) }
+                        }
+                    )
                 }
                 HStack(spacing: 6) {
                     // The slash button lives inside the pill because it acts on
@@ -545,6 +561,7 @@ struct SessionView: View {
             try await store.control(agentId: agentId, action: action, value: message, force: force)
             draft = ""
             blockedNotice = nil
+            await store.loadQueued(agentId: agentId)
         } catch {
             let bridgeError = BridgeError.from(error)
             // The one refusal that keeps the draft and asks a question instead

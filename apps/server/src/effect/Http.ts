@@ -181,6 +181,32 @@ export const BridgeRoutes = HttpRouter.addAll([
       });
     }),
   ),
+  /**
+   * The dock's own reads and takes: what a person queued that the runtime
+   * has not yet collected, and the withdrawal of one such instruction. A
+   * device may cancel only what is still queued — a delivered instruction
+   * cannot be unsaid, only followed up.
+   */
+  route(
+    "GET",
+    "/agents/:agentId/queued",
+    Effect.gen(function* () {
+      const state = yield* BridgeState;
+      return yield* HttpServerResponse.json({
+        commands: yield* state.queuedMessages(yield* param("agentId")),
+      });
+    }),
+  ),
+  route(
+    "DELETE",
+    "/agents/:agentId/queued/:commandId",
+    Effect.gen(function* () {
+      const state = yield* BridgeState;
+      return (yield* state.cancelCommand(yield* param("agentId"), yield* param("commandId")))
+        ? yield* HttpServerResponse.json({ canceled: true })
+        : yield* error("Nothing queued under that id — it may already be delivered", 404);
+    }),
+  ),
   route(
     "GET",
     "/commands/:id/receipt",

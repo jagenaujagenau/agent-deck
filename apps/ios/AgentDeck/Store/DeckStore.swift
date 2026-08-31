@@ -405,6 +405,20 @@ final class DeckStore {
         }
     }
 
+    /// The message commands still queued per session, for the composer's dock.
+    var queuedMessages: [String: [QueuedCommand]] = [:]
+
+    func loadQueued(agentId: String) async {
+        if let queue = try? await client.queuedMessages(agentId: agentId) {
+            queuedMessages[agentId] = queue
+        }
+    }
+
+    func cancelQueued(agentId: String, commandId: String) async {
+        try? await client.cancelQueued(agentId: agentId, commandId: commandId)
+        await loadQueued(agentId: agentId)
+    }
+
     func control(agentId: String, action: String, value: String? = nil, force: Bool = false) async throws {
         // One id per logical send: the bridge dedupes on it, so a transport
         // retry can never queue the same instruction twice.
