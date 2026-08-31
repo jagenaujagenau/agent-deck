@@ -24,9 +24,11 @@ class AgentCardPolicyTest {
 
     @Test
     fun activityPrioritizesWhatTheAgentIsDoingNow() {
-        assertEquals("Working on instruction", agentCardActivity(agent()))
-        assertEquals("Using bash", agentCardActivity(agent(task = "Using bash")))
-        assertEquals("bash finished", agentCardActivity(agent(task = "bash completed")))
+        // A clock at the fixture's own heartbeat: signal is flowing.
+        val now = Instant.parse("2026-08-24T10:00:30Z").toEpochMilli()
+        assertEquals("Working on instruction", agentCardActivity(agent(), now))
+        assertEquals("Using bash", agentCardActivity(agent(task = "Using bash"), now))
+        assertEquals("bash finished", agentCardActivity(agent(task = "bash completed"), now))
     }
 
     @Test

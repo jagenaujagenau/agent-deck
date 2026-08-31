@@ -331,8 +331,12 @@ export class ManagedRuntime extends Context.Service<
         value?: JsonValue,
       ) {
         const hosted = (yield* Ref.get(sessions)).get(agentId);
-        if (hosted === undefined || !(yield* state.requests.canResolve(agentId, requestId, status)))
+        if (
+          hosted === undefined ||
+          !(yield* state.requests.canResolve(agentId, requestId, status, value))
+        ) {
           return false;
+        }
         yield* Effect.promise(() =>
           adapter.resolveRequest(hosted.session, requestId, status, value),
         );

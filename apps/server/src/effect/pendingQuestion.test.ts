@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { toPendingQuestion } from "./RequestLedger";
+import { resolutionFitsKind, toPendingQuestion } from "./RequestLedger";
 
 describe("toPendingQuestion", () => {
   test("reads the flat hook/pi shape", () => {
@@ -77,5 +77,28 @@ describe("toPendingQuestion", () => {
     );
     expect(question?.createdAt).toBe("2026-08-26T00:00:00.000Z");
     expect(question?.expiresAt).not.toBe("");
+  });
+});
+
+describe("resolutionFitsKind", () => {
+  test("an answer is the question mapped to the words chosen", () => {
+    expect(resolutionFitsKind("answered", { "Which branch?": "main" })).toBe(true);
+    expect(resolutionFitsKind("answered", { a: "x", b: "y" })).toBe(true);
+  });
+
+  test("an answer that is not question-to-text is refused whole", () => {
+    expect(resolutionFitsKind("answered", undefined)).toBe(false);
+    expect(resolutionFitsKind("answered", "main")).toBe(false);
+    expect(resolutionFitsKind("answered", ["main"])).toBe(false);
+    expect(resolutionFitsKind("answered", { "Which?": 42 })).toBe(false);
+    expect(resolutionFitsKind("answered", { "Which?": { nested: "no" } })).toBe(false);
+  });
+
+  test("a decision carries no value at all", () => {
+    expect(resolutionFitsKind("approved", undefined)).toBe(true);
+    expect(resolutionFitsKind("rejected", undefined)).toBe(true);
+    expect(resolutionFitsKind("approved", { sneak: "value" })).toBe(false);
+    expect(resolutionFitsKind("rejected", "reason")).toBe(false);
+    expect(resolutionFitsKind("expired", undefined)).toBe(true);
   });
 });

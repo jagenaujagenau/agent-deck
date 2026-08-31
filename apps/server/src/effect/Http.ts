@@ -394,7 +394,7 @@ export const BridgeRoutes = HttpRouter.addAll([
         (yield* state.resolveRuntimeRequest(agentId, requestId, input.status, value));
       return resolved
         ? yield* HttpServerResponse.json({ resolved: true })
-        : yield* error("No pending request to resolve", 404);
+        : yield* error("No pending request to resolve, or the resolution does not fit it", 404);
     }),
   ),
 

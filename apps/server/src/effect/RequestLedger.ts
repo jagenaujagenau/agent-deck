@@ -112,6 +112,29 @@ export const toPendingQuestion = (
   };
 };
 
+/**
+ * The one shape an answer may take: the question's own text mapped to the
+ * words chosen, which is what every runtime consumes. Anything else fed
+ * through would reach a blocked runtime as garbage it cannot act on — and a
+ * consumed request with a useless resolution leaves the real answer with
+ * nothing left to answer. A decision carries no value at all: approve or
+ * reject is the whole of it.
+ */
+export const resolutionFitsKind = (
+  status: RuntimeRequestStatus,
+  value: JsonValue | undefined,
+): boolean => {
+  if (status === "answered") {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Object.values(value).every((entry) => typeof entry === "string")
+    );
+  }
+  return value === undefined;
+};
+
 const resolvedEventType = (kind: string): "request.resolved" | "user-input.resolved" =>
   kind === "user-input" ? "user-input.resolved" : "request.resolved";
 
@@ -180,14 +203,17 @@ export function makeRequestLedger(deps: RequestLedgerDeps) {
     });
 
   /**
-   * Whether this resolution is legal: the request is still pending, and the
+   * Whether this resolution is legal: the request is still pending, the
    * status fits the kind — answers settle questions, decisions settle
-   * approvals, never the other way around.
+   * approvals, never the other way around — and the value fits the status.
+   * A resolution that does not fit is refused whole and the request stays
+   * pending, because consent or an answer the bridge invented is neither.
    */
   const canResolve = Effect.fn("RequestLedger.canResolve")(function* (
     agentId: string,
     requestId: string,
     status: RuntimeRequestStatus,
+    value?: JsonValue,
   ) {
     const rows = yield* sql<{ kind: string; status: string }>`
       SELECT kind, status FROM bridge_requests WHERE request_id = ${requestId} AND agent_id = ${agentId}`;
@@ -195,7 +221,8 @@ export function makeRequestLedger(deps: RequestLedgerDeps) {
     return (
       row?.status === "pending" &&
       (status !== "answered" || row.kind === "user-input") &&
-      (!["approved", "rejected"].includes(status) || row.kind === "approval")
+      (!["approved", "rejected"].includes(status) || row.kind === "approval") &&
+      resolutionFitsKind(status, value)
     );
   }, Effect.orDie);
 
@@ -206,7 +233,7 @@ export function makeRequestLedger(deps: RequestLedgerDeps) {
     status: RuntimeRequestStatus,
     value?: JsonValue,
   ) {
-    if (!(yield* canResolve(agentId, requestId, status))) return false;
+    if (!(yield* canResolve(agentId, requestId, status, value))) return false;
     const rows = yield* sql<{ kind: string }>`
       SELECT kind FROM bridge_requests WHERE request_id = ${requestId}`.pipe(Effect.orDie);
     yield* setStatus(requestId, status, value);
@@ -315,7 +342,7 @@ export function makeRequestLedger(deps: RequestLedgerDeps) {
     const seen = new Set<string>();
     for (const row of rows) {
       // Latest per agent and kind wins; the rest are stale duplicates.
-      const key = `${row.agent_id} ${row.kind}`;
+      const key = `${row.agent_id}\u0000${row.kind}`;
       if (seen.has(key)) continue;
       seen.add(key);
       if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) {

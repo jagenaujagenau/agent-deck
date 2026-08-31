@@ -29,6 +29,13 @@ struct SessionView: View {
     @State private var changesOpen = false
     /// The cluster opened into its steps — a titled sheet over the conversation.
     @State private var openSteps: StepsSelection?
+    /// The conversation map and the pick it made; the timeline consumes the
+    /// pick by scrolling to it once.
+    @State private var mapOpen = false
+    @State private var mapTarget: String?
+    /// Reading history after a map jump: the auto-scroll to the live edge
+    /// stands down until the person speaks again or reopens the session.
+    @State private var readingPast = false
     @FocusState private var composerFocused: Bool
     /// The live-window signature the fetched history was current for.
     @State private var fetchedActivity = ""
@@ -54,6 +61,12 @@ struct SessionView: View {
                 }
                 .sheet(item: $openSteps) { selection in
                     StepsSheet(events: selection.events)
+                }
+                .sheet(isPresented: $mapOpen) {
+                    ConversationMapSheet(markers: conversationMarkers(viewedEvents(agent))) { id in
+                        mapOpen = false
+                        mapTarget = id
+                    }
                 }
                 .sheet(item: $openActivity) { event in
                     ActivityDetailSheet(event: event)
@@ -171,6 +184,23 @@ struct SessionView: View {
         }
         ToolbarItem(placement: .topBarTrailing) {
             if let agent {
+                // The conversation map: a long chat's table of contents. Only
+                // offered once there are exchanges to jump between.
+                let markers = conversationMarkers(viewedEvents(agent))
+                if markers.count > 1 {
+                    Button {
+                        mapOpen = true
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .accessibilityLabel("Conversation map")
+                }
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            if let agent {
                 let archived = store.isArchived(agent)
                 Button {
                     if archived { store.restore(agent) } else { store.archive(agent) }
@@ -270,7 +300,11 @@ struct SessionView: View {
                         .buttonStyle(.plain)
                     }
                     if agent.state == "running" {
-                        WorkingIndicatorView(task: agent.task)
+                        // The typing indicator claims live work; over minutes
+                        // of silence it shows the silence instead.
+                        WorkingIndicatorView(
+                            task: signalSilenceMinutes(agent).map { "No signal for \($0)m" } ?? agent.task
+                        )
                             .id("working")
                     }
                     if let failure {
@@ -289,11 +323,27 @@ struct SessionView: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: agent.events.count) { _, _ in scrollToEnd(proxy, agent: agent) }
             .onChange(of: loadedHistory) { _, _ in scrollToEnd(proxy, agent: agent) }
-            .onAppear { scrollToEnd(proxy, agent: agent) }
+            .onAppear {
+                readingPast = false
+                scrollToEnd(proxy, agent: agent)
+            }
+            // A picked marker is a decision to read history: jump there and
+            // stop following the live edge until the person speaks again.
+            .onChange(of: mapTarget) { _, target in
+                guard let target else { return }
+                readingPast = true
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        proxy.scrollTo("item:\(target)", anchor: .top)
+                    }
+                }
+                mapTarget = nil
+            }
         }
     }
 
     private func scrollToEnd(_ proxy: ScrollViewProxy, agent: Agent) {
+        if readingPast { return }
         let target: String? = if agent.pendingApproval != nil || openQuestion(agent) != nil {
             "pending"
         } else if agent.state == "running" {
@@ -479,6 +529,8 @@ struct SessionView: View {
     private func send(action: String, force: Bool = false) async {
         var message = draft.trimmed
         guard !message.isEmpty else { return }
+        // Speaking rejoins the live edge after reading history.
+        readingPast = false
         // `!` is the terminal living in the composer: the rest of the line
         // goes to the runtime as an exact shell command.
         if message.hasPrefix("!") {

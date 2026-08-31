@@ -8,7 +8,7 @@ package dev.agentdeck.shared
  * is two different answers to the same question, and the watch is the surface
  * where the short answer matters most.
  */
-fun agentCardActivity(agent: Agent): String {
+fun agentCardActivity(agent: Agent, nowMs: Long = System.currentTimeMillis()): String {
     if (agent.state == "waiting") {
         if (agent.pendingApproval != null) return "Review required"
         if (agent.pendingQuestion != null || agent.events.any { it.kind == "question" }) return "Awaiting your answer"
@@ -18,6 +18,9 @@ fun agentCardActivity(agent: Agent): String {
     }
     return when (agent.state) {
         "running" -> when {
+            // A green "working" over minutes of silence is the deck vouching
+            // for something it cannot see; say the silence instead.
+            signalSilenceMinutes(agent, nowMs) != null -> "No signal for ${signalSilenceMinutes(agent, nowMs)}m"
             agent.task.startsWith("Using ") -> "Using ${agent.task.removePrefix("Using ")}"
             agent.task.endsWith(" completed") -> "${agent.task.removeSuffix(" completed")} finished"
             agent.task.isBlank() || agent.task == agent.objective -> "Working on instruction"

@@ -78,6 +78,9 @@ func chatPreview(_ agent: Agent, state: HomeAgentState) -> String {
     // it, a bare command in amber would not say what is being asked of you.
     if state == .approvalRequired { return "Approve? \(usefulTask(agent))" }
     if state.attention || state == .failed { return usefulTask(agent) }
+    // Silence outranks a stale train of thought: the newest reasoning of a
+    // runtime that has gone mute reads as live work that is not happening.
+    if state == .running, signalSilenceMinutes(agent) != nil { return agentCardActivity(agent) }
     if state == .running { return latestReasoningPreview(agent) ?? agentCardActivity(agent) }
     guard let last = conversationEntries(agent.events).last,
           let line = last.content
@@ -127,6 +130,8 @@ struct ChatRow: View {
         switch state {
         case .failed: Palette.danger
         case _ where state.attention: Palette.amber
+        // Running, but mute for minutes: amber, not the confident green.
+        case .running where signalSilenceMinutes(agent) != nil: Palette.amber
         case .running: Palette.signal
         case .done: Palette.text.opacity(0.87)
         default: Palette.muted

@@ -45,6 +45,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Toc
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.*
@@ -1374,6 +1375,8 @@ private fun ChatRow(agent: Agent, homeState: HomeAgentState, busy: Boolean, onCl
     val previewColor = when {
         homeState == HomeAgentState.Failed -> Danger
         homeState.attention -> Amber
+        // Running, but mute for minutes: amber, not the confident green.
+        homeState == HomeAgentState.Running && signalSilenceMinutes(agent) != null -> Amber
         homeState == HomeAgentState.Running -> Signal
         homeState == HomeAgentState.Done -> Text.copy(alpha = 0.87f)
         else -> Muted
@@ -1453,6 +1456,9 @@ private fun chatPreview(agent: Agent, state: HomeAgentState): String {
     // it, a bare command in amber would not say what is being asked of you.
     if (state == HomeAgentState.ApprovalRequired) return "Approve? ${usefulTask(agent)}"
     if (state.attention || state == HomeAgentState.Failed) return usefulTask(agent)
+    // Silence outranks a stale train of thought: the newest reasoning of a
+    // runtime that has gone mute reads as live work that is not happening.
+    if (state == HomeAgentState.Running && signalSilenceMinutes(agent) != null) return agentCardActivity(agent)
     if (state == HomeAgentState.Running) return latestReasoningPreview(agent) ?: agentCardActivity(agent)
     val last = conversationEntries(agent.events).lastOrNull() ?: return usefulTask(agent)
     val line = last.content.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return usefulTask(agent)
@@ -1692,6 +1698,11 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
             ?: sessionAgent
     }
     val pendingQuestion = latestEvent(sessionAgent) { it.kind == "question" }?.takeIf { agent.state == "waiting" }
+    // The conversation map and the pick it made; the timeline consumes the
+    // pick by scrolling to it once.
+    var mapOpen by rememberSaveable(agent.id) { mutableStateOf(false) }
+    var mapTarget by remember(agent.id) { mutableStateOf<String?>(null) }
+    val markers = remember(viewedAgent.events) { conversationMarkers(viewedAgent.events) }
     val harness = harnessFor(agent)
     val provider = providerFor(agent)
     val stateColor = statusColor(agent.state)
@@ -1798,6 +1809,12 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                     }
                     HeaderPill {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // The conversation map: a long chat's table of
+                            // contents. Only offered once there are exchanges
+                            // to jump between.
+                            if (markers.size > 1) IconButton(onClick = { mapOpen = true }, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.AutoMirrored.Rounded.Toc, "Conversation map", tint = Text, modifier = Modifier.size(20.dp))
+                            }
                             val pauseAction = if (isPaused) "resume" else "pause"
                             if (supports(pauseAction)) IconButton(onClick = { onControl(pauseAction, null) }, enabled = !busy, modifier = Modifier.size(40.dp)) {
                                 Icon(if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause, if (isPaused) "Resume agent" else "Pause agent", tint = Text, modifier = Modifier.size(20.dp))
@@ -1839,6 +1856,8 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                 changedFiles = fileChanges.size,
                 changedStat = remember(sessionChanges) { diffStat(sessionChanges) },
                 onOpenChanges = { changesOpen = true },
+                scrollToId = mapTarget,
+                onScrolledToMarker = { mapTarget = null },
                 modifier = Modifier.weight(1f),
             )
         }
@@ -1858,6 +1877,16 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     }
     if (changesOpen) {
         ChangesSheet(fileChanges, changesLoaded, onDismiss = { changesOpen = false })
+    }
+    if (mapOpen) {
+        ConversationMapSheet(
+            markers = markers,
+            onPick = { id ->
+                mapOpen = false
+                mapTarget = id
+            },
+            onDismiss = { mapOpen = false },
+        )
     }
     if (lensPickerOpen) SubagentPicker(
         runs = runs,
@@ -1881,6 +1910,66 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
         },
         dismissButton = { TextButton(onClick = { confirmingStop = false }) { Text("Cancel") } },
     )
+}
+
+/**
+ * The conversation's table of contents: one row per exchange — what was
+ * asked, how it ended — each a jump into the timeline. A two-hundred-turn
+ * chat has no scrollbar worth the name; this is the one it earns.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConversationMapSheet(
+    markers: List<ConversationMarker>,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+            Text(
+                "Conversation",
+                color = Text,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+            LazyColumn(Modifier.heightIn(max = 560.dp)) {
+                items(markers, key = { "marker:${it.id}" }) { marker ->
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(9.dp))
+                            .clickable { onPick(marker.id) }
+                            .padding(horizontal = 6.dp, vertical = 8.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                marker.prompt,
+                                color = Text,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(formatMessageTime(marker.at), color = Muted, fontSize = 11.sp)
+                        }
+                        marker.reply?.let { reply ->
+                            Text(
+                                reply,
+                                color = Muted,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -2118,6 +2207,9 @@ private fun ResponsesView(
     changedFiles: Int = 0,
     changedStat: DiffStat? = null,
     onOpenChanges: () -> Unit = {},
+    /** A conversation-map pick: the timeline scrolls to this event once. */
+    scrollToId: String? = null,
+    onScrolledToMarker: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val timeline = remember(agent.events) { chatTimeline(agent.events) }
@@ -2154,6 +2246,17 @@ private fun ResponsesView(
                 }
             }
         }
+    }
+    // A picked marker is a decision to read history: stop following the live
+    // edge until the person scrolls back down themselves.
+    LaunchedEffect(scrollToId) {
+        val id = scrollToId ?: return@LaunchedEffect
+        val index = entries.indexOfFirst { it.leadEvent.id == id }
+        if (index >= 0) {
+            followNewest = false
+            listState.animateScrollToItem(index)
+        }
+        onScrolledToMarker()
     }
     val newest = entries.lastOrNull()
     val newestContentKey = listOf(
@@ -2272,7 +2375,11 @@ private fun ResponsesView(
                     }
                 }
                 if (working) item(key = "working") {
-                    WorkingIndicator(agent.task)
+                    // The typing indicator claims live work; over minutes of
+                    // silence it shows the silence instead.
+                    WorkingIndicator(
+                        signalSilenceMinutes(agent)?.let { "No signal for ${it}m" } ?: agent.task,
+                    )
                 }
             }
             if (newMessagesWaiting) FilledTonalButton(

@@ -85,3 +85,20 @@ class SeenStore(context: Context) {
         preferences.edit().putString(agentId, lastViewedActivityAt).apply()
     }
 }
+
+/**
+ * How long a running session has been silent, when that silence is worth
+ * saying. A session claiming "running" whose runtime has produced nothing
+ * for minutes is not confidently working — its agent may be hung, or its
+ * hook pipe broken — and a green typing indicator over that silence is the
+ * deck vouching for something it cannot see. Three minutes is past any
+ * honest thinking pause: thoughts and tool calls both stream as events.
+ * Null while the session is not running, or while signal still flows.
+ */
+fun signalSilenceMinutes(agent: Agent, nowMs: Long = System.currentTimeMillis()): Long? {
+    if (agent.state != "running") return null
+    val latest = runCatching { java.time.Instant.parse(latestActivityAt(agent)).toEpochMilli() }
+        .getOrNull() ?: return null
+    val minutes = (nowMs - latest) / 60_000
+    return if (minutes >= 3) minutes else null
+}

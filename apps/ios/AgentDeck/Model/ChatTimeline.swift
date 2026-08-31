@@ -123,3 +123,67 @@ func activitySummary(_ events: [AgentEvent]) -> String {
 extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }
+
+/// One entry of the conversation map: an exchange, said small.
+///
+/// A phone chat holding two hundred turns has no scrollbar worth the name.
+/// The map is the table of contents a long conversation earns — one row per
+/// thing the person asked, with how the agent left it — and each row knows
+/// the event the timeline can scroll to. Mirrored from `ChatTimeline.kt`.
+struct ConversationMarker: Identifiable, Equatable {
+    /// The user message's event id — the timeline item to scroll to.
+    var id: String
+    var prompt: String
+    /// How the exchange ended: the last reply before the next ask, if any.
+    var reply: String?
+    var at: String
+}
+
+func conversationMarkers(_ events: [AgentEvent]) -> [ConversationMarker] {
+    var markers: [ConversationMarker] = []
+    var prompt: ConversationEntry?
+    var reply: ConversationEntry?
+    func flush() {
+        if let asked = prompt {
+            markers.append(ConversationMarker(
+                id: asked.event.id,
+                prompt: markerPreview(asked.content),
+                reply: reply.map { markerPreview($0.content) },
+                at: asked.event.createdAt
+            ))
+        }
+        prompt = nil
+        reply = nil
+    }
+    for entry in conversationEntries(events) {
+        if entry.role == .user {
+            flush()
+            prompt = entry
+        } else if prompt != nil {
+            reply = entry
+        }
+    }
+    flush()
+    return markers
+}
+
+/// A message reduced to one plain line: markdown dressing stripped, code
+/// blocks named rather than quoted, clipped at a word.
+func markerPreview(_ text: String, limit: Int = 96) -> String {
+    var line = text
+    for (pattern, replacement) in [
+        ("```[\\s\\S]*?(```|$)", " code "),
+        ("`([^`]*)`", "$1"),
+        ("!?\\[([^\\]]*)\\]\\([^)]*\\)", "$1"),
+        ("(?m)^\\s{0,3}(#{1,6}|>|[-+*]|\\d+[.)])\\s+", ""),
+        ("[*_]{1,3}", ""),
+        ("\\s+", " "),
+    ] {
+        line = line.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+    }
+    line = line.trimmed
+    if line.count <= limit { return line }
+    let clipped = String(line.prefix(limit - 1)).trimmed
+    let atWord = clipped.range(of: " ", options: .backwards).map { String(clipped[..<$0.lowerBound]) } ?? clipped
+    return atWord + "…"
+}

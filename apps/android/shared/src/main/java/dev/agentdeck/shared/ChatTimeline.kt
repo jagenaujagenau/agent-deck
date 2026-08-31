@@ -118,3 +118,66 @@ val TimelineItem.newestEvent: AgentEvent
         is TimelineItem.Message -> entry.event
         is TimelineItem.Activity -> events.last()
     }
+
+/**
+ * One entry of the conversation map: an exchange, said small.
+ *
+ * A phone chat holding two hundred turns has no scrollbar worth the name.
+ * The map is the table of contents a long conversation earns — one row per
+ * thing the person asked, with how the agent left it — and each row knows
+ * the event the timeline can scroll to.
+ */
+data class ConversationMarker(
+    /** The user message's event id — the timeline item to scroll to. */
+    val id: String,
+    val prompt: String,
+    /** How the exchange ended: the last reply before the next ask, if any. */
+    val reply: String?,
+    val at: String,
+)
+
+fun conversationMarkers(events: List<AgentEvent>): List<ConversationMarker> {
+    val markers = mutableListOf<ConversationMarker>()
+    var prompt: ConversationEntry? = null
+    var reply: ConversationEntry? = null
+    fun flush() {
+        prompt?.let { asked ->
+            markers += ConversationMarker(
+                id = asked.event.id,
+                prompt = markerPreview(asked.content),
+                reply = reply?.let { markerPreview(it.content) },
+                at = asked.event.createdAt,
+            )
+        }
+        prompt = null
+        reply = null
+    }
+    for (entry in conversationEntries(events)) {
+        if (entry.role == ConversationRole.User) {
+            flush()
+            prompt = entry
+        } else if (prompt != null) {
+            reply = entry
+        }
+    }
+    flush()
+    return markers
+}
+
+/**
+ * A message reduced to one plain line: markdown dressing stripped, code
+ * blocks named rather than quoted, clipped at a word.
+ */
+fun markerPreview(text: String, limit: Int = 96): String {
+    val line = text
+        .replace(Regex("```[\\s\\S]*?(```|$)"), " code ")
+        .replace(Regex("`([^`]*)`"), "$1")
+        .replace(Regex("!?\\[([^\\]]*)]\\([^)]*\\)"), "$1")
+        .replace(Regex("(?m)^\\s{0,3}(#{1,6}|>|[-+*]|\\d+[.)])\\s+"), "")
+        .replace(Regex("[*_]{1,3}"), "")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+    if (line.length <= limit) return line
+    val clipped = line.take(limit - 1).trimEnd()
+    return clipped.substringBeforeLast(' ', clipped) + "…"
+}
