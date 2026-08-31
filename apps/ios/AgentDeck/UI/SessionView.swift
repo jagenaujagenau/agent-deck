@@ -53,7 +53,7 @@ struct SessionView: View {
                     SubagentPicker(runs: runs, selected: $lens)
                 }
                 .sheet(item: $openSteps) { selection in
-                    StepsSheet(events: selection.events, onOpen: { openActivity = $0 })
+                    StepsSheet(events: selection.events)
                 }
                 .sheet(item: $openActivity) { event in
                     ActivityDetailSheet(event: event)

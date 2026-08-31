@@ -84,10 +84,13 @@ struct DiffStatLabel: View {
     }
 }
 
-/// Every step of one run, under the sentence that summarised it.
+/// Every step of one run, under the sentence that summarised it. A step's
+/// depth opens over this sheet, not instead of it — the presenter here must
+/// be the sheet itself, because a sheet's host cannot present a second one
+/// while this is up.
 struct StepsSheet: View {
     var events: [AgentEvent]
-    var onOpen: (AgentEvent) -> Void
+    @State private var openStep: AgentEvent?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -103,7 +106,7 @@ struct StepsSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(events) { event in
-                        ActivityRowView(event: event, onOpen: onOpen)
+                        ActivityRowView(event: event, onOpen: { openStep = $0 })
                     }
                 }
             }
@@ -115,6 +118,9 @@ struct StepsSheet: View {
         .background(Palette.surface)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .sheet(item: $openStep) { event in
+            ActivityDetailSheet(event: event)
+        }
     }
 }
 
