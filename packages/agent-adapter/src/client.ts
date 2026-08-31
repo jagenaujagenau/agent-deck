@@ -102,10 +102,29 @@ export type RemoteCommand = {
   createdAt?: string;
 };
 
+/**
+ * How the client reaches the bridge and how it waits.
+ *
+ * `transport` and `sleep` exist so a caller can supply both. The park loops
+ * below hold a request open for up to 25 seconds and then sleep — against
+ * global `fetch` and global `setTimeout` that can only be exercised by a
+ * real socket and real wall-clock time, which is why the fake-harness e2e
+ * had to spawn a process per hook beat rather than drive the handler in
+ * process. Injected, an approval waiting on a decision is a test that
+ * answers on its own schedule.
+ */
 export type AdapterClientOptions = {
   baseUrl?: string;
   token?: string | (() => string);
   timeoutMs?: number;
+  /**
+   * Defaults to global `fetch`, read at call time. Typed as the function the
+   * client actually calls rather than `typeof fetch`, whose runtime statics
+   * (Bun hangs `preconnect` off it) a substitute has no reason to carry.
+   */
+  transport?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+  /** Defaults to a real `setTimeout` sleep. */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 const DEFAULT_TOKEN_FILE = join(homedir(), ".config", "agent-deck", "runtime-token");
@@ -136,6 +155,8 @@ export class AgentDeckClient {
   readonly baseUrl: string;
   private readonly token: string | (() => string);
   private readonly timeoutMs: number;
+  private readonly transport: AdapterClientOptions["transport"];
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(options: AdapterClientOptions = {}) {
     this.baseUrl = (
@@ -145,6 +166,11 @@ export class AgentDeckClient {
     ).replace(/\/$/, "");
     this.token = options.token ?? runtimeToken;
     this.timeoutMs = options.timeoutMs ?? 5_000;
+    // Held as given, not defaulted at construction: a caller that swaps
+    // `globalThis.fetch` after building a client — which is how the pi
+    // adapter's tests fake a bridge — must still be the one answering.
+    this.transport = options.transport;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   async request<T>(path: string, init: RequestInit = {}, timeoutMs = this.timeoutMs): Promise<T> {
@@ -152,7 +178,8 @@ export class AgentDeckClient {
     headers.set("Content-Type", "application/json");
     const token = this.token instanceof Function ? this.token() : this.token;
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${this.baseUrl}/bridge/v1${path}`, {
+    const send = this.transport ?? globalThis.fetch;
+    const response = await send(`${this.baseUrl}/bridge/v1${path}`, {
       ...init,
       headers,
       signal: AbortSignal.timeout(timeoutMs),
@@ -251,7 +278,7 @@ export class AgentDeckClient {
       // A bridge that ignores `wait` answers immediately; without this pause
       // the loop would spin. A parked response longer than the pause loops
       // straight back into the next park.
-      if (Date.now() - asked < pollMs) await new Promise((resolve) => setTimeout(resolve, pollMs));
+      if (Date.now() - asked < pollMs) await this.sleep(pollMs);
     }
     return undefined;
   }
@@ -276,7 +303,7 @@ export class AgentDeckClient {
       } catch {
         // Network and bridge restarts are transient while a native tool call is blocked.
       }
-      if (Date.now() - asked < pollMs) await new Promise((resolve) => setTimeout(resolve, pollMs));
+      if (Date.now() - asked < pollMs) await this.sleep(pollMs);
     }
     return false;
   }
