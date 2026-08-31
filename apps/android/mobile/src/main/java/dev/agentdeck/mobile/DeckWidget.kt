@@ -75,7 +75,7 @@ class DeckWidget : GlanceAppWidget() {
 private val Window = Color(0xFF0D1117)
 private val TitleBar = Color(0xFF161B22)
 private val Foreground = Color(0xFFC9D1D9)
-private val Muted = Color(0xFF8B949E)
+private val WidgetMuted = Color(0xFF8B949E)
 private val Card = Color(0xFF141920)
 private val Badge = Color(0xFF20262F)
 private val Prompt = Color(0xFF3FB950)
@@ -127,7 +127,7 @@ private fun TerminalWindow(summary: DeckSummary) {
                 Spacer(GlanceModifier.height(4.dp))
                 // Never silently truncated: three of eight shown without a word
                 // would tell you the deck has three sessions.
-                Text(text = "  … $hidden more", style = mono(11f, Muted))
+                Text(text = "  … $hidden more", style = mono(11f, WidgetMuted))
             }
             // A resting cursor under the last line. The deck is usually small
             // enough to leave space below it, and in a terminal that space is
@@ -136,7 +136,7 @@ private fun TerminalWindow(summary: DeckSummary) {
             Spacer(GlanceModifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(text = "❯ ", style = mono(12f, Prompt, FontWeight.Bold))
-                Text(text = "▊", style = mono(11f, Muted))
+                Text(text = "▊", style = mono(11f, WidgetMuted))
             }
         }
     }
@@ -157,7 +157,7 @@ private fun TitleBar(summary: DeckSummary) {
         Spacer(GlanceModifier.width(10.dp))
         Text(
             text = "agent-deck",
-            style = mono(11f, Muted),
+            style = mono(11f, WidgetMuted),
             maxLines = 1,
         )
     }
@@ -207,7 +207,7 @@ private fun SessionCard(line: DeckLine) {
                 maxLines = 1,
             )
             // The activity feed: what it is thinking, or the last thing it said.
-            Text(text = line.detail, style = mono(10f, Muted), maxLines = 2)
+            Text(text = line.detail, style = mono(10f, WidgetMuted), maxLines = 2)
         }
     }
 }
