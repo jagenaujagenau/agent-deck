@@ -236,3 +236,21 @@ func activitySegments(_ events: [AgentEvent]) -> [ActivitySegment] {
 func isSearchTool(_ tool: String?) -> Bool {
     searchTools.contains(tool ?? "")
 }
+
+/// When the person last instructed — the boundary of the current pass. The
+/// changes receipt leads with what this pass touched, because
+/// mid-conversation the question is "what did it just do", not "what has
+/// this session ever done". Mirrored from `ChatTimeline.kt`.
+func latestInstructionAt(_ events: [AgentEvent]) -> String? {
+    conversationEntries(events).last { $0.role == .user }?.event.createdAt
+}
+
+/// Where the news begins: the first timeline item this reader has not seen,
+/// for the "New" divider a returning reader lands on. Nil when there is no
+/// mark to compare against, nothing is new, or everything is — a divider
+/// above the whole conversation marks nothing. Mirrored from `ChatTimeline.kt`.
+func firstUnseenIndex(_ items: [TimelineItem], seenUpTo: String?) -> Int? {
+    guard let seenUpTo, !seenUpTo.isEmpty else { return nil }
+    guard let index = items.firstIndex(where: { $0.newestEvent.createdAt > seenUpTo }) else { return nil }
+    return index == 0 ? nil : index
+}

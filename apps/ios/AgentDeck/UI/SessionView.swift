@@ -36,6 +36,9 @@ struct SessionView: View {
     /// Reading history after a map jump: the auto-scroll to the live edge
     /// stands down until the person speaks again or reopens the session.
     @State private var readingPast = false
+    /// The reader's mark, frozen at open — beginViewing moves it, and the
+    /// "New" divider must point at where it stood before.
+    @State private var seenUpTo: String?
     @FocusState private var composerFocused: Bool
     /// The live-window signature the fetched history was current for.
     @State private var fetchedActivity = ""
@@ -99,6 +102,10 @@ struct SessionView: View {
             // Opening this view is the one act that counts as *seeing* the
             // session; the store keeps the mark moving for as long as it
             // stays open.
+            if let agent {
+                seenUpTo = max(store.seenMarks[agentId] ?? "", agent.viewedAt ?? "")
+                if seenUpTo?.isEmpty == true { seenUpTo = nil }
+            }
             store.beginViewing(agentId: agentId)
             await store.loadSlashCommands(agentId: agentId)
             await refetch()
@@ -222,6 +229,12 @@ struct SessionView: View {
         agentFileChanges(store.sessionChanges[agentId] ?? [])
     }
 
+    /// The current pass: everything since the last instruction.
+    private func passChanges(for agent: Agent) -> [AgentEvent] {
+        guard let at = latestInstructionAt(viewedEvents(agent)) else { return [] }
+        return (store.sessionChanges[agentId] ?? []).filter { $0.createdAt > at }
+    }
+
     private var slashMatches: [SlashCommand] {
         guard let query = slashCommandQuery(draft) else { return [] }
         return matchSlashCommands(query, store.slashCommands[agentId] ?? [])
@@ -243,10 +256,16 @@ struct SessionView: View {
                         EmptyConversation(agent: agent, lensed: lens != nil)
                     }
                     let timeline = chatTimeline(viewedEvents(agent))
+                    let newIndex = firstUnseenIndex(timeline, seenUpTo: seenUpTo)
                     ForEach(Array(timeline.enumerated()), id: \.element.id) { index, item in
+                        // Where the news begins for a returning reader.
+                        if index == newIndex {
+                            NewDivider()
+                        }
                         // A hairline where an exchange opens — never before the
-                        // first entry, which opens nothing.
-                        if index > 0, startsNewTurn(previous: timeline[index - 1].newestEvent, current: item.leadEvent) {
+                        // first entry, which opens nothing. The New divider is
+                        // already a boundary; two lines would say it twice.
+                        if index > 0, index != newIndex, startsNewTurn(previous: timeline[index - 1].newestEvent, current: item.leadEvent) {
                             TurnHairline()
                         }
                         switch item {
@@ -280,19 +299,42 @@ struct SessionView: View {
                     if !fileChanges.isEmpty {
                         // The session's receipt: what all that work touched,
                         // one quiet line where a conversation would leave one.
+                        // Mid-conversation the question is "what did it just
+                        // do", so the current pass leads and the session's
+                        // running total sits under it.
+                        let passChanges = passChanges(for: agent)
+                        let passFiles = agentFileChanges(passChanges).count
+                        let passLeads = passFiles > 0 && passFiles != fileChanges.count
                         Button { changesOpen = true } label: {
-                            HStack(spacing: 7) {
-                                Image(systemName: "plusminus")
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 7) {
+                                    Image(systemName: "plusminus")
+                                        .font(.system(size: 12))
+                                    Text(
+                                        passLeads
+                                            ? "\(passFiles == 1 ? "1 file" : "\(passFiles) files") changed this pass"
+                                            : fileChanges.count == 1 ? "1 file changed" : "\(fileChanges.count) files changed"
+                                    )
                                     .font(.system(size: 12))
-                                Text(fileChanges.count == 1 ? "1 file changed" : "\(fileChanges.count) files changed")
-                                    .font(.system(size: 12))
-                                if let stat = diffStat(store.sessionChanges[agentId] ?? []) {
-                                    DiffStatLabel(stat: stat)
+                                    if let stat = diffStat(passLeads ? passChanges : store.sessionChanges[agentId] ?? []) {
+                                        DiffStatLabel(stat: stat)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Palette.muted.opacity(0.7))
                                 }
-                                Spacer(minLength: 0)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Palette.muted.opacity(0.7))
+                                if passLeads {
+                                    HStack(spacing: 6) {
+                                        Text("\(fileChanges.count) files across the session")
+                                            .font(.system(size: 11))
+                                        if let stat = diffStat(store.sessionChanges[agentId] ?? []) {
+                                            DiffStatLabel(stat: stat)
+                                        }
+                                    }
+                                    .opacity(0.65)
+                                    .padding(.leading, 22)
+                                }
                             }
                             .foregroundStyle(Palette.muted)
                             .padding(.horizontal, 6)
@@ -786,6 +828,21 @@ private struct SubagentRow: View {
             }
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Where the news begins for a returning reader — the messaging idiom.
+private struct NewDivider: View {
+    var body: some View {
+        HStack(spacing: 9) {
+            Rectangle().fill(Palette.signal.opacity(0.35)).frame(height: 1)
+            Text("New")
+                .font(.system(size: 10, weight: .semibold))
+                .kerning(0.8)
+                .foregroundStyle(Palette.signal)
+            Rectangle().fill(Palette.signal.opacity(0.35)).frame(height: 1)
+        }
+        .padding(.vertical, 4)
     }
 }
 

@@ -226,3 +226,24 @@ fun activitySegments(events: List<AgentEvent>): List<ActivitySegment> {
 
 /** Whether a tool looks things up rather than changes them. */
 fun isSearchTool(tool: String?): Boolean = tool in searchTools
+
+/**
+ * When the person last instructed — the boundary of the current pass. The
+ * changes receipt leads with what this pass touched, because mid-conversation
+ * the question is "what did it just do", not "what has this session ever
+ * done"; a long-lived session's grand total buries the answer.
+ */
+fun latestInstructionAt(events: List<AgentEvent>): String? =
+    conversationEntries(events).lastOrNull { it.role == ConversationRole.User }?.event?.createdAt
+
+/**
+ * Where the news begins: the first timeline item this reader has not seen,
+ * for the "New" divider a returning reader lands on. Null when there is no
+ * mark to compare against, nothing is new, or everything is — a divider
+ * above the whole conversation marks nothing.
+ */
+fun firstUnseenIndex(items: List<TimelineItem>, seenUpTo: String?): Int? {
+    if (seenUpTo.isNullOrBlank()) return null
+    val index = items.indexOfFirst { it.newestEvent.createdAt > seenUpTo }
+    return if (index <= 0) null else index
+}

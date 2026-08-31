@@ -623,6 +623,11 @@ private fun AgentDeckApp(
         // Being on this screen is what "seen" means - and staying on it keeps
         // the mark current as the session produces more. Nothing else marks:
         // the deck list, the widget and the notifiers are machine reads.
+        // The reader's mark, frozen at open — the LaunchedEffect below moves
+        // it, and the "New" divider must point at where it stood before.
+        val seenUpTo = remember(openAgent.id) {
+            maxOf(seenMarks[openAgent.id] ?: "", openAgent.viewedAt ?: "").ifBlank { null }
+        }
         LaunchedEffect(openAgent.id, latestActivityAt(openAgent)) { vm.markSeen(openAgent) }
         AgentSessionView(
             agent = openAgent,
@@ -649,6 +654,7 @@ private fun AgentDeckApp(
             queuedMessages = queuedMessages[openAgent.id].orEmpty(),
             onLoadQueued = { vm.loadQueued(openAgent.id) },
             onCancelQueued = { commandId -> vm.cancelQueued(openAgent.id, commandId) },
+            seenUpTo = seenUpTo,
         )
         return
     }
@@ -1686,7 +1692,7 @@ private fun StatusLabel(state: String, color: Color) {
 }
 
 @Composable
-private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit, queuedMessages: List<QueuedCommand> = emptyList(), onLoadQueued: () -> Unit = {}, onCancelQueued: (String) -> Unit = {}) {
+private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?, commandNotice: String?, commandBlocked: BlockedCommand?, onSendAnyway: () -> Unit, onDismiss: () -> Unit, archived: Boolean, onArchiveToggle: () -> Unit, onControl: (String, String?) -> Unit, onQuestionAnswer: (AgentEvent, String) -> Unit, sessionChanges: List<AgentEvent>, changesLoaded: Boolean, onLoadChanges: () -> Unit, sessionHistory: List<AgentEvent>, onLoadHistory: () -> Unit, slashCommands: List<SlashCommand>, onLoadSlashCommands: () -> Unit, queuedMessages: List<QueuedCommand> = emptyList(), onLoadQueued: () -> Unit = {}, onCancelQueued: (String) -> Unit = {}, seenUpTo: String? = null) {
     // The session is one conversation. Everything the agent did reads inline
     // as work between the words; depth — a command's output, a file's diff,
     // the session's changed files — opens as a sheet over the same screen
@@ -1731,6 +1737,13 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     val activity = remember(agent.state, agent.task, agent.objective, agent.pendingApproval, agent.events) { agentCardActivity(agent) }
     // Prefer the bridge's full history; fall back to whatever the live window still holds while it loads.
     val fileChanges = remember(sessionChanges) { agentFileChanges(sessionChanges) }
+    // The current pass: everything since the last instruction. The receipt
+    // leads with it, because "what did it just do" is the mid-conversation
+    // question the session's grand total buries.
+    val instructionAt = remember(viewedAgent.events) { latestInstructionAt(viewedAgent.events) }
+    val passChanges = remember(sessionChanges, instructionAt) {
+        instructionAt?.let { at -> sessionChanges.filter { it.createdAt > at } }.orEmpty()
+    }
     val hasAttention = pendingApproval != null || pendingQuestion != null
     val isPaused = agent.state == "paused"
     // Live events already merge over the fetched history, so a refetch is only needed to recover
@@ -1878,6 +1891,9 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                 onOpenSteps = { openSteps = it },
                 changedFiles = fileChanges.size,
                 changedStat = remember(sessionChanges) { diffStat(sessionChanges) },
+                passFiles = remember(passChanges) { agentFileChanges(passChanges).size },
+                passStat = remember(passChanges) { diffStat(passChanges) },
+                seenUpTo = seenUpTo,
                 onOpenChanges = { changesOpen = true },
                 scrollToId = mapTarget,
                 onScrolledToMarker = { mapTarget = null },
@@ -2131,6 +2147,26 @@ private fun TurnSeparator() {
     }
 }
 
+/** Where the news begins for a returning reader — the messaging idiom. */
+@Composable
+private fun NewDivider() {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f).height(1.dp).background(Signal.copy(alpha = 0.35f)))
+        Text(
+            "New",
+            color = Signal,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.padding(horizontal = 9.dp),
+        )
+        Box(Modifier.weight(1f).height(1.dp).background(Signal.copy(alpha = 0.35f)))
+    }
+}
+
 @Composable
 private fun DaySeparator(label: String) {
     Box(Modifier.fillMaxWidth().padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
@@ -2231,6 +2267,11 @@ private fun ResponsesView(
     onOpenSteps: (List<AgentEvent>) -> Unit = {},
     changedFiles: Int = 0,
     changedStat: DiffStat? = null,
+    /** What the current pass — since the last instruction — touched. */
+    passFiles: Int = 0,
+    passStat: DiffStat? = null,
+    /** Everything newer than this is news to the reader; the divider's mark. */
+    seenUpTo: String? = null,
     onOpenChanges: () -> Unit = {},
     /** A conversation-map pick: the timeline scrolls to this event once. */
     scrollToId: String? = null,
@@ -2332,7 +2373,10 @@ private fun ResponsesView(
                     lensed = lensed,
                 )
             }
+            val newIndex = firstUnseenIndex(entries, seenUpTo)
             itemsIndexed(entries, key = { _, item -> "item:${item.leadEvent.id}" }) { index, item ->
+                // Where the news begins for a returning reader.
+                if (index == newIndex) NewDivider()
                 // A session open since yesterday reads as one unbroken run, and
                 // the stamps only give the hour - "09:14" under "23:47" looks
                 // like four minutes, not ten hours.
@@ -2340,8 +2384,9 @@ private fun ResponsesView(
                     .separatorBefore(entries.getOrNull(index - 1)?.newestEvent?.createdAt, item.leadEvent.createdAt)
                     ?.let { DaySeparator(it) }
                 // A hairline where a new exchange begins, so a long session
-                // reads as threads rather than one unbroken run.
-                if (index > 0 && startsNewTurn(entries[index - 1].newestEvent, item.leadEvent)) TurnSeparator()
+                // reads as threads rather than one unbroken run. The New
+                // divider is already a boundary; two lines would say it twice.
+                if (index > 0 && index != newIndex && startsNewTurn(entries[index - 1].newestEvent, item.leadEvent)) TurnSeparator()
                 when (item) {
                     is TimelineItem.Message -> ConversationBubble(item.entry, providerFor(agent))
                     is TimelineItem.Activity -> ActivityCluster(
@@ -2376,29 +2421,50 @@ private fun ResponsesView(
                     }
                 }
                 if (changedFiles > 0) item(key = "changes") {
-                    // The session's receipt: what all that work touched, one
-                    // quiet line where a conversation would leave one.
-                    Row(
+                    // The session's receipt: what the work touched, one quiet
+                    // line where a conversation would leave one. Mid-
+                    // conversation the question is "what did it just do", so
+                    // the current pass leads and the session's running total
+                    // sits under it — a long-lived session's grand total
+                    // would bury the pass that just happened.
+                    val passLeads = passFiles > 0 && passFiles != changedFiles
+                    Column(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
                             .clickable(onClick = onOpenChanges)
                             .padding(horizontal = 6.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Rounded.Difference, null, tint = Muted, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(7.dp))
-                        Text(
-                            if (changedFiles == 1) "1 file changed" else "$changedFiles files changed",
-                            color = Muted,
-                            fontSize = 12.sp,
-                        )
-                        changedStat?.let { stat ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Difference, null, tint = Muted, modifier = Modifier.size(15.dp))
                             Spacer(Modifier.width(7.dp))
-                            DiffStatLabel(stat)
+                            Text(
+                                if (passLeads) {
+                                    "${if (passFiles == 1) "1 file" else "$passFiles files"} changed this pass"
+                                } else if (changedFiles == 1) "1 file changed" else "$changedFiles files changed",
+                                color = Muted,
+                                fontSize = 12.sp,
+                            )
+                            (if (passLeads) passStat else changedStat)?.let { stat ->
+                                Spacer(Modifier.width(7.dp))
+                                DiffStatLabel(stat)
+                            }
+                            Spacer(Modifier.weight(1f))
+                            Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
                         }
-                        Spacer(Modifier.weight(1f))
-                        Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                        if (passLeads) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 22.dp, top = 1.dp)) {
+                                Text(
+                                    "$changedFiles files across the session",
+                                    color = Muted.copy(alpha = 0.65f),
+                                    fontSize = 11.sp,
+                                )
+                                changedStat?.let { stat ->
+                                    Spacer(Modifier.width(6.dp))
+                                    Box(Modifier.graphicsLayer { alpha = 0.65f }) { DiffStatLabel(stat) }
+                                }
+                            }
+                        }
                     }
                 }
                 if (working) item(key = "working") {

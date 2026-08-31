@@ -113,4 +113,45 @@ final class ChatSummaryTests: XCTestCase {
         XCTAssertEqual(segments[1].title, "Search the docs")
         XCTAssertEqual(segments[3].events.count, 1)
     }
+
+    func testTheCurrentPassBeginsAtTheLastInstruction() throws {
+        func chat(_ id: String, kind: String, detail: String, at: String) throws -> AgentEvent {
+            try JSONDecoder().decode(
+                AgentEvent.self,
+                from: JSONSerialization.data(withJSONObject: [
+                    "id": id, "kind": kind,
+                    "summary": kind == "user" ? "Remote command: prompt" : "Edit",
+                    "detail": detail, "createdAt": at,
+                ]))
+        }
+        let events = [
+            try chat("u1", kind: "user", detail: "first", at: "2026-08-30T10:00:00Z"),
+            try chat("t1", kind: "tool", detail: "", at: "2026-08-30T10:01:00Z"),
+            try chat("u2", kind: "user", detail: "second", at: "2026-08-30T10:02:00Z"),
+            try chat("t2", kind: "tool", detail: "", at: "2026-08-30T10:03:00Z"),
+        ]
+        XCTAssertEqual(latestInstructionAt(events), "2026-08-30T10:02:00Z")
+        XCTAssertNil(latestInstructionAt(events.filter { $0.kind == "tool" }))
+    }
+
+    func testTheNewDividerLandsOnTheFirstUnseenItemAndOnlyMidList() throws {
+        func item(_ id: String, at: String) throws -> TimelineItem {
+            .activity([
+                try JSONDecoder().decode(
+                    AgentEvent.self,
+                    from: JSONSerialization.data(withJSONObject: [
+                        "id": id, "kind": "tool", "summary": "Edit", "createdAt": at,
+                    ])),
+            ])
+        }
+        let items = [
+            try item("a", at: "2026-08-30T10:00:00Z"),
+            try item("b", at: "2026-08-30T10:05:00Z"),
+            try item("c", at: "2026-08-30T10:10:00Z"),
+        ]
+        XCTAssertEqual(firstUnseenIndex(items, seenUpTo: "2026-08-30T10:02:00Z"), 1)
+        XCTAssertNil(firstUnseenIndex(items, seenUpTo: "2026-08-30T09:00:00Z"))
+        XCTAssertNil(firstUnseenIndex(items, seenUpTo: "2026-08-30T11:00:00Z"))
+        XCTAssertNil(firstUnseenIndex(items, seenUpTo: nil))
+    }
 }

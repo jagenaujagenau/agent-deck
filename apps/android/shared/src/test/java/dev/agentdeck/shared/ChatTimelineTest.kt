@@ -1,6 +1,7 @@
 package dev.agentdeck.shared
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -169,5 +170,34 @@ class CompletionIsActivityTest {
         // The same subagent returning later is a new run, not a merge across
         // the session's own work between them.
         assertEquals(1, segments[3].events.size)
+    }
+
+    @Test
+    fun `the current pass begins at the last instruction`() {
+        val events = listOf(
+            AgentEvent(id = "u1", kind = "user", summary = "Remote command: prompt", detail = "first", createdAt = "2026-08-30T10:00:00Z"),
+            AgentEvent(id = "t1", kind = "tool", summary = "Edit", createdAt = "2026-08-30T10:01:00Z"),
+            AgentEvent(id = "u2", kind = "user", summary = "Remote command: prompt", detail = "second", createdAt = "2026-08-30T10:02:00Z"),
+            AgentEvent(id = "t2", kind = "tool", summary = "Edit", createdAt = "2026-08-30T10:03:00Z"),
+        )
+        assertEquals("2026-08-30T10:02:00Z", latestInstructionAt(events))
+        assertNull(latestInstructionAt(events.filter { it.kind == "tool" }))
+    }
+
+    @Test
+    fun `the New divider lands on the first unseen item, and only mid-list`() {
+        fun item(id: String, at: String) = TimelineItem.Activity(
+            listOf(AgentEvent(id = id, kind = "tool", summary = "Edit", createdAt = at)),
+        )
+        val items = listOf(
+            item("a", "2026-08-30T10:00:00Z"),
+            item("b", "2026-08-30T10:05:00Z"),
+            item("c", "2026-08-30T10:10:00Z"),
+        )
+        assertEquals(1, firstUnseenIndex(items, "2026-08-30T10:02:00Z"))
+        // Everything new marks nothing; so does everything seen, or no mark.
+        assertNull(firstUnseenIndex(items, "2026-08-30T09:00:00Z"))
+        assertNull(firstUnseenIndex(items, "2026-08-30T11:00:00Z"))
+        assertNull(firstUnseenIndex(items, null))
     }
 }
