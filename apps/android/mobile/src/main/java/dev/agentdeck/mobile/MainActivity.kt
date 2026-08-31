@@ -1697,6 +1697,7 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     // the session's changed files — opens as a sheet over the same screen
     // rather than as somewhere else to be.
     var openActivity by remember(agent.id) { mutableStateOf<AgentEvent?>(null) }
+    var openSteps by remember(agent.id) { mutableStateOf<List<AgentEvent>?>(null) }
     var changesOpen by rememberSaveable(agent.id) { mutableStateOf(false) }
     var confirmingStop by rememberSaveable(agent.id) { mutableStateOf(false) }
     val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
@@ -1867,7 +1868,9 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                 autoFocus = false,
                 lensed = activeRun != null,
                 onOpenActivity = { openActivity = it },
+                onOpenSteps = { openSteps = it },
                 changedFiles = fileChanges.size,
+                changedStat = remember(sessionChanges) { diffStat(sessionChanges) },
                 onOpenChanges = { changesOpen = true },
                 modifier = Modifier.weight(1f),
             )
@@ -1875,6 +1878,16 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
     }
     openActivity?.let { event ->
         ActivityDetailSheet(event, onDismiss = { openActivity = null })
+    }
+    openSteps?.let { steps ->
+        StepsSheet(
+            steps,
+            onOpen = { event ->
+                openSteps = null
+                openActivity = event
+            },
+            onDismiss = { openSteps = null },
+        )
     }
     if (changesOpen) {
         ChangesSheet(fileChanges, changesLoaded, onDismiss = { changesOpen = false })
@@ -2134,7 +2147,9 @@ private fun ResponsesView(
     /** Reading one subagent rather than the session. */
     lensed: Boolean = false,
     onOpenActivity: (AgentEvent) -> Unit = {},
+    onOpenSteps: (List<AgentEvent>) -> Unit = {},
     changedFiles: Int = 0,
+    changedStat: DiffStat? = null,
     onOpenChanges: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -2237,6 +2252,7 @@ private fun ResponsesView(
                         // The last run of a working session is the one being
                         // written; it arrives open so the work is watchable.
                         live = working && index == entries.lastIndex,
+                        onOpenSteps = onOpenSteps,
                         onOpen = onOpenActivity,
                     )
                 }
@@ -2280,6 +2296,10 @@ private fun ResponsesView(
                             color = Muted,
                             fontSize = 12.sp,
                         )
+                        changedStat?.let { stat ->
+                            Spacer(Modifier.width(7.dp))
+                            DiffStatLabel(stat)
+                        }
                         Spacer(Modifier.weight(1f))
                         Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
                     }
@@ -2417,93 +2437,163 @@ private fun SlashCommandPicker(matches: List<SlashCommand>, onPick: (SlashComman
 /**
  * A run of work between words, folded to one quiet line.
  *
- * Collapsed, it says what the run amounted to — "14 steps · Edit, Bash ·
- * 3 files" — because the words around it are what a conversation is for.
- * Tapped, it opens into the steps themselves, each one line, each openable
- * where there is a command, a diff, or words behind it. The live run of a
- * working session arrives already open at its tail, so the work is
+ * Collapsed, it says what the run amounted to — "Ran 11 commands, edited
+ * 2 files · +190 −11" — because the words around it are what a conversation
+ * is for. Tapped, the steps open as a sheet titled with the same sentence;
+ * the live run of a working session shows its tail inline, so the work is
  * watchable as it happens without anyone asking.
  */
 @Composable
-private fun ActivityCluster(events: List<AgentEvent>, live: Boolean, onOpen: (AgentEvent) -> Unit) {
-    var expanded by rememberSaveable(events.first().id) { mutableStateOf(false) }
-    val shown = when {
-        expanded -> events
-        live -> events.takeLast(3)
-        else -> emptyList()
-    }
+private fun ActivityCluster(
+    events: List<AgentEvent>,
+    live: Boolean,
+    onOpenSteps: (List<AgentEvent>) -> Unit,
+    onOpen: (AgentEvent) -> Unit,
+) {
+    val tail = if (live) events.takeLast(3) else emptyList()
     Column(Modifier.fillMaxWidth().padding(end = 40.dp)) {
         Row(
             Modifier
                 .clip(RoundedCornerShape(9.dp))
-                .clickable { expanded = !expanded }
+                .clickable { onOpenSteps(events) }
                 .padding(horizontal = 6.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Rounded.Bolt, null, tint = Muted, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(7.dp))
-            Text(activitySummary(events), color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.width(4.dp))
-            Icon(
-                if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                if (expanded) "Collapse steps" else "Expand steps",
-                tint = Muted.copy(alpha = 0.7f),
-                modifier = Modifier.size(15.dp),
+            Text(
+                activitySummary(events),
+                color = Muted,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
+            diffStat(events)?.let { stat ->
+                Spacer(Modifier.width(6.dp))
+                DiffStatLabel(stat)
+            }
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Rounded.ChevronRight, "Open steps", tint = Muted.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
         }
-        if (shown.isNotEmpty()) Row(Modifier.padding(start = 12.dp)) {
+        if (tail.isNotEmpty()) Row(Modifier.padding(start = 12.dp)) {
             Box(Modifier.width(1.dp).fillMaxHeight().background(Line))
             Column(Modifier.padding(start = 10.dp)) {
-                if (!expanded && live && events.size > shown.size) {
+                if (events.size > tail.size) {
                     Text(
-                        "${events.size - shown.size} earlier steps",
+                        "${events.size - tail.size} earlier steps",
                         color = Muted.copy(alpha = 0.6f),
                         fontSize = 11.sp,
                         modifier = Modifier.padding(vertical = 3.dp),
                     )
                 }
-                shown.forEach { event -> ActivityRow(event, onOpen) }
+                tail.forEach { event -> ActivityRow(event, onOpen) }
             }
         }
     }
 }
 
+/** `+190 −11`, in the diff's own colours. */
+@Composable
+private fun DiffStatLabel(stat: DiffStat) {
+    Row {
+        Text("+${stat.added}", color = Signal, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(4.dp))
+        Text("−${stat.removed}", color = Danger.copy(alpha = 0.9f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** Every step of one run, under the sentence that summarised it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StepsSheet(events: List<AgentEvent>, onOpen: (AgentEvent) -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Surface) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
+                Text(
+                    activitySummary(events),
+                    color = Text,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                diffStat(events)?.let { DiffStatLabel(it) }
+            }
+            LazyColumn(Modifier.heightIn(max = 560.dp)) {
+                items(events, key = { "step:${it.id}" }) { event -> ActivityRow(event, onOpen) }
+            }
+        }
+    }
+}
+
+/** One step, said as its verb: Ran, Edited, Created, Read — or the thought itself. */
 @Composable
 private fun ActivityRow(event: AgentEvent, onOpen: (AgentEvent) -> Unit) {
     val openable = !event.command.isNullOrBlank() || !event.diff.isNullOrBlank() || !event.detail.isNullOrBlank()
     val failed = event.kind == "error"
+    val command = event.command?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
+    val fileName = event.path?.substringAfterLast('/')
+    val verb = when {
+        command != null -> "Ran"
+        fileName != null && event.tool == "Write" -> "Created"
+        fileName != null && event.tool == "Read" -> "Read"
+        fileName != null -> "Edited"
+        else -> null
+    }
     val icon = when {
         event.kind == "thought" -> Icons.Rounded.Psychology
         failed || event.kind == "warning" -> Icons.Rounded.WarningAmber
-        !event.command.isNullOrBlank() -> Icons.Rounded.Terminal
-        !event.diff.isNullOrBlank() || event.path != null -> Icons.Rounded.Difference
+        command != null -> Icons.Rounded.Terminal
+        verb == "Created" -> Icons.Rounded.NoteAdd
+        verb == "Read" -> Icons.Rounded.Visibility
+        verb == "Edited" -> Icons.Rounded.Edit
         else -> Icons.Rounded.Build
-    }
-    // A thought's first words are the row; everything else leads with what it did.
-    val line = if (event.kind == "thought") {
-        event.detail.orEmpty().lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: event.summary
-    } else {
-        event.summary
     }
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(7.dp))
             .clickable(enabled = openable) { onOpen(event) }
-            .padding(horizontal = 4.dp, vertical = 5.dp),
+            .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = if (failed) Danger else Muted.copy(alpha = 0.8f), modifier = Modifier.size(13.dp))
         Spacer(Modifier.width(8.dp))
-        Text(
-            line,
-            color = if (failed) Danger else Text.copy(alpha = 0.72f),
-            fontSize = 12.sp,
-            fontStyle = if (event.kind == "thought") FontStyle.Italic else FontStyle.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
+        if (verb != null) {
+            Text(verb, color = if (failed) Danger else Text.copy(alpha = 0.72f), fontSize = 12.sp)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                command ?: fileName.orEmpty(),
+                color = if (failed) Danger else Muted,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (fileName != null) {
+                event.diff?.let { diffStat(listOf(event)) }?.let { stat ->
+                    Spacer(Modifier.width(6.dp))
+                    DiffStatLabel(stat)
+                }
+            }
+        } else {
+            // A thought's first words are the row; everything else leads with what it did.
+            val line = if (event.kind == "thought") {
+                event.detail.orEmpty().lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: event.summary
+            } else {
+                event.summary
+            }
+            Text(
+                line,
+                color = if (failed) Danger else Text.copy(alpha = 0.72f),
+                fontSize = 12.sp,
+                fontStyle = if (event.kind == "thought") FontStyle.Italic else FontStyle.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
         if (openable) {
             Spacer(Modifier.width(5.dp))
             Icon(Icons.Rounded.ChevronRight, null, tint = Muted.copy(alpha = 0.55f), modifier = Modifier.size(13.dp))

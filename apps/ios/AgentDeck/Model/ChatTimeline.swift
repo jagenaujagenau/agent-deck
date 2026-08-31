@@ -71,22 +71,53 @@ private func isActivity(_ event: AgentEvent) -> Bool {
     return ["tool", "thought", "warning", "error", "output", "question"].contains(event.kind)
 }
 
-/// The collapsed cluster's one line: what the work amounted to. Steps first —
-/// the honest size of the run — then the tools that dominated it, then how
-/// many files it touched.
-func activitySummary(_ events: [AgentEvent]) -> String {
-    var parts = ["\(events.count) \(events.count == 1 ? "step" : "steps")"]
-    let counts = events.compactMap { $0.tool?.nonEmpty }.reduce(into: [String: Int]()) {
-        $0[$1, default: 0] += 1
+/// A cluster's total diff, summed from every step that carried one. Counts
+/// the diff's own +/− lines (file headers excluded), so the label agrees with
+/// the diff a tap reveals. Mirrored from Android's `ChatTimeline.kt`.
+struct DiffStat: Equatable {
+    var added: Int
+    var removed: Int
+}
+
+func diffStat(_ events: [AgentEvent]) -> DiffStat? {
+    var added = 0
+    var removed = 0
+    var any = false
+    for event in events {
+        guard let diff = event.diff?.nonEmpty else { continue }
+        any = true
+        for line in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("+++") || line.hasPrefix("---") { continue }
+            if line.hasPrefix("+") { added += 1 } else if line.hasPrefix("-") { removed += 1 }
+        }
     }
-    let tools = counts.sorted { $0.value > $1.value || ($0.value == $1.value && $0.key < $1.key) }
-        .prefix(2)
-        .map(\.key)
-        .joined(separator: ", ")
-    if !tools.isEmpty { parts.append(tools) }
-    let files = Set(events.compactMap { $0.path?.nonEmpty }).count
-    if files == 1 { parts.append("1 file") } else if files > 1 { parts.append("\(files) files") }
-    return parts.joined(separator: " · ")
+    return any ? DiffStat(added: added, removed: removed) : nil
+}
+
+/// The collapsed cluster's one line: what the work amounted to, said the way
+/// a person would — "Ran 11 commands, edited 2 files", not a tool census.
+/// The verbs come from what each step actually was; a run of nothing nameable
+/// falls back to counting steps. Mirrored from Android's `ChatTimeline.kt`.
+func activitySummary(_ events: [AgentEvent]) -> String {
+    let commands = events.filter { !($0.command ?? "").trimmed.isEmpty || $0.tool == "Bash" }.count
+    let paths = events.filter { !($0.path ?? "").trimmed.isEmpty }
+    let created = Set(paths.filter { $0.tool == "Write" }.compactMap(\.path)).count
+    let read = Set(paths.filter { $0.tool == "Read" }.compactMap(\.path)).count
+    let edited = Set(paths.filter { $0.tool != "Write" && $0.tool != "Read" }.compactMap(\.path)).count
+    let thoughts = events.filter { $0.kind == "thought" }.count
+    func files(_ count: Int) -> String { count == 1 ? "1 file" : "\(count) files" }
+    var parts: [String] = []
+    if commands > 0 { parts.append("ran \(commands == 1 ? "1 command" : "\(commands) commands")") }
+    if edited > 0 { parts.append("edited \(files(edited))") }
+    if created > 0 { parts.append("created \(files(created))") }
+    if read > 0 { parts.append("read \(files(read))") }
+    if parts.isEmpty, thoughts > 0 {
+        parts.append(thoughts == 1 ? "thought once" : "thought \(thoughts) times")
+    }
+    let line = parts.isEmpty
+        ? "\(events.count) \(events.count == 1 ? "step" : "steps")"
+        : parts.joined(separator: ", ")
+    return line.prefix(1).uppercased() + line.dropFirst()
 }
 
 extension String {

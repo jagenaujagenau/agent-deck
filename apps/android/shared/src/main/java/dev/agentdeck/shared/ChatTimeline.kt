@@ -55,31 +55,54 @@ private fun isActivity(event: AgentEvent): Boolean {
     return event.kind in setOf("tool", "thought", "warning", "error", "output", "question")
 }
 
+/** A cluster's total diff, summed from every step that carried one. */
+data class DiffStat(val added: Int, val removed: Int)
+
+fun diffStat(events: List<AgentEvent>): DiffStat? {
+    var added = 0
+    var removed = 0
+    var any = false
+    for (event in events) {
+        val diff = event.diff ?: continue
+        any = true
+        for (line in diff.lineSequence()) {
+            when {
+                line.startsWith("+++") || line.startsWith("---") -> Unit
+                line.startsWith("+") -> added += 1
+                line.startsWith("-") -> removed += 1
+            }
+        }
+    }
+    return if (any) DiffStat(added, removed) else null
+}
+
 /**
- * The collapsed cluster's one line: what the work amounted to. Steps first —
- * the honest size of the run — then the tools that dominated it, then how
- * many files it touched. "14 steps · Edit, Bash · 3 files" reads at a
- * glance; the expansion carries the detail.
+ * The collapsed cluster's one line: what the work amounted to, said the way
+ * a person would — "Ran 11 commands, edited 2 files", not a step count. The
+ * verbs come from what each step actually was; a run of nothing nameable
+ * falls back to counting steps.
  */
 fun activitySummary(events: List<AgentEvent>): String {
-    val steps = "${events.size} ${if (events.size == 1) "step" else "steps"}"
-    val tools = events.mapNotNull { it.tool?.takeIf(String::isNotBlank) }
-        .groupingBy { it }
-        .eachCount()
-        .entries
-        .sortedByDescending { it.value }
-        .take(2)
-        .joinToString(", ") { it.key }
-    val files = events.mapNotNull { it.path?.takeIf(String::isNotBlank) }.distinct().size
-    return listOfNotNull(
-        steps,
-        tools.takeIf { it.isNotBlank() },
-        when {
-            files == 0 -> null
-            files == 1 -> "1 file"
-            else -> "$files files"
-        },
-    ).joinToString(" · ")
+    val commands = events.count { !it.command.isNullOrBlank() || it.tool == "Bash" }
+    val paths = events.filter { !it.path.isNullOrBlank() }
+    val created = paths.filter { it.tool == "Write" }.map { it.path }.distinct().size
+    val read = paths.filter { it.tool == "Read" }.map { it.path }.distinct().size
+    val edited = paths.filter { it.tool != "Write" && it.tool != "Read" }.map { it.path }.distinct().size
+    val thoughts = events.count { it.kind == "thought" }
+    fun files(count: Int) = if (count == 1) "1 file" else "$count files"
+    val parts = buildList {
+        if (commands > 0) add("ran ${if (commands == 1) "1 command" else "$commands commands"}")
+        if (edited > 0) add("edited ${files(edited)}")
+        if (created > 0) add("created ${files(created)}")
+        if (read > 0) add("read ${files(read)}")
+        if (isEmpty() && thoughts > 0) add(if (thoughts == 1) "thought once" else "thought $thoughts times")
+    }
+    val line = if (parts.isEmpty()) {
+        "${events.size} ${if (events.size == 1) "step" else "steps"}"
+    } else {
+        parts.joinToString(", ")
+    }
+    return line.replaceFirstChar { it.uppercase() }
 }
 
 /** The event a timeline item leads with — what separators and list keys anchor on. */

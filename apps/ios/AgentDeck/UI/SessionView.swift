@@ -27,8 +27,8 @@ struct SessionView: View {
     /// over the conversation rather than somewhere else to be.
     @State private var openActivity: AgentEvent?
     @State private var changesOpen = false
-    /// Clusters the reader has opened into their steps, by lead event id.
-    @State private var expandedClusters: Set<String> = []
+    /// The cluster opened into its steps — a titled sheet over the conversation.
+    @State private var openSteps: StepsSelection?
     @FocusState private var composerFocused: Bool
     /// The live-window signature the fetched history was current for.
     @State private var fetchedActivity = ""
@@ -51,6 +51,9 @@ struct SessionView: View {
                 }
                 .sheet(isPresented: $lensPickerOpen) {
                     SubagentPicker(runs: runs, selected: $lens)
+                }
+                .sheet(item: $openSteps) { selection in
+                    StepsSheet(events: selection.events, onOpen: { openActivity = $0 })
                 }
                 .sheet(item: $openActivity) { event in
                     ActivityDetailSheet(event: event)
@@ -226,14 +229,7 @@ struct SessionView: View {
                                 // being written; it arrives open at its tail so
                                 // the work is watchable.
                                 live: agent.state == "running" && index == timeline.count - 1,
-                                expanded: expandedClusters.contains(item.id),
-                                onToggle: {
-                                    if expandedClusters.contains(item.id) {
-                                        expandedClusters.remove(item.id)
-                                    } else {
-                                        expandedClusters.insert(item.id)
-                                    }
-                                },
+                                onOpenSteps: { openSteps = StepsSelection(events: $0) },
                                 onOpen: { openActivity = $0 }
                             )
                             .id(item.id)
@@ -259,6 +255,9 @@ struct SessionView: View {
                                     .font(.system(size: 12))
                                 Text(fileChanges.count == 1 ? "1 file changed" : "\(fileChanges.count) files changed")
                                     .font(.system(size: 12))
+                                if let stat = diffStat(store.sessionChanges[agentId] ?? []) {
+                                    DiffStatLabel(stat: stat)
+                                }
                                 Spacer(minLength: 0)
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 11))
@@ -834,4 +833,10 @@ private struct BubbleShape: Shape {
             )
         )
     }
+}
+
+/// A cluster's steps, wrapped so a sheet can present them by identity.
+private struct StepsSelection: Identifiable {
+    var events: [AgentEvent]
+    var id: String { events.first?.id ?? "steps" }
 }

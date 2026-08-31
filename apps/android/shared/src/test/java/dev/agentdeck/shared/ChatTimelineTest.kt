@@ -77,7 +77,7 @@ class ChatTimelineTest {
     }
 
     @Test
-    fun `the collapsed line says steps, dominant tools, and files touched`() {
+    fun `the collapsed line says what the work amounted to, the way a person would`() {
         val summary = activitySummary(
             listOf(
                 event("tool", "Edit a.ts", tool = "Edit", path = "a.ts"),
@@ -86,8 +86,26 @@ class ChatTimelineTest {
                 event("thought", "Reasoning", detail = "hm"),
             ),
         )
-        assertEquals("4 steps · Edit, Bash · 2 files", summary)
-        assertEquals("1 step", activitySummary(listOf(event("thought", "Reasoning", detail = "x"))))
+        assertEquals("Ran 1 command, edited 2 files", summary)
+        assertEquals("Thought once", activitySummary(listOf(event("thought", "Reasoning", detail = "x"))))
+        assertEquals(
+            "Read 1 file",
+            activitySummary(listOf(event("tool", "Read a.ts", tool = "Read", path = "a.ts"))),
+        )
+        assertEquals("1 step", activitySummary(listOf(event("warning", "Needs attention"))))
+    }
+
+    @Test
+    fun `the cluster's diff adds up across its steps`() {
+        val stat = diffStat(
+            listOf(
+                event("tool", "Edit", tool = "Edit", path = "a.ts").copy(diff = "+one\n+two\n-old"),
+                event("tool", "Edit", tool = "Edit", path = "b.ts").copy(diff = "+++ b/b.ts\n+three"),
+                event("tool", "Bash", tool = "Bash"),
+            ),
+        )
+        assertEquals(DiffStat(added = 3, removed = 1), stat)
+        assertEquals(null, diffStat(listOf(event("tool", "Bash", tool = "Bash"))))
     }
 }
 
