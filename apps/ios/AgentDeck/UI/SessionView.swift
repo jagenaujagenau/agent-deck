@@ -222,6 +222,16 @@ struct SessionView: View {
                             Label("Conversation map", systemImage: "list.bullet")
                         }
                     }
+                    // The ledger again, where the actions live: the header
+                    // shows it, the menu opens it. Menus strip custom colour,
+                    // so the numbers ride the title as plain text.
+                    if let stat = diffStat(store.sessionChanges[agentId] ?? []) {
+                        Button {
+                            changesOpen = true
+                        } label: {
+                            Label("Changes  +\(stat.added) −\(stat.removed)", systemImage: "plusminus")
+                        }
+                    }
                     Button {
                         if archived { store.restore(agent) } else { store.archive(agent) }
                     } label: {

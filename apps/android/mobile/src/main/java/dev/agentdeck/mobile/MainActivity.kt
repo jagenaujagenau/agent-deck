@@ -1904,6 +1904,19 @@ private fun AgentSessionView(agent: Agent, busy: Boolean, commandError: String?,
                                         confirmingStop = true
                                     },
                                 )
+                                // The ledger again, where the actions live:
+                                // the header shows it, the menu opens it.
+                                remember(sessionChanges) { diffStat(sessionChanges) }?.let { stat ->
+                                    DropdownMenuItem(
+                                        text = { Text("Session changes", color = Text, fontSize = 13.sp) },
+                                        leadingIcon = { Icon(Icons.Rounded.Difference, null, tint = Muted, modifier = Modifier.size(18.dp)) },
+                                        trailingIcon = { DiffStatLabel(stat) },
+                                        onClick = {
+                                            actionsOpen = false
+                                            changesOpen = true
+                                        },
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = { Text(if (archived) "Restore session" else "Archive session", color = Text, fontSize = 13.sp) },
                                     leadingIcon = { Icon(if (archived) Icons.Rounded.Unarchive else Icons.Rounded.Archive, null, tint = Muted, modifier = Modifier.size(18.dp)) },
