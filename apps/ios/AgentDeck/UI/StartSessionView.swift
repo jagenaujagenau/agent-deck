@@ -176,7 +176,12 @@ struct StartSessionView: View {
                 .foregroundStyle(Palette.muted)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    modelChip(id: nil, label: "Default")
+                    // A runtime that names its own default needs no chip from
+                    // us: two chips both saying Default is the sheet asking a
+                    // question it has already answered.
+                    if runtimeDefault == nil {
+                        modelChip(id: nil, label: "Default")
+                    }
                     ForEach(catalog, id: \.id) { choice in
                         modelChip(id: choice.id, label: choice.label)
                     }
@@ -186,10 +191,21 @@ struct StartSessionView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// The catalog entry a runtime offers for "whatever you would have picked
+    /// anyway", if it offers one.
+    private var runtimeDefault: RuntimeModel? {
+        catalog.first { $0.id == Self.runtimeDefaultModel }
+    }
+
+    /// The id the Claude SDK lists its own default under. It arrives as a model
+    /// like any other, so choosing it is choosing nothing.
+    private static let runtimeDefaultModel = "default"
+
     private func modelChip(id: String?, label: String) -> some View {
-        let selected = model == id
+        let isRuntimeDefault = id != nil && id == runtimeDefault?.id
+        let selected = (model ?? runtimeDefault?.id) == id
         return Button {
-            withAnimation(.easeOut(duration: 0.18)) { model = id }
+            withAnimation(.easeOut(duration: 0.18)) { model = isRuntimeDefault ? nil : id }
         } label: {
             Text(label)
                 .font(.system(size: 13, weight: selected ? .semibold : .regular))

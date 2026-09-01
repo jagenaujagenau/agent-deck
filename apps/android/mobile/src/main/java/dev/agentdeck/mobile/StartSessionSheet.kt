@@ -24,6 +24,13 @@ import dev.agentdeck.shared.*
  * is the one that has to find the directory. The project names already on the
  * deck are offered as completions, because they are the work this bridge runs.
  */
+/**
+ * The id a runtime uses for "whatever you would have picked anyway". The Claude
+ * SDK lists it as a model like any other, so the sheet treats choosing it as
+ * choosing nothing rather than showing a second Default beside it.
+ */
+private const val RUNTIME_DEFAULT_MODEL = "default"
+
 @Composable
 internal fun StartSessionSheet(
     projects: List<String>,
@@ -124,16 +131,25 @@ internal fun StartSessionSheet(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        FilterChip(
-                            selected = model == null,
-                            onClick = { if (!starting) model = null },
-                            shape = CircleShape,
-                            label = { Text("Default") },
-                        )
-                        models.forEach { choice ->
+                        // A runtime that names its own default needs no chip
+                        // from us: two chips both saying Default is the sheet
+                        // asking a question it has already answered.
+                        val runtimeDefault = models.firstOrNull { it.id == RUNTIME_DEFAULT_MODEL }
+                        if (runtimeDefault == null) {
                             FilterChip(
-                                selected = model == choice.id,
-                                onClick = { if (!starting) model = choice.id },
+                                selected = model == null,
+                                onClick = { if (!starting) model = null },
+                                shape = CircleShape,
+                                label = { Text("Default") },
+                            )
+                        }
+                        models.forEach { choice ->
+                            val isRuntimeDefault = choice.id == runtimeDefault?.id
+                            FilterChip(
+                                // Choosing the runtime's own default is choosing
+                                // nothing, so it sends nothing.
+                                selected = (model ?: runtimeDefault?.id) == choice.id,
+                                onClick = { if (!starting) model = if (isRuntimeDefault) null else choice.id },
                                 shape = CircleShape,
                                 label = { Text(choice.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             )
