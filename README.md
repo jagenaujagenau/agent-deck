@@ -15,6 +15,20 @@ document: [`docs/bridge-api.md`](docs/bridge-api.md).
 Nothing is exposed publicly; the bridge listens on localhost and is reached
 over a tailnet.
 
+## What it looks like
+
+The iOS client, against the demo bridge `scripts/demo-deck.ts` seeds — six
+invented sessions rather than anyone's real work.
+
+| Deck | Session | Approval | Usage |
+| --- | --- | --- | --- |
+| <img src="docs/screenshots/ios-deck.png" width="200" alt="The deck: every session on one screen, the two that want a person first"> | <img src="docs/screenshots/ios-session.png" width="200" alt="A session transcript rendering headings, a table, a fenced code block and a task list"> | <img src="docs/screenshots/ios-approval.png" width="200" alt="A blocked Bash call, approved or rejected from the phone"> | <img src="docs/screenshots/ios-usage.png" width="200" alt="Spend and token usage over the past month"> |
+
+The deck sorts by who needs a person, not by recency. A message renders as the
+Markdown it was written in; anywhere one line is all there is — a card, a
+notification, a widget row — that Markdown is taken off rather than clipped
+mid-syntax.
+
 ## The shape of it
 
 ```mermaid
@@ -48,6 +62,7 @@ flowchart TB
         direction LR
         phone["Android app<br>+ home screen widget"]
         watch["Wear OS app<br>+ tile"]
+        ios["iOS app<br>apps/ios · SwiftUI"]
         desk["macOS menu bar<br>apps/desktop · Tauri"]
     end
 
@@ -67,6 +82,7 @@ flowchart TB
     bridge <--> db
 
     bridge -->|SSE| phone
+    bridge -->|SSE| ios
     phone -->|Wear Data Layer| watch
     bridge -.->|status, version| desk
 ```
@@ -155,6 +171,8 @@ integrations/
   herdr/          Terminal state the hooks cannot see; message delivery
 packages/
   agent-adapter/  Bridge client, canonical events, projector, approval policy
+  bridge-client/  Consumer SDK: the live stream, the shared policies, the verbs
+  config/         Shared TypeScript configuration
 scripts/
   agent-deck-service.ts   launchd jobs, generated from one definition
   release-desktop.ts      Build, sign, notarize, emit the update manifest
@@ -210,8 +228,15 @@ keeping it runnable in one command.
 **The bridge is the only source of truth.** Every surface derives its state from
 the same snapshot, and the shared reduction lives in one place per platform —
 `packages/agent-adapter` for adapters, `apps/android/shared` for the phone and
-watch. Two glanceable surfaces disagreeing about how many sessions want you is
-worse than either being wrong, because neither can be trusted afterwards.
+watch, `apps/ios/AgentDeck/Model` for iOS. Two glanceable surfaces disagreeing
+about how many sessions want you is worse than either being wrong, because
+neither can be trusted afterwards.
+
+**One corpus decides the rules three languages implement.**
+`packages/bridge-client/fixtures/attention-parity.json` holds the cases — which
+session wants a person, what a card says, how Markdown is reduced for a one-line
+surface — and the Kotlin, Swift and TypeScript suites all execute it. Every case
+in it was a live disagreement between two apps before it was written down.
 
 **Widgets never fetch.** A widget composes on the system's schedule, usually with
 the app dead and sometimes with no route to the bridge. Both the home screen
