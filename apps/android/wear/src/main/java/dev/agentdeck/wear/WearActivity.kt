@@ -842,13 +842,10 @@ private fun SessionControls(
     val color = statusColor(agent.state)
     val haptics = LocalHapticFeedback.current
     val supports: (String) -> Boolean = { action -> supportsCapability(agent.capabilities, action) }
-    val hasApproval = agent.state == "waiting" && agent.pendingApproval != null
-    // Only a question with preset options is answerable from a watch; free-text belongs on the host.
-    val pendingQuestion = agent.events
-        .filter { it.kind == "question" && it.options.isNotEmpty() }
-        .maxByOrNull { it.createdAt }
-        ?.takeIf { agent.state == "waiting" }
-    val wantsDecision = hasApproval || pendingQuestion != null
+    val decision = wristDecision(agent)
+    val approval = (decision as? WristDecision.Approve)?.approval
+    val pendingQuestion = (decision as? WristDecision.Answer)?.event
+    val wantsDecision = approval != null || pendingQuestion != null
     val detailScroll = rememberLazyListState()
     val detailRotary = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { detailRotary.requestFocus() } }
@@ -923,11 +920,11 @@ private fun SessionControls(
                 }
             }
         }
-        if (hasApproval) {
+        if (approval != null) {
             // What is being approved, before the button that approves it. A
             // watch is the surface most likely to be tapped without thinking,
             // so it is the last place to ask for a decision without its subject.
-            agent.pendingApproval?.let { approval ->
+            approval.let { approval ->
                 item {
                     Surface(
                         shape = RoundedCornerShape(18.dp),

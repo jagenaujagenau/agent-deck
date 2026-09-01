@@ -9,7 +9,9 @@ import android.content.Intent
 import dev.agentdeck.shared.Agent
 import dev.agentdeck.shared.AlertArming
 import dev.agentdeck.shared.AttentionPolicy
+import dev.agentdeck.shared.OpenRequest
 import dev.agentdeck.shared.SeenStore
+import dev.agentdeck.shared.openRequest
 
 /**
  * Buzzes the wrist when a session is waiting on a person.
@@ -81,12 +83,18 @@ internal object WatchNotifier {
     }
 
     private fun build(context: Context, agent: Agent, attentionKey: String, channel: String): Notification {
-        val approval = agent.pendingApproval
-        val durable = agent.pendingQuestion
-        val question = agent.events.maxByOrNull { it.createdAt }?.takeIf { it.kind == "question" }
-        val questionText = durable?.question?.takeIf { it.isNotBlank() } ?: question?.detail ?: question?.summary
-        val questionOptions = durable?.options.orEmpty().ifEmpty { question?.options.orEmpty() }
-        val questionId = durable?.id ?: question?.id
+        // Whether to buzz is AttentionPolicy's answer. What the buzz says it is
+        // about is this one — asked the same way both phones ask it, rather
+        // than by merging a durable Request with the newest question event and
+        // checking neither for expiry. That merge would offer Approve on an
+        // approval that had already lapsed, and answer buttons for an ask the
+        // runtime had moved past.
+        val open = openRequest(agent)
+        val approval = (open as? OpenRequest.Approval)?.approval
+        val question = (open as? OpenRequest.Question)?.question
+        val questionText = question?.question?.takeIf { it.isNotBlank() }
+        val questionOptions = question?.options.orEmpty()
+        val questionId = question?.id
         val detail = approval?.detail ?: questionText ?: agent.task
 
         val builder = Notification.Builder(context, channel)
