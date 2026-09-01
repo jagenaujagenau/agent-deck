@@ -1,7 +1,8 @@
 import { Effect, Option, Schema, Stream, SubscriptionRef } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { MESSAGE_ACTIONS } from "./CommandQueue";
-import { isLoopback, pairingPage, pairingPayload } from "./Pairing";
+import { isLoopback, pairingPayload } from "./Pairing";
+import { pairingPage } from "./PairingPage";
 import {
   AgentEventInput,
   ControlCommand,
