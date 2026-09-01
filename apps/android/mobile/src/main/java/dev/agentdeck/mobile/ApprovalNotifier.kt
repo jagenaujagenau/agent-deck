@@ -12,6 +12,7 @@ import dev.agentdeck.shared.AlertArming
 import dev.agentdeck.shared.AttentionPolicy
 import dev.agentdeck.shared.AttentionPolicy.Action
 import dev.agentdeck.shared.SeenStore
+import dev.agentdeck.shared.stripMarkdownForPreview
 import dev.agentdeck.shared.supportsCapability
 
 /** Posts each concrete approval event once, durably across reconnects and process restarts. */
@@ -96,7 +97,11 @@ internal object ApprovalNotifier {
         )
         val approval = agent.pendingApproval
         val question = agent.events.maxByOrNull { it.createdAt }?.takeIf { it.kind == "question" }
-        val detail = approval?.detail ?: agent.pendingQuestion?.question ?: question?.detail ?: agent.task
+        // A banner is one clipped line and a tap: Markdown in it is dressing
+        // nobody can open.
+        val detail = stripMarkdownForPreview(
+            approval?.detail ?: agent.pendingQuestion?.question ?: question?.detail ?: agent.task,
+        )
         val builder = Notification.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(if (approval != null) "${agent.name} needs approval" else "${agent.name} has a question")

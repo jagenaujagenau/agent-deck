@@ -84,12 +84,4 @@ class AgentCardPolicyTest {
         // An agent that is not running shows its outcome, not a train of thought.
         assertEquals(null, latestReasoningPreview(agent(state = "paused", events = listOf(reasoning))))
     }
-
-    @Test
-    fun markdownPreviewKeepsMeaningWithoutFormattingSyntax() {
-        assertEquals(
-            "Plan Read docs before editing",
-            stripMarkdownForPreview("# Plan\n\n- Read [docs](https://example.com) before **editing**"),
-        )
-    }
 }

@@ -90,7 +90,9 @@ final class ApprovalNotifier: NSObject {
         guard authorized else { return }
         let content = UNMutableNotificationContent()
         content.title = "\(agent.name) finished"
-        content.body = [agent.project, agent.task].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        content.body = [agent.project, stripMarkdownForPreview(agent.task)]
+            .filter { !$0.isEmpty }
+            .joined(separator: " \u{00B7} ")
         content.sound = .default
         content.userInfo = ["agentId": agent.id]
         content.threadIdentifier = agent.id
@@ -113,7 +115,10 @@ final class ApprovalNotifier: NSObject {
         let approval = agent.pendingApproval
         let content = UNMutableNotificationContent()
         content.title = approval != nil ? "\(agent.name) needs approval" : "\(agent.name) has a question"
-        content.body = approval?.detail ?? agent.pendingQuestion?.question ?? agent.task
+        // A banner is one clipped line and a tap: Markdown in it is dressing
+        // nobody can open.
+        content.body = stripMarkdownForPreview(
+            approval?.detail ?? agent.pendingQuestion?.question ?? agent.task)
         content.sound = .default
         content.userInfo = ["agentId": agent.id, "approvalKey": approvalKey]
         // Only an answerable approval gets the buttons. A question's own preset

@@ -3,8 +3,10 @@ package dev.agentdeck.wear
 import androidx.compose.ui.graphics.Color
 import dev.agentdeck.shared.AgentEvent
 import dev.agentdeck.shared.ConversationRole
+import dev.agentdeck.shared.clipAtWord
 import dev.agentdeck.shared.conversationEntries
 import dev.agentdeck.shared.reasoningEvents
+import dev.agentdeck.shared.stripMarkdownForPreview
 
 /**
  * How much of one item is worth reading on a wrist before it becomes scrolling.
@@ -32,9 +34,16 @@ internal fun latestOf(events: List<AgentEvent>): List<LatestSection> =
 /** The newest thing the agent said, if it has said anything. */
 internal fun latestMessage(events: List<AgentEvent>): LatestSection? =
     conversationEntries(events).lastOrNull { it.role == ConversationRole.Agent }
-        ?.let { LatestSection("LATEST MESSAGE", it.content.take(WATCH_EXCERPT), Signal) }
+        ?.let { LatestSection("LATEST MESSAGE", excerpt(it.content), Signal) }
 
 /** The newest thing it was thinking, where the provider shares that at all. */
 internal fun latestReasoning(events: List<AgentEvent>): LatestSection? =
     reasoningEvents(events).lastOrNull()?.detail?.takeIf { it.isNotBlank() }
-        ?.let { LatestSection("REASONING", it.take(WATCH_EXCERPT), Blue) }
+        ?.let { LatestSection("REASONING", excerpt(it), Blue) }
+
+/**
+ * A watch-sized excerpt: the Markdown off first, then the clip. Nothing on a
+ * wrist renders a table or a fence, so a message that opens with one used to
+ * spend the excerpt on punctuation nobody could unfold.
+ */
+private fun excerpt(value: String): String = clipAtWord(stripMarkdownForPreview(value), WATCH_EXCERPT)

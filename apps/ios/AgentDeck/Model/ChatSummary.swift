@@ -10,7 +10,12 @@ import Foundation
 /// here, mirrored from Kotlin's `AgentActivity.kt`/`AgentCardPolicy.kt`, and
 /// pinned by the corpus's `cardText` section.
 
-func usefulTask(_ agent: Agent) -> String {
+func usefulTask(_ agent: Agent) -> String { stripMarkdownForPreview(rawUsefulTask(agent)) }
+
+/// The same headline before its Markdown is taken off. An approval detail, a
+/// question, an instruction and a last response are all agent-written prose,
+/// and every surface that shows this shows one clipped line of it.
+private func rawUsefulTask(_ agent: Agent) -> String {
     let newest = { (kind: String) in
         agent.events.filter { $0.kind == kind }.max { $0.createdAt < $1.createdAt }
     }
@@ -98,41 +103,87 @@ func chatPreview(_ agent: Agent, state: HomeAgentState) -> String {
     // runtime that has gone mute reads as live work that is not happening.
     if state == .running, signalSilenceMinutes(agent) != nil { return agentCardActivity(agent) }
     if state == .running { return latestReasoningPreview(agent) ?? agentCardActivity(agent) }
+    // The whole message, flattened, rather than its first line: a reply that
+    // opens with a heading or a fence used to preview as "## Findings" or
+    // "```kotlin" — the dressing, never the thing said.
     guard let last = conversationEntries(agent.events).last,
-          let line = last.content
-              .split(separator: "\n", omittingEmptySubsequences: true)
-              .map({ String($0).trimmed })
-              .first(where: { !$0.isEmpty })
+          let line = stripMarkdownForPreview(last.content).nonEmpty
     else { return usefulTask(agent) }
     return last.role == .user ? "You: \(line)" : line
 }
 
-/// Markdown reduced to the plain words a preview line can hold: links become
-/// their text, code fences and inline code lose their marks, list and heading
-/// markers go, emphasis unwraps twice (nested bold-italic), and whitespace
-/// collapses. Mirrored from Kotlin's `stripMarkdownForPreview` — the Swift
-/// side used to strip only backticks and asterisks, so the two previews of
-/// one thought read differently.
+/// Markdown reduced to the plain words a one-line surface can hold.
+///
+/// Anywhere a message is clipped — a card's preview line, a notification body,
+/// a conversation-map marker — the reader gets one line and no way to open the
+/// dressing back up. A heading arrives as "## Findings" there, a table as a
+/// row of pipes, a fenced block as three backticks and its first statement.
+/// Fenced code is named rather than quoted, because "code" says more in a
+/// preview than the first eighty characters of it do. Mirrored from Kotlin's
+/// `stripMarkdownForPreview` in `MarkdownPreview.kt`.
 func stripMarkdownForPreview(_ markdown: String) -> String {
     var value = markdown
+        .replacingOccurrences(of: "```[\\s\\S]*?(```|$)", with: " code ", options: [.regularExpression])
+        .components(separatedBy: "\n")
+        .map(withoutBlockMarkers)
+        .filter { !$0.trimmed.isEmpty }
+        .joined(separator: " ")
     func sub(_ pattern: String, _ replacement: String) {
         value = value.replacingOccurrences(
             of: pattern, with: replacement, options: [.regularExpression])
     }
     sub("!\\[([^\\]]*)\\]\\([^)]*\\)", "$1")
     sub("\\[([^\\]]+)\\]\\([^)]*\\)", "$1")
-    sub("```[^\n]*", " ")
-    value = value.replacingOccurrences(of: "```", with: " ")
     sub("`([^`]*)`", "$1")
-    sub("(?m)^\\s{0,3}(?:#{1,6}|>|[-+*]|\\d+[.)])\\s+", "")
     sub("<[^>]+>", " ")
+    // Twice, for the nested bold-italic an agent writes without thinking.
+    // Underscores need a word boundary on both ends: `user_id_lookup` is a
+    // name a preview should print whole, not emphasis around "id".
     for _ in 0 ..< 2 {
-        sub("(?:\\*\\*|__)(.*?)(?:\\*\\*|__)", "$1")
-        sub("(?:\\*|_)(.*?)(?:\\*|_)", "$1")
+        sub("\\*\\*(.*?)\\*\\*", "$1")
+        sub("\\*(.*?)\\*", "$1")
+        sub("(?<![A-Za-z0-9])__(.+?)__(?![A-Za-z0-9])", "$1")
+        sub("(?<![A-Za-z0-9])_(.+?)_(?![A-Za-z0-9])", "$1")
         sub("~~(.*?)~~", "$1")
     }
     sub("\\s+", " ")
     return value.trimmed
+}
+
+/// A rule row, a thematic break, and the markers that open a line.
+private func withoutBlockMarkers(_ line: String) -> String {
+    let trimmed = line.trimmed
+    func matches(_ pattern: String) -> Bool {
+        trimmed.range(of: "^" + pattern + "$", options: .regularExpression) != nil
+    }
+    // A table's rule row and a horizontal rule are pure punctuation: they say
+    // nothing once the shape they belong to is gone.
+    if matches("\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)*\\|?") { return "" }
+    if matches("([-*_])\\s*(\\1\\s*){2,}") { return "" }
+    let text = trimmed
+        .replacingOccurrences(
+            of: "^(?:#{1,6}|>|[-+*]|\\d+[.)])\\s+", with: "", options: [.regularExpression])
+        // The checkbox of a task item, once its bullet is gone.
+        .replacingOccurrences(of: "^\\[[ xX]\\]\\s+", with: "", options: [.regularExpression])
+    // A table row reads as its cells, separated the way the deck separates
+    // anything else on one line.
+    if text.count >= 2, text.hasPrefix("|"), text.hasSuffix("|") {
+        return text
+            .trimmingCharacters(in: CharacterSet(charactersIn: "|"))
+            .components(separatedBy: "|")
+            .map { $0.trimmed }
+            .joined(separator: " \u{00B7} ")
+            .trimmed
+    }
+    return text
+}
+
+/// One line's worth, cut at a word rather than mid-syllable.
+func clipAtWord(_ value: String, limit: Int) -> String {
+    if value.count <= limit { return value }
+    let clipped = String(value.prefix(max(0, limit - 1))).trimmed
+    let atWord = clipped.range(of: " ", options: .backwards).map { String(clipped[..<$0.lowerBound]) } ?? clipped
+    return atWord + "…"
 }
 
 /// The current train of thought of a running session, clipped for a preview
@@ -146,8 +197,5 @@ func latestReasoningPreview(_ agent: Agent, limit: Int = 120) -> String? {
     else { return nil }
     let reasoning = stripMarkdownForPreview(thought.detail ?? "")
     guard !reasoning.trimmed.isEmpty else { return nil }
-    if reasoning.count <= limit { return reasoning }
-    let clipped = String(reasoning.prefix(max(0, limit - 1))).trimmed
-    let atWord = clipped.range(of: " ", options: .backwards).map { String(clipped[..<$0.lowerBound]) } ?? clipped
-    return atWord + "…"
+    return clipAtWord(reasoning, limit: limit)
 }

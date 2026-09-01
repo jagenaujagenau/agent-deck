@@ -12,6 +12,7 @@ import dev.agentdeck.shared.AttentionPolicy
 import dev.agentdeck.shared.OpenRequest
 import dev.agentdeck.shared.SeenStore
 import dev.agentdeck.shared.openRequest
+import dev.agentdeck.shared.stripMarkdownForPreview
 
 /**
  * Buzzes the wrist when a session is waiting on a person.
@@ -95,7 +96,8 @@ internal object WatchNotifier {
         val questionText = question?.question?.takeIf { it.isNotBlank() }
         val questionOptions = question?.options.orEmpty()
         val questionId = question?.id
-        val detail = approval?.detail ?: questionText ?: agent.task
+        // A wrist reads one clipped line: no Markdown survives the trip.
+        val detail = stripMarkdownForPreview(approval?.detail ?: questionText ?: agent.task)
 
         val builder = Notification.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)

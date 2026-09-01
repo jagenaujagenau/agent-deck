@@ -140,11 +140,12 @@ object DeckSummaries {
         }
     }
 
-    /** One line's worth, with the newlines a transcript is full of flattened out. */
-    private fun clip(value: String): String {
-        val flat = value.replace(Regex("\\s+"), " ").trim()
-        return if (flat.length <= DETAIL_LIMIT) flat else flat.take(DETAIL_LIMIT - 1).trimEnd() + "…"
-    }
+    /**
+     * One line's worth, with the newlines a transcript is full of flattened
+     * out and its Markdown taken off — a widget row two lines tall has no use
+     * for a heading's hashes or a table's pipes.
+     */
+    private fun clip(value: String): String = clipAtWord(stripMarkdownForPreview(value), DETAIL_LIMIT)
 
     /**
      * The line a surface leads with.

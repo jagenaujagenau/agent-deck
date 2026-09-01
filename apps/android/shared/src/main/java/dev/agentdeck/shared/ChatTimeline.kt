@@ -173,19 +173,8 @@ fun conversationMarkers(events: List<AgentEvent>): List<ConversationMarker> {
  * A message reduced to one plain line: markdown dressing stripped, code
  * blocks named rather than quoted, clipped at a word.
  */
-fun markerPreview(text: String, limit: Int = 96): String {
-    val line = text
-        .replace(Regex("```[\\s\\S]*?(```|$)"), " code ")
-        .replace(Regex("`([^`]*)`"), "$1")
-        .replace(Regex("!?\\[([^\\]]*)]\\([^)]*\\)"), "$1")
-        .replace(Regex("(?m)^\\s{0,3}(#{1,6}|>|[-+*]|\\d+[.)])\\s+"), "")
-        .replace(Regex("[*_]{1,3}"), "")
-        .replace(Regex("\\s+"), " ")
-        .trim()
-    if (line.length <= limit) return line
-    val clipped = line.take(limit - 1).trimEnd()
-    return clipped.substringBeforeLast(' ', clipped) + "…"
-}
+fun markerPreview(text: String, limit: Int = 96): String =
+    clipAtWord(stripMarkdownForPreview(text), limit)
 
 /** How many steps of a run failed — worn on the cluster header so triage needs no expansion. */
 fun failedSteps(events: List<AgentEvent>): Int = events.count { it.kind == "error" }

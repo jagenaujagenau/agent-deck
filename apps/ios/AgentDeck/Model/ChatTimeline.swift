@@ -176,22 +176,7 @@ func conversationMarkers(_ events: [AgentEvent]) -> [ConversationMarker] {
 /// A message reduced to one plain line: markdown dressing stripped, code
 /// blocks named rather than quoted, clipped at a word.
 func markerPreview(_ text: String, limit: Int = 96) -> String {
-    var line = text
-    for (pattern, replacement) in [
-        ("```[\\s\\S]*?(```|$)", " code "),
-        ("`([^`]*)`", "$1"),
-        ("!?\\[([^\\]]*)\\]\\([^)]*\\)", "$1"),
-        ("(?m)^\\s{0,3}(#{1,6}|>|[-+*]|\\d+[.)])\\s+", ""),
-        ("[*_]{1,3}", ""),
-        ("\\s+", " "),
-    ] {
-        line = line.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
-    }
-    line = line.trimmed
-    if line.count <= limit { return line }
-    let clipped = String(line.prefix(limit - 1)).trimmed
-    let atWord = clipped.range(of: " ", options: .backwards).map { String(clipped[..<$0.lowerBound]) } ?? clipped
-    return atWord + "…"
+    clipAtWord(stripMarkdownForPreview(text), limit: limit)
 }
 
 /// How many steps of a run failed — worn on the cluster header so triage

@@ -56,7 +56,14 @@ fun supportsCapability(capabilities: List<String>?, action: String): Boolean =
  * whitespace-only question, and iOS alone honouring `objective`). Shared and
  * corpus-pinned now.
  */
-fun usefulTask(agent: Agent): String {
+fun usefulTask(agent: Agent): String = stripMarkdownForPreview(rawUsefulTask(agent))
+
+/**
+ * The same headline before its Markdown is taken off. An approval detail, a
+ * question, an instruction and a last response are all agent-written prose,
+ * and every surface that shows this shows one clipped line of it.
+ */
+private fun rawUsefulTask(agent: Agent): String {
     val newest = { kind: String, predicate: (AgentEvent) -> Boolean ->
         agent.events.filter { it.kind == kind && predicate(it) }.maxByOrNull { it.createdAt }
     }

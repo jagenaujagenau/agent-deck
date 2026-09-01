@@ -10,6 +10,7 @@ import android.net.Uri
 import dev.agentdeck.shared.Agent
 import dev.agentdeck.shared.SeenStore
 import dev.agentdeck.shared.sessionSeen
+import dev.agentdeck.shared.stripMarkdownForPreview
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -112,11 +113,12 @@ internal object CompletionNotifier {
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val detail = "${agent.project} · ${stripMarkdownForPreview(agent.task)}"
         return Notification.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("${agent.name} finished")
-            .setContentText("${agent.project} · ${agent.task}")
-            .setStyle(Notification.BigTextStyle().bigText("${agent.project} · ${agent.task}"))
+            .setContentText(detail)
+            .setStyle(Notification.BigTextStyle().bigText(detail))
             .setContentIntent(openIntent)
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)

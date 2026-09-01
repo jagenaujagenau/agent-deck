@@ -834,6 +834,77 @@
           ]
         },
         "latestReasoningPreview": null
+      },
+      {
+        "case": "an approval detail written in markdown is headlined as plain words",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code · deck · 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "waiting",
+          "task": "",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [],
+          "pendingApproval": {
+            "id": "r1",
+            "tool": "Edit",
+            "detail": "## Replace the loop\n\n| file | lines |\n|---|---|\n| tile.kt | 12 |\n\n```kotlin\nval paint = Paint()\n```",
+            "createdAt": "2026-08-31T11:00:00Z",
+            "expiresAt": "2026-08-31T23:00:00Z"
+          }
+        },
+        "usefulTask": "Replace the loop file · lines tile.kt · 12 code"
+      },
+      {
+        "case": "a task list, a rule and a quote leave only what they said",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code · deck · 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "running",
+          "task": "Thinking",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [
+            {
+              "id": "e1",
+              "kind": "thought",
+              "summary": "Reasoning",
+              "detail": "- [x] measured the wide map\n- [ ] measured the tall one\n\n---\n\n> the renderer was never the problem",
+              "createdAt": "2026-08-31T10:00:00Z"
+            }
+          ]
+        },
+        "latestReasoningPreview": "measured the wide map measured the tall one the renderer was never the problem"
+      },
+      {
+        "case": "an identifier with underscores is not emphasis",
+        "agent": {
+          "id": "a1",
+          "name": "Claude Code · deck · 4f2a",
+          "project": "deck",
+          "model": "claude",
+          "state": "running",
+          "task": "Thinking",
+          "tokens": 0,
+          "costUsd": 0,
+          "lastSeenAt": "2026-08-31T11:00:00Z",
+          "events": [
+            {
+              "id": "e1",
+              "kind": "thought",
+              "summary": "Reasoning",
+              "detail": "Check user_id_lookup before _touching_ the cache",
+              "createdAt": "2026-08-31T10:00:00Z"
+            }
+          ]
+        },
+        "latestReasoningPreview": "Check user_id_lookup before touching the cache"
       }
     ]
   },
