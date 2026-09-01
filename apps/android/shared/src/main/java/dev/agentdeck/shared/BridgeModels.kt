@@ -41,6 +41,22 @@ data class RuntimeModel(
 @Serializable
 internal data class RuntimeModels(val models: List<RuntimeModel> = emptyList())
 
+/**
+ * What one runtime last said it supports, and when it said so.
+ *
+ * Only a live session can answer what models an account reaches, and the start
+ * sheet has no session — so it reads what the bridge was told last time.
+ */
+@Serializable
+data class ModelCatalogEntry(
+    val runtime: String,
+    val models: List<RuntimeModel> = emptyList(),
+    val learnedAt: String = "",
+)
+
+@Serializable
+internal data class ModelCatalog(val catalog: List<ModelCatalogEntry> = emptyList())
+
 @Serializable
 data class SlashCommand(val name: String, val description: String? = null, val source: String = "user")
 

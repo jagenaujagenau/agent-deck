@@ -293,6 +293,20 @@ class BridgeClient(
         }
     }
 
+    /**
+     * What each runtime last said it supports, for the start sheet — which is
+     * choosing what to open and so has no session to ask. A bridge that has
+     * never hosted one answers empty, and the sheet then sends no model: the
+     * runtime's own default is a better answer than one we invent.
+     */
+    suspend fun modelCatalog(): List<ModelCatalogEntry> = withContext(Dispatchers.IO) {
+        val request = requestBuilder("$baseUrl/bridge/v1/models").get().build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@withContext emptyList()
+            json.decodeFromString<ModelCatalog>(response.body.string()).catalog
+        }
+    }
+
     /** The message commands still queued for this session — the sender's to take back. */
     suspend fun queuedMessages(agentId: String): List<QueuedCommand> = withContext(Dispatchers.IO) {
         val request = requestBuilder("$baseUrl/bridge/v1/agents/$agentId/queued").get().build()
@@ -414,6 +428,8 @@ class AgentRepository(private val client: BridgeClient) {
     suspend fun changes(agentId: String): List<AgentEvent> = client.changes(agentId)
 
     suspend fun models(agentId: String): List<RuntimeModel> = client.models(agentId)
+
+    suspend fun modelCatalog(): List<ModelCatalogEntry> = client.modelCatalog()
 
     suspend fun queuedMessages(agentId: String): List<QueuedCommand> = client.queuedMessages(agentId)
 

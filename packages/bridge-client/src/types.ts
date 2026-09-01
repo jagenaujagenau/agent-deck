@@ -190,3 +190,14 @@ export interface RuntimeModel {
   description?: string;
   resolvedModel?: string;
 }
+
+/**
+ * What one runtime last said it supports, and when it said so — the answer a
+ * surface gets when there is no session to ask.
+ */
+export interface ModelCatalogEntry {
+  runtime: string;
+  models: RuntimeModel[];
+  /** When a live session last answered. A surface should say how old this is. */
+  learnedAt: string;
+}

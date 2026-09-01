@@ -74,6 +74,15 @@ actor BridgeClient {
         }
     }
 
+    /// What each runtime last said it supports, for the start sheet — which is
+    /// choosing what to open and so has no session to ask. A bridge that has
+    /// never hosted one answers empty, and the sheet offers no choice rather
+    /// than a list we invent.
+    func modelCatalog() async throws -> [ModelCatalogEntry] {
+        let response: ModelCatalogResponse = try await get("/bridge/v1/models")
+        return response.catalog
+    }
+
     /// The message commands still queued for this session — the sender's to
     /// take back until the runtime collects them.
     func queuedMessages(agentId: String) async throws -> [QueuedCommand] {

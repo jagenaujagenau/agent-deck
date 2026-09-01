@@ -33,6 +33,7 @@ import type {
 import { StoredAgent, StoredCommand } from "./Domain";
 import { isMessageAction, makeCommandQueue } from "./CommandQueue";
 import { makeDeviceRegistry, type PairedDevice } from "./DeviceRegistry";
+import { makeModelCatalog } from "./ModelCatalog";
 import { makeRequestLedger } from "./RequestLedger";
 import type { PendingQuestion, RequestLedger } from "./RequestLedger";
 import { makeRuntimeEventLog } from "./RuntimeEventLog";
@@ -441,6 +442,8 @@ export class BridgeState extends Context.Service<
     readonly explain: (agentId: string) => Effect.Effect<AgentExplanation | undefined>;
     /** The one owner of durable Requests; see RequestLedger. */
     readonly requests: RequestLedger;
+    /** What each runtime last said it supports; see ModelCatalog. */
+    readonly modelCatalog: ReturnType<typeof makeModelCatalog>;
     readonly setSlashCommands: (
       agentId: string,
       commands: ReadonlyArray<JsonValue>,
@@ -581,6 +584,12 @@ export class BridgeState extends Context.Service<
        * be kept by twenty lines sitting in the middle of `heartbeat`.
        */
       const usage = makeUsageLedger({ sql, now }, yield* emptyTranscriptCache());
+
+      /**
+       * What each runtime last said it supports, so the start sheet can offer
+       * a model before there is a session to ask.
+       */
+      const modelCatalog = makeModelCatalog({ sql, now });
 
       /**
        * The Request lifecycle in one place. The ledger publishes each
@@ -1171,6 +1180,7 @@ export class BridgeState extends Context.Service<
         resolveRuntimeRequest,
         explain,
         requests,
+        modelCatalog,
         setSlashCommands,
         commandReceipt,
         queuedMessages,

@@ -30,6 +30,9 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS bridge_activity (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, project TEXT NOT NULL, runtime TEXT NOT NULL, kind TEXT NOT NULL, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_file_changes (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, path TEXT, tool TEXT, diff TEXT NOT NULL, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_slash_commands (agent_id TEXT PRIMARY KEY, commands TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  // What a runtime last said it supports, so the start sheet can offer a model
+  // when there is no session yet to ask.
+  `CREATE TABLE IF NOT EXISTS bridge_model_catalog (runtime TEXT PRIMARY KEY, models TEXT NOT NULL, updated_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS bridge_session_events (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT, tool TEXT, command TEXT, path TEXT, options TEXT, subagent_id TEXT, subagent_type TEXT, subagent_name TEXT, turn_id TEXT, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS bridge_session_events_agent_idx ON bridge_session_events(agent_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS bridge_file_changes_agent_idx ON bridge_file_changes(agent_id, created_at)`,

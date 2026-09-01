@@ -477,6 +477,23 @@ const bridgeRouteTable = [
         : yield* HttpServerResponse.json({ models });
     }),
   ),
+  /**
+   * What each runtime last said it supports.
+   *
+   * The per-session route above asks a live query, which is the only place
+   * this can truly be learned — and is no help to the start sheet, which is
+   * choosing what to open and so has no session to ask. This answers from
+   * what the deck was told last time, stamped, so a surface can say how old
+   * the answer is rather than presenting it as current.
+   */
+  route(
+    "GET",
+    "/models",
+    Effect.gen(function* () {
+      const state = yield* BridgeState;
+      return yield* HttpServerResponse.json({ catalog: yield* state.modelCatalog.known() });
+    }),
+  ),
   route(
     "GET",
     "/managed/runtimes",

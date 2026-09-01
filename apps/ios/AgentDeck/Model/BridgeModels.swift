@@ -379,6 +379,21 @@ struct ManagedRuntimes: Decodable {
 
 /// Body for starting a bridge-hosted session. The `cwd` must be absolute and
 /// exist on the bridge's machine.
+/// What one runtime last said it supports, and when it said so.
+///
+/// Only a live session can answer what an account reaches, and the start sheet
+/// has none — so it reads what the bridge was told last time.
+struct ModelCatalogEntry: Decodable, Equatable {
+    var runtime: String
+    var models: [RuntimeModel]
+    /// When a live session last answered.
+    var learnedAt: String
+}
+
+struct ModelCatalogResponse: Decodable {
+    var catalog: [ModelCatalogEntry]
+}
+
 struct ManagedSessionRequest: Encodable {
     var project: String
     var cwd: String

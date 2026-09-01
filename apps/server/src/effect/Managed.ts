@@ -149,7 +149,12 @@ export class ManagedRuntime extends Context.Service<
       const models = Effect.fn("ManagedRuntime.models")(function* (agentId: string) {
         const hosted = (yield* Ref.get(sessions)).get(agentId);
         if (hosted === undefined || !adapter.models) return undefined;
-        return yield* Effect.promise(() => adapter.models!(hosted.session));
+        const answer = yield* Effect.promise(() => adapter.models!(hosted.session));
+        // Asking a live session is the only way to learn this, and the moment
+        // a person most wants the answer is before there is a session at all.
+        // So every answer is kept for the start sheet.
+        yield* state.modelCatalog.remember("claude", answer);
+        return answer;
       });
 
       const available = Effect.sync(() => [

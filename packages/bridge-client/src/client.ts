@@ -7,6 +7,7 @@ import type {
   CommandReceipt,
   ControlAction,
   ManagedRuntime,
+  ModelCatalogEntry,
   PairedDevice,
   QueuedCommand,
   RuntimeModel,
@@ -109,6 +110,21 @@ export class BridgeClient {
   /** Why the deck believes what it believes about one session. */
   async explain(agentId: string): Promise<JsonValue> {
     return await this.request<JsonValue>("GET", `/agents/${encodeURIComponent(agentId)}/explain`);
+  }
+
+  /**
+   * What each runtime last said it supports, for a surface choosing what to
+   * open — the start sheet has no session to ask. A deck that has never
+   * hosted one answers empty, and the caller should send no model rather than
+   * guessing: the runtime's own default is a better answer than ours.
+   */
+  async modelCatalog(): Promise<ModelCatalogEntry[]> {
+    try {
+      const body = await this.request<{ catalog: ModelCatalogEntry[] }>("GET", "/models");
+      return body.catalog;
+    } catch {
+      return [];
+    }
   }
 
   /**

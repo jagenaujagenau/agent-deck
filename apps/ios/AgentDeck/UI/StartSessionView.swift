@@ -24,6 +24,10 @@ struct StartSessionView: View {
     @State private var objective = ""
     @State private var prompt = ""
     @State private var permission: ManagedPermissionMode = .default
+    /// Nothing chosen means the runtime's own default, which is a better
+    /// answer than any this sheet could invent.
+    @State private var model: String?
+    @State private var catalog: [RuntimeModel] = []
     @State private var working = false
     @State private var validationError: String?
     @State private var failure: BridgeError?
@@ -47,6 +51,7 @@ struct StartSessionView: View {
                 .padding(20)
             }
             .scrollDismissesKeyboard(.interactively)
+            .task { catalog = await store.modelCatalog().flatMap(\.models) }
             .background(Palette.ink)
             .navigationTitle("New Session")
             .navigationBarTitleDisplayMode(.inline)
@@ -152,9 +157,50 @@ struct StartSessionView: View {
                     .lineLimit(1 ... 4)
                     .focused($focus, equals: .prompt)
             }
+            if !catalog.isEmpty {
+                modelPicker
+            }
             permissionPicker
         }
         .disabled(working)
+    }
+
+    /// What the bridge was last told this account can reach. Only a running
+    /// session can answer that, and there is none here — so an empty catalog
+    /// means no choice is offered rather than a list we made up.
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("MODEL")
+                .font(.system(size: 10, weight: .bold))
+                .kerning(1.1)
+                .foregroundStyle(Palette.muted)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    modelChip(id: nil, label: "Default")
+                    ForEach(catalog, id: \.id) { choice in
+                        modelChip(id: choice.id, label: choice.label)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func modelChip(id: String?, label: String) -> some View {
+        let selected = model == id
+        return Button {
+            withAnimation(.easeOut(duration: 0.18)) { model = id }
+        } label: {
+            Text(label)
+                .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .frame(height: 34)
+                .foregroundStyle(selected ? Palette.signal : Palette.muted)
+                .background(Capsule().fill(selected ? Palette.signal.opacity(0.16) : Palette.surface))
+                .overlay(Capsule().stroke(Palette.line.opacity(selected ? 0 : 1), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private var permissionPicker: some View {
@@ -226,7 +272,8 @@ struct StartSessionView: View {
                 project: trimmedProject,
                 objective: objective.trimmed,
                 prompt: prompt.trimmed,
-                permissionMode: permission.wire
+                permissionMode: permission.wire,
+                model: model
             )
             dismiss()
         } catch {

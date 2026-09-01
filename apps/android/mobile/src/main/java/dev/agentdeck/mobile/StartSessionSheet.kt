@@ -30,14 +30,18 @@ internal fun StartSessionSheet(
     workingDirectories: List<String>,
     starting: Boolean,
     error: String?,
+    models: List<RuntimeModel>,
     onDismiss: () -> Unit,
-    onStart: (cwd: String, project: String, objective: String, prompt: String, permissionMode: String?, (Boolean, String?) -> Unit) -> Unit,
+    onStart: (cwd: String, project: String, objective: String, prompt: String, permissionMode: String?, model: String?, (Boolean, String?) -> Unit) -> Unit,
 ) {
     var project by remember { mutableStateOf("") }
     var cwd by remember { mutableStateOf("") }
     var objective by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
     var permission by remember { mutableStateOf("default") }
+    // Nothing chosen means the runtime's own default, which is a better answer
+    // than any this sheet could invent.
+    var model by remember { mutableStateOf<String?>(null) }
     var fieldError by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = { if (!starting) onDismiss() },
@@ -114,6 +118,28 @@ internal fun StartSessionSheet(
                     minLines = 1,
                     maxLines = 4,
                 )
+                if (models.isNotEmpty()) {
+                    Text("Model", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp, color = Muted)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = model == null,
+                            onClick = { if (!starting) model = null },
+                            shape = CircleShape,
+                            label = { Text("Default") },
+                        )
+                        models.forEach { choice ->
+                            FilterChip(
+                                selected = model == choice.id,
+                                onClick = { if (!starting) model = choice.id },
+                                shape = CircleShape,
+                                label = { Text(choice.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            )
+                        }
+                    }
+                }
                 Text("Permission mode", fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp, color = Muted)
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -144,7 +170,7 @@ internal fun StartSessionSheet(
                         fieldError = "The working directory must be an absolute path"
                         return@Button
                     }
-                    onStart(cwd, project, objective, prompt, permission) { success, message ->
+                    onStart(cwd, project, objective, prompt, permission, model) { success, message ->
                         if (!success) fieldError = message
                     }
                 },

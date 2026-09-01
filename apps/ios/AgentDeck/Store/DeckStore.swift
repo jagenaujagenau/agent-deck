@@ -453,18 +453,26 @@ final class DeckStore {
     /// Starts a bridge-hosted Claude session. The new session arrives through
     /// the live stream like any other; the refresh makes the deck show it now.
     @discardableResult
+    /// What the start sheet can offer before there is a session to ask.
+    /// Failure is an empty catalog: the sheet then offers no model choice,
+    /// which is the same thing it does on a bridge that has never hosted one.
+    func modelCatalog() async -> [ModelCatalogEntry] {
+        (try? await client.modelCatalog()) ?? []
+    }
+
     func startManagedSession(
         cwd: String,
         project: String,
         objective: String,
         prompt: String,
-        permissionMode: String?
+        permissionMode: String?,
+        model: String?
     ) async throws -> String {
         let session = try await client.startManagedSession(
             request: ManagedSessionRequest(
                 project: project,
                 cwd: cwd,
-                model: nil,
+                model: model,
                 objective: objective.isEmpty ? nil : objective,
                 prompt: prompt.isEmpty ? nil : prompt,
                 permissionMode: permissionMode

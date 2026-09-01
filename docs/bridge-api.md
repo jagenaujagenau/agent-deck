@@ -162,6 +162,14 @@ the runtime that owns it. Switch with the `set_model` control action, whose
 when its runtime can really do it, and the deck reports the new model only
 once the runtime has accepted the switch.
 
+`GET /models` (read scope) answers the same question for a surface with no
+session to ask — the start sheet, choosing what to open:
+`{catalog: [{runtime, models: [...], learnedAt}]}`. It is what each runtime
+last said it supports, kept when a live session answered, so `learnedAt` is
+how old the answer is and a surface should say so rather than presenting it as
+current. A deck that has never hosted a session answers an empty catalog; the
+start sheet then sends no model and the runtime picks its own default.
+
 What a person queued is theirs to take back until the runtime collects it:
 `GET /agents/:id/queued` (read scope) lists the message commands — prompt,
 steer, follow_up — not yet acknowledged, oldest first, as

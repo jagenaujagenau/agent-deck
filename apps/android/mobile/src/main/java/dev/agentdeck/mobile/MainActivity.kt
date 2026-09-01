@@ -271,6 +271,21 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
             .onSuccess { models -> _sessionModels.value = _sessionModels.value + (agentId to models) }
     }
 
+    private val _startModels = MutableStateFlow<List<RuntimeModel>>(emptyList())
+
+    /**
+     * What the start sheet can offer. Only a running session can say what an
+     * account reaches, so this is what the bridge was told last time — empty
+     * on a deck that has never hosted one, and the sheet then offers no choice
+     * rather than a list it made up.
+     */
+    internal val startModels = _startModels.asStateFlow()
+
+    fun loadStartModels() = viewModelScope.launch {
+        runCatching { repository.modelCatalog() }
+            .onSuccess { catalog -> _startModels.value = catalog.flatMap { it.models } }
+    }
+
     private val _queuedMessages = MutableStateFlow<Map<String, List<QueuedCommand>>>(emptyMap())
     val queuedMessages = _queuedMessages.asStateFlow()
 
@@ -448,6 +463,7 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
         objective: String,
         prompt: String,
         permissionMode: String?,
+        model: String?,
         onResult: (Boolean, String?) -> Unit,
     ) = viewModelScope.launch {
         if (cwd.isBlank() || project.isBlank()) {
@@ -461,6 +477,7 @@ class DeckViewModel(application: Application) : AndroidViewModel(application) {
                 ManagedSessionRequest(
                     project = project.trim(),
                     cwd = cwd.trim(),
+                    model = model,
                     objective = objective.trim().ifBlank { null },
                     prompt = prompt.trim().ifBlank { null },
                     permissionMode = permissionMode,
@@ -712,6 +729,7 @@ internal fun AgentDeckApp(
                 onRefresh = vm::refresh,
                 onStart = {
                     vm.loadManagedRuntimes()
+                    vm.loadStartModels()
                     startOpen = true
                 },
             )
@@ -821,9 +839,10 @@ internal fun AgentDeckApp(
             workingDirectories = knownWorkingDirectories(snapshot?.agents ?: emptyList()),
             starting = vm.startingSession.collectAsStateWithLifecycle().value,
             error = vm.startError.collectAsStateWithLifecycle().value,
+            models = vm.startModels.collectAsStateWithLifecycle().value,
             onDismiss = { startOpen = false },
-            onStart = { cwd, project, objective, prompt, permission, onResult ->
-                vm.startManagedSession(cwd, project, objective, prompt, permission) { success, agentId ->
+            onStart = { cwd, project, objective, prompt, permission, model, onResult ->
+                vm.startManagedSession(cwd, project, objective, prompt, permission, model) { success, agentId ->
                     onResult(success, agentId)
                     if (success) {
                         startOpen = false
