@@ -1,0 +1,912 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jagenaujagenau/agent-deck/blob/main/docs/bridge-v1.schema.json",
+  "title": "Agent Deck bridge — /bridge/v1 request payloads",
+  "description": "Generated from apps/server/src/effect/Domain.ts by apps/server/scripts/wire-schema.ts. Do not edit by hand. The prose contract is docs/bridge-api.md.",
+  "$defs": {
+    "RateLimitWindow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "usedPercent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "NaN"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "Infinity"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "-Infinity"
+              ]
+            }
+          ]
+        },
+        "resetsAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "account": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "usedPercent"
+      ],
+      "additionalProperties": true
+    },
+    "PendingApproval": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tool",
+        "detail",
+        "createdAt",
+        "expiresAt"
+      ],
+      "additionalProperties": true
+    },
+    "AgentEvent": {
+      "description": "An event as the bridge hands it back: the input shape with id and createdAt filled in. Referenced from Heartbeat and returned in snapshots.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "thought",
+            "tool",
+            "output",
+            "warning",
+            "error",
+            "question",
+            "user"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "options": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subagentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subagentType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subagentName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turnId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "summary",
+        "createdAt"
+      ],
+      "additionalProperties": true
+    },
+    "Heartbeat": {
+      "description": "POST /agents/heartbeat — identity and liveness. Repeating totals is safe: usage is stored as deltas against a high-water cursor.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "runtime": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runtimeProtocol": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "canonical-v1"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "running",
+            "waiting",
+            "paused",
+            "error",
+            "offline"
+          ]
+        },
+        "task": {
+          "type": "string"
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "NaN"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "Infinity"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "-Infinity"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "processedTokens": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "NaN"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "Infinity"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "-Infinity"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "pause",
+                  "resume",
+                  "stop",
+                  "approve",
+                  "reject",
+                  "prompt",
+                  "steer",
+                  "follow_up",
+                  "set_model"
+                ]
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rateLimits": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RateLimitWindow"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pendingApproval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PendingApproval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tokens": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "NaN"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "Infinity"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "-Infinity"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "costUsd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "NaN"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "Infinity"
+              ]
+            },
+            {
+              "type": "string",
+              "enum": [
+                "-Infinity"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "events": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentEvent"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "project",
+        "model",
+        "state",
+        "task"
+      ],
+      "additionalProperties": true
+    },
+    "AgentEventInput": {
+      "description": "POST /agents/:id/events — one event for a session's stream. The bridge assigns id and createdAt when they are omitted.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "thought",
+            "tool",
+            "output",
+            "warning",
+            "error",
+            "question",
+            "user"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "diff": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "options": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subagentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subagentType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subagentName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turnId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "summary"
+      ],
+      "additionalProperties": true
+    },
+    "RuntimeEvent": {
+      "description": "POST /agents/:id/runtime-events — the canonical vocabulary, for adapters that declare runtimeProtocol \"canonical-v1\". A session.state.changed may carry origin {source, seq}; reports whose sequence is not newer than the last accepted from that source are answered 201 {accepted: false, reason: \"stale\"}. Unknown fields are carried, not refused.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "session.registered",
+            "session.state.changed",
+            "turn.started",
+            "turn.completed",
+            "request.opened",
+            "request.resolved",
+            "user-input.requested",
+            "user-input.resolved",
+            "item.started",
+            "item.updated",
+            "item.completed",
+            "token-usage.updated",
+            "rate-limits.updated",
+            "runtime.error"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "seq": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "NaN"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "-Infinity"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "source",
+            "seq"
+          ],
+          "additionalProperties": true
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "agentId",
+        "type",
+        "createdAt",
+        "payload"
+      ],
+      "additionalProperties": true
+    },
+    "ControlCommand": {
+      "description": "POST /agents/:id/control — steer a session or resolve what it is blocked on. A prompt sent while the agent is blocked is refused with error \"agent_blocked\" unless force is set.",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "pause",
+            "resume",
+            "stop",
+            "approve",
+            "reject",
+            "prompt",
+            "steer",
+            "follow_up",
+            "set_model"
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commandId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "force": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": true
+    },
+    "ResolveRequestBody": {
+      "description": "POST /agents/:agentId/requests/:requestId/resolve — settle a durable approval or question. \"pending\" is absent on purpose: reopening a settled request is not something the wire allows.",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "rejected",
+            "answered",
+            "expired",
+            "unavailable"
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": true
+    },
+    "SlashCommandPublication": {
+      "description": "POST /agents/:agentId/slash-commands — the session's runnable catalog, capped at 400. Entries stay unconstrained: each runtime describes its own commands.",
+      "type": "object",
+      "properties": {
+        "commands": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "commands"
+      ],
+      "additionalProperties": true
+    },
+    "ManagedSessionRequest": {
+      "description": "POST /managed/claude/sessions — start a session the bridge itself hosts.",
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "objective": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "permissionMode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "default",
+                "acceptEdits",
+                "bypassPermissions",
+                "plan",
+                "dontAsk",
+                "auto"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "project",
+        "cwd"
+      ],
+      "additionalProperties": true
+    },
+    "PairingRequest": {
+      "description": "POST /pair — exchange a short-lived single-use pairing code for a device credential. The only route that takes no bearer token.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "deviceName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "deviceName"
+      ],
+      "additionalProperties": true
+    }
+  }
+}

@@ -11,6 +11,15 @@ the point.
 This document is the wire contract those clients — and yours — are written
 against. Everything here is served under `/bridge/v1`.
 
+The request payloads named below are also published as JSON Schema:
+[`bridge-v1.schema.json`](bridge-v1.schema.json), generated from the very
+schemas the routes decode with (`bun run schema`; a test fails when the two
+disagree). A harness written in a language that cannot import this repository's
+TypeScript can validate against that file instead of transcribing field lists
+out of this prose. The semantics — when to heartbeat, what a state claim means,
+why an acknowledgement precedes delivery — live here and nowhere else; a schema
+cannot carry them.
+
 ## Conventions
 
 **Auth.** Every route except `POST /pair` takes `Authorization: Bearer <token>`.

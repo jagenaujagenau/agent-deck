@@ -79,7 +79,7 @@ export const AgentEvent = Schema.Struct({
    */
   turnId: optionalField(Schema.String),
   createdAt: Schema.String,
-});
+}).annotate({ identifier: "AgentEvent" });
 export interface AgentEvent extends Schema.Schema.Type<typeof AgentEvent> {}
 
 /** What a runtime posts to `/agents/:id/events`; the bridge assigns id and time. */
@@ -139,7 +139,7 @@ export const PendingApproval = Schema.Struct({
   detail: Schema.String,
   createdAt: Schema.String,
   expiresAt: Schema.String,
-});
+}).annotate({ identifier: "PendingApproval" });
 export interface PendingApproval extends Schema.Schema.Type<typeof PendingApproval> {}
 
 export const RateLimitWindow = Schema.Struct({
@@ -148,7 +148,7 @@ export const RateLimitWindow = Schema.Struct({
   usedPercent: Schema.Number,
   resetsAt: optionalField(Schema.String),
   account: optionalField(Schema.String),
-});
+}).annotate({ identifier: "RateLimitWindow" });
 export interface RateLimitWindow extends Schema.Schema.Type<typeof RateLimitWindow> {}
 
 /** The heartbeat body a runtime adapter sends to keep its session live. */
@@ -261,6 +261,52 @@ export const PairingRequest = Schema.Struct({
 /** Only the routing field is read here; the event itself is validated downstream. */
 export const RuntimeEventEnvelope = Schema.Struct({
   agentId: Schema.String,
+});
+
+/**
+ * The canonical runtime event, as a schema.
+ *
+ * Ingestion still goes through `canonicalRuntimeEvent` in the adapter package,
+ * which is deliberately lenient in two ways a schema cannot express: a
+ * malformed `origin` is dropped rather than refused, because the fact the
+ * event carries is still true and only its ordering is lost, and unknown
+ * fields ride along untouched. This schema exists to be *published* — it is
+ * what `docs/bridge-v1.schema.json` emits for the one payload a new harness
+ * has to get right — and `WireSchema.test.ts` holds the two to the same
+ * accept/reject verdicts so the published contract cannot drift from the
+ * ingester that enforces it.
+ */
+export const RuntimeEvent = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1)),
+  agentId: Schema.String.check(Schema.isMinLength(1)),
+  type: Schema.Literals([
+    "session.registered",
+    "session.state.changed",
+    "turn.started",
+    "turn.completed",
+    "request.opened",
+    "request.resolved",
+    "user-input.requested",
+    "user-input.resolved",
+    "item.started",
+    "item.updated",
+    "item.completed",
+    "token-usage.updated",
+    "rate-limits.updated",
+    "runtime.error",
+  ]),
+  createdAt: Schema.String,
+  turnId: Schema.optionalKey(Schema.String),
+  itemId: Schema.optionalKey(Schema.String),
+  requestId: Schema.optionalKey(Schema.String),
+  /** Which publisher said it, and where in that publisher's own order. */
+  origin: Schema.optionalKey(
+    Schema.Struct({
+      source: Schema.String.check(Schema.isMinLength(1)),
+      seq: Schema.Number,
+    }),
+  ),
+  payload: Schema.Record(Schema.String, Schema.Unknown),
 });
 
 /**

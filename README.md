@@ -259,6 +259,10 @@ have already reported a healthy bridge that had never once started.
   pairing, the snapshot/patch stream, the event vocabulary, control verbs and
   the blocked refusal, and what an adapter must publish. Build a client from
   this document alone.
+- [`docs/bridge-v1.schema.json`](docs/bridge-v1.schema.json) — the same request
+  payloads as JSON Schema, for a harness in a language that cannot import the
+  TypeScript. Generated from the schemas the routes decode with (`bun run
+  schema`), and a test fails when the committed file falls behind them.
 - [`CONTEXT.md`](CONTEXT.md) — the domain vocabulary: Agent, Project, Runtime
   Event, Runtime Projection, and what each one is allowed to mean.
 - [`docs/`](docs) — protocol and adapter notes.

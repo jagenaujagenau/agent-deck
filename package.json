@@ -21,6 +21,7 @@
     "dev:server": "turbo -F server dev",
     "format": "oxfmt apps packages integrations scripts tools",
     "format:check": "oxfmt --check apps packages integrations scripts tools",
+    "schema": "bun run apps/server/scripts/wire-schema.ts",
     "release:desktop": "bun run scripts/release-desktop.ts",
     "bench": "bun run scripts/bench-bridge.ts",
     "service": "bun run scripts/agent-deck-service.ts",

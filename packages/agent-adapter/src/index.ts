@@ -6,6 +6,10 @@
  * SDK with it.
  */
 export * from "./agent-identity";
+// The predicates only, not the grammar's type names: the bridge names its own
+// `JsonValue` in Domain.ts, and exporting a second one under the same name
+// makes every importer disambiguate two identical types.
+export { isJsonObject, isJsonString } from "./json-value";
 export * from "./runtime-events";
 export * from "./runtime-projector";
 export * from "./runtime-publisher";
