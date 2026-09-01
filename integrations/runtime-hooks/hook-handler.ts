@@ -75,6 +75,7 @@ import {
 } from "../../packages/agent-adapter/src/agent-identity";
 import { processStart } from "./process-identity";
 import { approvalClaim, claimWindow } from "./state-claim";
+import { whileBlocked } from "./blocked-turn";
 import { nextReportSeq, REPORT_SOURCE } from "./report-seq";
 
 export type HookRuntime = "claude" | "codex" | "gemini";
@@ -418,8 +419,10 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
     }
   }
 
-  const heartbeat = async () =>
-    client.heartbeat({
+  // Saying it is still here, and nothing more: no caller reads what the
+  // bridge answers, so the type says so.
+  const heartbeat = async (): Promise<void> => {
+    await client.heartbeat({
       id: agentId,
       name: state.name ?? displayName,
       project: state.project ?? detectedProject,
@@ -436,6 +439,7 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
       rateLimits: state.rateLimits,
       pendingApproval: state.pendingApproval,
     });
+  };
   const save = () => writeFileSync(statePath, JSON.stringify(state));
   const publisher = client.publisher(REPORT_SOURCE);
   const publishRuntime = (
@@ -544,38 +548,35 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
       const askedAt = new Date().toISOString();
       const expiresAt = new Date(Date.now() + QUESTION_TIMEOUT_MS).toISOString();
       save();
-      let questionHeartbeat: ReturnType<typeof setInterval> | undefined;
       try {
-        await heartbeat();
-        questionHeartbeat = setInterval(() => void heartbeat().catch(() => {}), 10_000);
-        // A durable request is what makes the question answerable from a device: the phone and watch
-        // resolve it, and this blocked hook collects the answer by polling.
-        await publishRuntime(
-          "user-input.requested",
-          { kind: "user-input", question, options, createdAt: askedAt, expiresAt },
-          {
-            id: `user-input-requested:${questionId}`,
-            requestId: questionId,
-            turnId: state.activeTurnId,
-          },
-        );
-        // Same claim as an approval: the question is deck-answerable for
-        // exactly this window, and only the hooks know that.
-        await publishRuntime("session.state.changed", {
-          state: "waiting",
-          task: state.task,
-          claim: claimWindow(expiresAt, Date.now()),
-        }).catch(() => {});
-        await publish("question", "Question", question, {
-          id: questionId,
-          tool: toolName,
-          options,
-        });
-        const answer =
-          options.length > 0 && QUESTION_TIMEOUT_MS > 0
+        const answer = await whileBlocked(heartbeat, async () => {
+          // A durable request is what makes the question answerable from a device: the phone and watch
+          // resolve it, and this blocked hook collects the answer by polling.
+          await publishRuntime(
+            "user-input.requested",
+            { kind: "user-input", question, options, createdAt: askedAt, expiresAt },
+            {
+              id: `user-input-requested:${questionId}`,
+              requestId: questionId,
+              turnId: state.activeTurnId,
+            },
+          );
+          // Same claim as an approval: the question is deck-answerable for
+          // exactly this window, and only the hooks know that.
+          await publishRuntime("session.state.changed", {
+            state: "waiting",
+            task: state.task,
+            claim: claimWindow(expiresAt, Date.now()),
+          }).catch(() => {});
+          await publish("question", "Question", question, {
+            id: questionId,
+            tool: toolName,
+            options,
+          });
+          return options.length > 0 && QUESTION_TIMEOUT_MS > 0
             ? await client.waitForAnswer(agentId, questionId, { timeoutMs: QUESTION_TIMEOUT_MS })
             : undefined;
-        if (questionHeartbeat) clearInterval(questionHeartbeat);
+        });
         state.state = "running";
         state.pendingApproval = undefined;
         if (answer === undefined) {
@@ -611,7 +612,6 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
         );
         return;
       } catch {
-        if (questionHeartbeat) clearInterval(questionHeartbeat);
         state.state = "running";
         save();
         return;
@@ -645,35 +645,33 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
       expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
     };
     save();
-    let approvalHeartbeat: ReturnType<typeof setInterval> | undefined;
     try {
-      await heartbeat();
-      approvalHeartbeat = setInterval(() => void heartbeat().catch(() => {}), 10_000);
-      await publishRuntime(
-        "request.opened",
-        {
-          kind: "approval",
+      const approved = await whileBlocked(heartbeat, async () => {
+        await publishRuntime(
+          "request.opened",
+          {
+            kind: "approval",
+            tool: toolName,
+            detail,
+            createdAt,
+            expiresAt: state.pendingApproval!.expiresAt,
+          },
+          { id: `request-opened:${approvalId}`, requestId: approvalId, turnId: state.activeTurnId },
+        );
+        // The claim lands with the request rather than waiting for the daemon's
+        // next beat: from this moment a terminal observer's delayed report must
+        // not erase a session blocked on something a device can answer.
+        await publishRuntime("session.state.changed", {
+          state: "waiting",
+          task: state.task,
+          claim: approvalClaim(state, Date.now()),
+        }).catch(() => {});
+        await publish("warning", `Approval required: ${toolName}`, detail, {
+          id: approvalId,
           tool: toolName,
-          detail,
-          createdAt,
-          expiresAt: state.pendingApproval!.expiresAt,
-        },
-        { id: `request-opened:${approvalId}`, requestId: approvalId, turnId: state.activeTurnId },
-      );
-      // The claim lands with the request rather than waiting for the daemon's
-      // next beat: from this moment a terminal observer's delayed report must
-      // not erase a session blocked on something a device can answer.
-      await publishRuntime("session.state.changed", {
-        state: "waiting",
-        task: state.task,
-        claim: approvalClaim(state, Date.now()),
-      }).catch(() => {});
-      await publish("warning", `Approval required: ${toolName}`, detail, {
-        id: approvalId,
-        tool: toolName,
+        });
+        return await client.waitForDecision(agentId);
       });
-      const approved = await client.waitForDecision(agentId);
-      if (approvalHeartbeat) clearInterval(approvalHeartbeat);
       state.state = approved ? "running" : "idle";
       state.task = approved ? `Approved: ${toolName}` : `Rejected: ${toolName}`;
       state.pendingApproval = undefined;
@@ -697,7 +695,6 @@ async function handle(request: HookEventRequest, emit: (line: string) => void): 
         }),
       );
     } catch {
-      if (approvalHeartbeat) clearInterval(approvalHeartbeat);
       state.state = "running";
       state.task = `Local approval required: ${toolName}`;
       state.pendingApproval = undefined;
