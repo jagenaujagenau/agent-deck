@@ -773,9 +773,7 @@ private struct ConversationBubble: View {
                             }
                             .foregroundStyle(Palette.blue)
                         }
-                        Text(markdown(entry.content))
-                            .font(.system(size: 15))
-                            .lineSpacing(5)
+                        MarkdownText(content: entry.content)
                             .foregroundStyle(Palette.text.opacity(0.92))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -795,16 +793,6 @@ private struct ConversationBubble: View {
     private var reportLabel: String? {
         let summary = entry.event.summary
         return summary == "Response" || summary == "Message" ? nil : summary
-    }
-
-    /// Inline markdown only: bold, italic, code, and links render; block
-    /// structure stays as written, and anything unparsable falls back to the
-    /// literal text rather than a blank bubble.
-    private func markdown(_ content: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: content,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(content)
     }
 
     private var timestamp: some View {

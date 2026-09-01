@@ -234,8 +234,11 @@ script.set("opencode-demo-hex", [
   {
     kind: "output",
     summary: "Response",
+    // Deliberately Markdown-rich: the phones render headings, lists, fences
+    // and tables themselves, and a demo deck with only flat prose in it never
+    // shows whether that rendering still works.
     detail:
-      "It's allocation, not draw calls — each tile builds a new paint every frame. Hoisting it out is a one-line change.",
+      "It's allocation, not draw calls — each tile builds a new paint every frame.\n\n## What the profile shows\n\n| pass | allocations | frame |\n|---|---|---|\n| before | 4,000 | 21 ms |\n| after | 1 | 6 ms |\n\n1. Hoist the `Paint` out of the loop.\n2. Reuse it per layer, not per tile.\n\n```kotlin\nval paint = Paint()\ntiles.forEach { it.draw(canvas, paint) }\n```\n\n- [x] measured on a wide map\n- [ ] measured on a tall one\n\n> The renderer was never the problem.",
     ago: 60,
   },
 ]);
