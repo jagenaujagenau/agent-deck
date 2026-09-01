@@ -263,6 +263,10 @@ have already reported a healthy bridge that had never once started.
   payloads as JSON Schema, for a harness in a language that cannot import the
   TypeScript. Generated from the schemas the routes decode with (`bun run
   schema`), and a test fails when the committed file falls behind them.
+- [`packages/bridge-client/fixtures/adapter-conformance.json`](packages/bridge-client/fixtures/adapter-conformance.json)
+  — the rules a shape cannot carry: what a *sequence* of runtime events must add
+  up to. `bun run conformance` plays them against a running bridge; `bun test`
+  plays the same file against the shipped projector.
 - [`CONTEXT.md`](CONTEXT.md) — the domain vocabulary: Agent, Project, Runtime
   Event, Runtime Projection, and what each one is allowed to mean.
 - [`docs/`](docs) — protocol and adapter notes.

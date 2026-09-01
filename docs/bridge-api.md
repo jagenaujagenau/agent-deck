@@ -198,6 +198,14 @@ Questions and approvals are durable requests:
 `POST /agents/:id/requests/:requestId/resolve` answers one (device answers
 record `answered`; only the runtime credential may record another outcome).
 
+**A request id is global to the bridge, and a settled one never reopens.** The
+ledger is keyed by request id alone; reopening an id that was already approved,
+rejected or expired refreshes its payload and leaves it settled, so it blocks
+nothing. That is deliberate — a runtime re-announcing a request that was
+answered while it was away must not re-block the session — but it means an
+adapter numbering its approvals per session (`r1`, `r2`) will find them inert
+after a reconnect. Namespace them: a uuid, or the session id and a counter.
+
 ## Hosting sessions
 
 The bridge can run sessions itself, not only observe them.
@@ -240,6 +248,30 @@ An adapter is anything that can speak three routes:
   that settles it instead of on its next poll. A bridge that predates the
   parameter answers immediately, and the adapter client falls back to
   pacing itself.
+
+### Conformance
+
+The payload shapes are published; the rules a *sequence* of events must obey
+are not something a shape can carry. `bun run conformance` plays them against a
+running bridge — point it at a scratch one, it creates and drives sessions:
+
+```bash
+BRIDGE_URL=http://127.0.0.1:3100 BRIDGE_TOKEN=… bun run conformance
+```
+
+It reports rule by rule: a superseded report refused rather than applied, each
+publisher ordered against itself, a claim holding others off until it expires
+or is released, a subagent's late completion not resurrecting an idle session,
+usage that never goes backwards, the `agent_blocked` refusal and its `force`
+override, a command delivered at most once, and a settled request id staying
+settled. The scenarios live in
+[`packages/bridge-client/fixtures/adapter-conformance.json`](../packages/bridge-client/fixtures/adapter-conformance.json)
+with a sentence on each saying which production surprise taught it, and the
+same file is played in process against the shipped projector by `bun test`.
+
+Over HTTP a snapshot exposes `state`, `task` and the live claim, so the live
+runner checks the scenarios on those and says so in its output; the in-process
+run covers the rest of the projection.
 
 The reference adapters live in `integrations/` (hook-driven for Claude Code,
 Codex, and Gemini CLI — one handler serves all three, folding Gemini's

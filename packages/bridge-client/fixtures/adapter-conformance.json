@@ -1,0 +1,417 @@
+{
+  "comment": "What a harness's runtime events must add up to. Each scenario is a sequence of canonical events and the projection they leave behind — the semantics docs/bridge-v1.schema.json cannot state, because a shape cannot say that a report the publisher already superseded is dropped, or that a claim holds other publishers off until it expires. Played in-process by apps/server/src/effect/adapterConformance.test.ts against the shipped projector and stale guard, and against a live bridge over HTTP by `bun run conformance`. Every case here is a rule an adapter in this repository had to be taught the hard way. In `expect`, null means the field must be absent; an object is matched field by field, so a scenario names only what it is about.",
+  "agentId": "conformance-agent",
+  "scenarios": [
+    {
+      "case": "a registered session is named by the runtime, not by a heartbeat",
+      "why": "Identity from the projection is what lets the heartbeat stop being the only thing that knows a session's name (ADR-0001).",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "session.registered",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": {
+            "name": "Claude Code · deck · 4f2a",
+            "project": "deck",
+            "model": "claude-opus-5",
+            "runtime": "claude",
+            "capabilities": ["approve", "reject", "prompt"]
+          }
+        }
+      ],
+      "expect": {
+        "identity": {
+          "name": "Claude Code · deck · 4f2a",
+          "project": "deck",
+          "model": "claude-opus-5",
+          "runtime": "claude"
+        },
+        "state": "idle",
+        "task": "Ready"
+      }
+    },
+    {
+      "case": "a turn is named by its objective, and finishing it is named by its outcome",
+      "why": "A card leads with the task; \"Working\" for the whole of a ten-minute turn says nothing.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "turn.started",
+          "turnId": "t1",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": { "objective": "Fix the flaky socket test" }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "turn.completed",
+          "turnId": "t1",
+          "createdAt": "2026-09-01T10:04:00.000Z",
+          "payload": { "status": "completed", "summary": "Fixed in one place" }
+        }
+      ],
+      "expect": { "state": "idle", "task": "Fixed in one place", "activeTurnId": null }
+    },
+    {
+      "case": "a failed turn is an error, not an idle session",
+      "why": "A session that stopped because it broke and one that stopped because it finished are different rows on the deck.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "turn.started",
+          "turnId": "t1",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": {}
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "turn.completed",
+          "turnId": "t1",
+          "createdAt": "2026-09-01T10:01:00.000Z",
+          "payload": { "status": "failed" }
+        }
+      ],
+      "expect": { "state": "error", "task": "Turn completed" }
+    },
+    {
+      "case": "an approval opens a wait, and approving it resumes the work",
+      "why": "The blocked tool call is a real process waiting; the projection is what tells every surface it is waiting.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "request.opened",
+          "requestId": "r1",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": { "tool": "Bash", "detail": "rm -rf build" }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "request.resolved",
+          "requestId": "r1",
+          "createdAt": "2026-09-01T10:00:30.000Z",
+          "payload": { "status": "approved" }
+        }
+      ],
+      "expect": { "state": "running", "pendingRequest": null }
+    },
+    {
+      "case": "a request that expired unanswered leaves the session where it was",
+      "why": "Reporting \"running\" for a runtime still sitting at its prompt showed sessions as busy while nothing moved.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "request.opened",
+          "requestId": "r1",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": { "tool": "Bash", "detail": "rm -rf build" }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "request.resolved",
+          "requestId": "r1",
+          "createdAt": "2026-09-01T10:30:00.000Z",
+          "payload": { "status": "expired" }
+        }
+      ],
+      "expect": { "state": "waiting", "pendingRequest": null }
+    },
+    {
+      "case": "a subagent finishing does not resurrect a session that already went idle",
+      "why": "A Task subagent can outlive the turn that dispatched it, and its completion landing minutes later used to report the session as working again.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "turn.started",
+          "turnId": "t1",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": {}
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "turn.completed",
+          "turnId": "t1",
+          "createdAt": "2026-09-01T10:02:00.000Z",
+          "payload": { "status": "completed", "summary": "Done" }
+        },
+        {
+          "id": "e3",
+          "agentId": "conformance-agent",
+          "type": "item.completed",
+          "itemId": "i9",
+          "createdAt": "2026-09-01T10:05:00.000Z",
+          "payload": { "summary": "Search finished" }
+        }
+      ],
+      "expect": { "state": "idle", "task": "Search finished" }
+    },
+    {
+      "case": "a report the publisher already superseded is refused, not applied",
+      "why": "A hook and its daemon both report one session, and either can publish a state it read before the other advanced it. Refused as a success: a well-behaved adapter retries an error, and retrying a report that lost the race would never converge.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "origin": { "source": "hook", "seq": 5 },
+          "payload": { "state": "running", "task": "Working" }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:01.000Z",
+          "origin": { "source": "hook", "seq": 4 },
+          "payload": { "state": "idle", "task": "Ready" }
+        }
+      ],
+      "accepted": [true, false],
+      "expect": { "state": "running", "task": "Working" }
+    },
+    {
+      "case": "each publisher is ordered against itself, not against the others",
+      "why": "Two publishers keep two counters; comparing them to each other would drop whichever numbered its reports lower.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "origin": { "source": "hook", "seq": 5 },
+          "payload": { "state": "running", "task": "Working" }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:01.000Z",
+          "origin": { "source": "daemon", "seq": 1 },
+          "payload": { "state": "waiting", "task": "Waiting on a person" }
+        }
+      ],
+      "accepted": [true, true],
+      "expect": { "state": "waiting", "task": "Waiting on a person" }
+    },
+    {
+      "case": "a claim holds other publishers off while it lives",
+      "why": "ADR-0002. The other publisher's report is taken into the log — it is not wrong, only outranked — but it does not move the state, which is exactly what a claim is for.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "origin": { "source": "hook", "seq": 1 },
+          "payload": { "state": "running", "task": "Working", "claim": { "ttlMs": 60000 } }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:10.000Z",
+          "origin": { "source": "daemon", "seq": 1 },
+          "payload": { "state": "idle", "task": "Ready" }
+        }
+      ],
+      "accepted": [true, true],
+      "expect": {
+        "state": "running",
+        "task": "Working",
+        "stateAuthority": { "source": "hook" }
+      }
+    },
+    {
+      "case": "the holder releases by reporting without a claim",
+      "why": "A claim nobody can end is a session parked behind whoever spoke first.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "origin": { "source": "hook", "seq": 1 },
+          "payload": { "state": "running", "task": "Working", "claim": { "ttlMs": 60000 } }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:20.000Z",
+          "origin": { "source": "hook", "seq": 2 },
+          "payload": { "state": "idle", "task": "Ready" }
+        },
+        {
+          "id": "e3",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:30.000Z",
+          "origin": { "source": "daemon", "seq": 1 },
+          "payload": { "state": "waiting", "task": "Waiting on a person" }
+        }
+      ],
+      "expect": { "state": "waiting", "task": "Waiting on a person", "stateAuthority": null }
+    },
+    {
+      "case": "a claim decays with the clock, so a claimant that died cannot park a session",
+      "why": "A claim is honest only if it expires. The stranger's report lands after the ttl and sweeps the dead lease out with it.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "origin": { "source": "hook", "seq": 1 },
+          "payload": { "state": "running", "task": "Working", "claim": { "ttlMs": 5000 } }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:10.000Z",
+          "origin": { "source": "daemon", "seq": 1 },
+          "payload": { "state": "idle", "task": "Ready" }
+        }
+      ],
+      "expect": { "state": "idle", "task": "Ready", "stateAuthority": null }
+    },
+    {
+      "case": "resolving the claimed request is itself a release",
+      "why": "The claimed window existed for that request; holding it past the answer would suppress the next publisher with something true to say.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "origin": { "source": "hook", "seq": 1 },
+          "payload": { "state": "running", "task": "Working", "claim": { "ttlMs": 600000 } }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "request.opened",
+          "requestId": "r1",
+          "createdAt": "2026-09-01T10:00:05.000Z",
+          "origin": { "source": "hook", "seq": 2 },
+          "payload": { "tool": "Bash", "detail": "rm -rf build" }
+        },
+        {
+          "id": "e3",
+          "agentId": "conformance-agent",
+          "type": "request.resolved",
+          "requestId": "r1",
+          "createdAt": "2026-09-01T10:00:40.000Z",
+          "origin": { "source": "hook", "seq": 3 },
+          "payload": { "status": "approved" }
+        }
+      ],
+      "expect": { "state": "running", "pendingRequest": null, "stateAuthority": null }
+    },
+    {
+      "case": "re-registering after a reconnect does not send a working session back to idle",
+      "why": "Registration says who, not what it is doing.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "turn.started",
+          "turnId": "t1",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": { "objective": "Audit the parser" }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "session.registered",
+          "createdAt": "2026-09-01T10:00:10.000Z",
+          "payload": {
+            "name": "Claude Code · deck · 4f2a",
+            "project": "deck",
+            "model": "claude-opus-5"
+          }
+        }
+      ],
+      "expect": { "state": "running", "task": "Audit the parser" }
+    },
+    {
+      "case": "processed tokens never go backwards",
+      "why": "Usage is a running total against a high-water cursor; a publisher that restarts and reports from zero must not undo the session's spend.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "token-usage.updated",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": { "contextTokens": 1200, "processedTokens": 5000 }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "token-usage.updated",
+          "createdAt": "2026-09-01T10:01:00.000Z",
+          "payload": { "contextTokens": 800, "processedTokens": 4000 }
+        }
+      ],
+      "expect": { "contextTokens": 800, "processedTokens": 5000, "usageKnown": true }
+    },
+    {
+      "case": "the latest rate-limit reading replaces the last, and an unreadable one changes nothing",
+      "why": "Windows are a reading, not history: a window that stopped being reported has closed. But a payload that says nothing readable has not said a window closed.",
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "conformance-agent",
+          "type": "rate-limits.updated",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "payload": {
+            "windows": [
+              { "id": "five-hour", "label": "5-hour", "usedPercent": 40 },
+              { "id": "weekly", "label": "Weekly", "usedPercent": 12 }
+            ]
+          }
+        },
+        {
+          "id": "e2",
+          "agentId": "conformance-agent",
+          "type": "rate-limits.updated",
+          "createdAt": "2026-09-01T10:05:00.000Z",
+          "payload": { "windows": [{ "id": "five-hour", "label": "5-hour", "usedPercent": 55 }] }
+        },
+        {
+          "id": "e3",
+          "agentId": "conformance-agent",
+          "type": "rate-limits.updated",
+          "createdAt": "2026-09-01T10:06:00.000Z",
+          "payload": { "windows": "resets soon" }
+        }
+      ],
+      "expect": { "rateLimits": [{ "id": "five-hour", "label": "5-hour", "usedPercent": 55 }] }
+    },
+    {
+      "case": "an event addressed to another session is not this session's news",
+      "why": "One publisher can carry several sessions, and a mistyped id must be inert rather than authoritative. Over HTTP the route refuses it outright (400, the agentId does not match the path); the projector's own guard is what covers the paths below that, such as a log replayed after a restart.",
+      "httpRefused": true,
+      "events": [
+        {
+          "id": "e1",
+          "agentId": "someone-else",
+          "type": "session.state.changed",
+          "createdAt": "2026-09-01T10:00:00.000Z",
+          "origin": { "source": "hook", "seq": 1 },
+          "payload": { "state": "error", "task": "Not this session" }
+        }
+      ],
+      "expect": { "state": "idle", "task": "Ready" }
+    }
+  ]
+}

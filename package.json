@@ -16,6 +16,7 @@
     "build": "turbo build",
     "check-types": "turbo check-types",
     "typecheck": "tsc --noEmit && tsc -p tools/oxlint --noEmit && turbo check-types",
+    "conformance": "bun run apps/server/scripts/conformance.ts",
     "dev": "turbo dev",
     "dev:native": "turbo -F native dev",
     "dev:server": "turbo -F server dev",
