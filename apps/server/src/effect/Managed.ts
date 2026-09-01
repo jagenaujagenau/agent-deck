@@ -328,6 +328,13 @@ export class ManagedRuntime extends Context.Service<
         const timer = setInterval(() => void run(state.heartbeat(agent)), 15_000);
         yield* Ref.update(sessions, (map) => new Map(map).set(agentId, { session, agent, timer }));
         yield* Effect.forkDetach(consume(agentId, session).pipe(Effect.ignore));
+        // Learning the catalog here rather than only when somebody opens a
+        // picker is what makes the start sheet ever offer a model: a deck whose
+        // sessions are all terminal-owned would otherwise never hear the
+        // answer, and the one surface that needs it is the one with no session
+        // to ask. Detached and ignored — a session must start whether or not
+        // the runtime feels like listing itself.
+        yield* Effect.forkDetach(models(agentId).pipe(Effect.ignore));
         if (input.prompt?.trim()) {
           yield* Effect.tryPromise({
             try: () => adapter.send(session, input.prompt!.trim()),
