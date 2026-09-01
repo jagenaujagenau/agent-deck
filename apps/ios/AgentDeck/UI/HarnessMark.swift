@@ -50,20 +50,32 @@ struct HarnessMark: View {
 }
 
 /// The ring a running session wears in place of its status dot.
+///
+/// Turned by the clock rather than by a `repeatForever` animation started in
+/// `onAppear`. That animation is suspended outright in Low Power Mode, and it
+/// is never restarted when the card is recycled by the lazy stack it lives in
+/// or when the app comes back from the background — so on a real phone the
+/// ring stood still while the simulator, which is never in Low Power Mode and
+/// rarely scrolls far enough to recycle a card, span happily. Reading the
+/// angle off the current time cannot be suspended or lost: every frame simply
+/// asks what time it is.
 private struct RunningRing: View {
     var color: Color
-    @State private var angle: Double = 0
+
+    /// One turn of the ring.
+    private let turn: Double = 1.1
 
     var body: some View {
-        ZStack {
-            Circle().stroke(Palette.line, lineWidth: 2.5)
-            Circle()
-                .trim(from: 0, to: 0.28)
-                .stroke(color.opacity(0.78), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                .rotationEffect(.degrees(angle))
-        }
-        .onAppear {
-            withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { angle = 360 }
+        TimelineView(.animation) { context in
+            let phase = context.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: turn) / turn
+            ZStack {
+                Circle().stroke(Palette.line, lineWidth: 2.5)
+                Circle()
+                    .trim(from: 0, to: 0.28)
+                    .stroke(color.opacity(0.78), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(phase * 360))
+            }
         }
     }
 }

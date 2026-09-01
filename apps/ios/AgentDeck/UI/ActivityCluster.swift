@@ -317,20 +317,25 @@ struct ActivityRowView: View {
 /// idiom for "working".
 struct WorkingIndicatorView: View {
     var task: String
-    @State private var pulse = false
+
+    /// One breath of a dot, and the stagger between them.
+    private let cycle: Double = 1.4
+    private let stagger: Double = 0.16
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(0 ..< 3) { index in
-                Circle()
-                    .fill(Palette.signal.opacity(pulse ? 1 : 0.25))
-                    .frame(width: 6, height: 6)
-                    .animation(
-                        .easeInOut(duration: 0.7)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.16),
-                        value: pulse
-                    )
+            // Clock-driven for the same reason the running ring is: a
+            // `repeatForever` pulse is suspended in Low Power Mode and lost
+            // when the row is recycled, and dots frozen at one opacity say
+            // "stalled" about a session that is working fine.
+            TimelineView(.animation) { context in
+                HStack(spacing: 4) {
+                    ForEach(0 ..< 3) { index in
+                        Circle()
+                            .fill(Palette.signal.opacity(glow(context.date, dot: index)))
+                            .frame(width: 6, height: 6)
+                    }
+                }
             }
             Text(task)
                 .font(.system(size: 12))
@@ -341,7 +346,13 @@ struct WorkingIndicatorView: View {
         .padding(.leading, 6)
         .padding(.top, 2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { pulse = true }
+    }
+
+    /// Where one dot is in its breath at this instant.
+    private func glow(_ date: Date, dot index: Int) -> Double {
+        let time = date.timeIntervalSinceReferenceDate - Double(index) * stagger
+        let wave = (sin(2 * .pi * time / cycle) + 1) / 2
+        return 0.25 + 0.75 * wave
     }
 }
 
