@@ -1,65 +1,52 @@
 package dev.agentdeck.shared
 
+import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * The golden fixture's `conversationDays` section, executed against the Kotlin
+ * separator. The same corpus drives `ConversationDays.swift`: iOS drew no
+ * separators at all until it was written against these answers, and a label
+ * that differs by phone is the kind of thing nobody notices until the two are
+ * held side by side.
+ */
 class ConversationDaysTest {
-    private val utc = ZoneId.of("UTC")
-    private val today = LocalDate.of(2026, 8, 25)
-
-    private fun before(previous: String?, current: String) =
-        ConversationDays.separatorBefore(previous, current, today, utc)
-
-    @Test
-    fun `the first message always carries its date`() {
-        // Opening a conversation with no date leaves the reader guessing
-        // whether it started today.
-        assertEquals("Today", before(null, "2026-08-25T09:00:00Z"))
+    private fun fixture(): File {
+        var dir: File? = File(System.getProperty("user.dir")!!)
+        while (dir != null) {
+            val candidate = File(dir, "packages/bridge-client/fixtures/attention-parity.json")
+            if (candidate.exists()) return candidate
+            dir = dir.parentFile
+        }
+        error("attention-parity.json not found above ${System.getProperty("user.dir")}")
     }
 
-    @Test
-    fun `messages on the same day are not separated`() {
-        assertNull(before("2026-08-25T09:00:00Z", "2026-08-25T23:59:00Z"))
-    }
+    private val section =
+        Json.parseToJsonElement(fixture().readText()).jsonObject["conversationDays"]!!.jsonObject
 
     @Test
-    fun `crossing midnight draws a separator`() {
-        // The timestamps only say the hour, so "09:14" under "23:47" reads as
-        // four minutes later rather than ten hours.
-        assertEquals("Today", before("2026-08-24T23:47:00Z", "2026-08-25T09:14:00Z"))
-    }
-
-    @Test
-    fun `recent days are named, not dated`() {
-        assertEquals("Yesterday", ConversationDays.label(LocalDate.of(2026, 8, 24), today))
-        assertEquals("Today", ConversationDays.label(today, today))
-    }
-
-    @Test
-    fun `older days in this year need no year`() {
-        assertEquals("3 August", ConversationDays.label(LocalDate.of(2026, 8, 3), today))
-    }
-
-    @Test
-    fun `a different year earns its space`() {
-        assertEquals("30 December 2025", ConversationDays.label(LocalDate.of(2025, 12, 30), today))
-    }
-
-    @Test
-    fun `an unparseable timestamp draws nothing rather than guessing`() {
-        assertNull(before(null, "not-a-time"))
-    }
-
-    @Test
-    fun `the zone decides the day, not the instant`() {
-        // 23:30 UTC is already tomorrow in Tokyo; a person reads their own clock.
-        val tokyo = ZoneId.of("Asia/Tokyo")
-        assertEquals(
-            "Today",
-            ConversationDays.separatorBefore(null, "2026-08-24T23:30:00Z", today, tokyo),
-        )
+    fun `every day case answers as the corpus says`() {
+        val today = LocalDate.parse(section["today"]!!.jsonPrimitive.contentOrNull!!)
+        val cases = section["cases"]!!.jsonArray
+        assertTrue(cases.isNotEmpty())
+        for (entry in cases.map { it.jsonObject }) {
+            val text = { key: String -> entry[key]?.jsonPrimitive?.contentOrNull }
+            val separator = ConversationDays.separatorBefore(
+                previous = text("previous"),
+                current = text("current")!!,
+                today = today,
+                zone = ZoneId.of(text("zone")!!),
+            )
+            assertEquals(text("case"), text("separator"), separator)
+        }
     }
 }

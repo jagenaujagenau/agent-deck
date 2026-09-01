@@ -1,5 +1,5 @@
 {
-  "comment": "The Attention Priority, Seen, and home presentation-state contracts, as data. The rank and seen sections run in three languages \u2014 attention.ts (bun test), AttentionRank.kt (JVM test), AttentionPolicy.swift + SeenPolicy.swift (swift test in apps/ios/PolicyTests). The homeState sections run in the two that render a home deck \u2014 HomePolicy.kt (mobile JVM test) and HomePolicy.swift (swift test); no TypeScript surface renders one. The timeline section pins chatTimeline \u2014 how raw events become one conversation of messages and activity clusters \u2014 across ChatTimeline.kt and ChatTimeline.swift. Extend this file, never one implementation.",
+  "comment": "The Attention Priority, Seen, and home presentation-state contracts, as data. The rank and seen sections run in three languages — attention.ts (bun test), AttentionRank.kt (JVM test), AttentionPolicy.swift + SeenPolicy.swift (swift test in apps/ios/PolicyTests). The homeState sections run in the two that render a home deck — HomePolicy.kt (mobile JVM test) and HomePolicy.swift (swift test); no TypeScript surface renders one. The timeline section pins chatTimeline — how raw events become one conversation of messages and activity clusters — across ChatTimeline.kt and ChatTimeline.swift. Extend this file, never one implementation.",
   "rank": [
     {
       "case": "the stuck one is always first",
@@ -353,7 +353,7 @@
             "kind": "output",
             "summary": "Response",
             "createdAt": "2026-08-31T10:00:04Z",
-            "detail": "Done \u2014 the test is fixed."
+            "detail": "Done — the test is fixed."
           }
         ],
         "expect": ["message:user", "activity:3", "message:agent"]
@@ -373,14 +373,14 @@
             "kind": "output",
             "summary": "Edit completed",
             "createdAt": "2026-08-31T10:00:01Z",
-            "detail": "docs/a.md \u00b7 +18 \u22126"
+            "detail": "docs/a.md · +18 −6"
           },
           {
             "id": "e2",
             "kind": "output",
             "summary": "Edit completed",
             "createdAt": "2026-08-31T10:00:02Z",
-            "detail": "docs/b.md \u00b7 +2 \u22122"
+            "detail": "docs/b.md · +2 −2"
           },
           {
             "id": "e3",
@@ -477,7 +477,7 @@
     ]
   },
   "openRequest": {
-    "comment": "What a session is waiting on, asked once. An approval outranks a question \u2014 it is the one holding a tool call open. A question counts as open only when the durable Request says so, or when it is the newest thing the session did: an ask buried under later tool calls is one the runtime answered for itself. Expiry settles a durable Request; `now` below is the clock every runner uses.",
+    "comment": "What a session is waiting on, asked once. An approval outranks a question — it is the one holding a tool call open. A question counts as open only when the durable Request says so, or when it is the newest thing the session did: an ask buried under later tool calls is one the runtime answered for itself. Expiry settles a durable Request; `now` below is the clock every runner uses.",
     "now": "2026-08-31T12:00:00Z",
     "cases": [
       {
@@ -570,13 +570,13 @@
     ]
   },
   "cardText": {
-    "comment": "The one-line strings a surface says about a session: the headline (usefulTask), the chat's name (chatTitle), and the reasoning preview. Each case carries a literal Agent, decoded through the shipping wire decoder \u2014 so this doubles as a decode-parity test. Every case below was a real divergence between the two apps before the functions moved into shared, tested files.",
+    "comment": "The one-line strings a surface says about a session: the headline (usefulTask), the chat's name (chatTitle), and the reasoning preview. Each case carries a literal Agent, decoded through the shipping wire decoder — so this doubles as a decode-parity test. Every case below was a real divergence between the two apps before the functions moved into shared, tested files.",
     "cases": [
       {
         "case": "a whitespace-only durable question still says something actionable",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "waiting",
@@ -599,7 +599,7 @@
         "case": "an approval's own detail is the headline",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "waiting",
@@ -622,7 +622,7 @@
         "case": "a blank instruction is noise in front of the real one, not the newest",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "running",
@@ -653,7 +653,7 @@
         "case": "the session's own objective outranks any instruction report",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "running",
@@ -678,7 +678,7 @@
         "case": "a running session with nothing else to say dresses its task",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "running",
@@ -694,7 +694,7 @@
         "case": "an idle session that finished quotes its last response",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "idle",
@@ -712,13 +712,13 @@
             }
           ]
         },
-        "usefulTask": "Last response \u00b7 All green."
+        "usefulTask": "Last response · All green."
       },
       {
         "case": "the chat's name is its project and its short session hash",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "orbital-api",
           "model": "claude",
           "state": "idle",
@@ -728,7 +728,7 @@
           "lastSeenAt": "2026-08-31T11:00:00Z",
           "events": []
         },
-        "chatTitle": "orbital-api \u00b7 4f2a"
+        "chatTitle": "orbital-api · 4f2a"
       },
       {
         "case": "a projectless session is named by its harness",
@@ -751,7 +751,7 @@
         "case": "a non-ASCII suffix is not a session hash",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 \uff14f2a",
+          "name": "Claude Code · deck · ４f2a",
           "project": "deck",
           "model": "claude",
           "state": "idle",
@@ -767,7 +767,7 @@
         "case": "a reasoning preview is markdown reduced to its words",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "running",
@@ -791,7 +791,7 @@
         "case": "a long preview clips at a word",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "running",
@@ -809,13 +809,13 @@
             }
           ]
         },
-        "latestReasoningPreview": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi\u2026"
+        "latestReasoningPreview": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi…"
       },
       {
         "case": "an idle session has no train of thought",
         "agent": {
           "id": "a1",
-          "name": "Claude Code \u00b7 deck \u00b7 4f2a",
+          "name": "Claude Code · deck · 4f2a",
           "project": "deck",
           "model": "claude",
           "state": "idle",
@@ -834,6 +834,79 @@
           ]
         },
         "latestReasoningPreview": null
+      }
+    ]
+  },
+  "conversationDays": {
+    "comment": "Where a conversation crosses from one day into the next. Runs in the two surfaces that draw a timeline: ConversationDays.kt (JVM test) and ConversationDays.swift (swift test). Every case is evaluated with `today` and `zone` fixed, so the answers never depend on when the suite runs.",
+    "today": "2026-08-25",
+    "cases": [
+      {
+        "case": "the first message always carries its date",
+        "zone": "UTC",
+        "previous": null,
+        "current": "2026-08-25T09:00:00Z",
+        "separator": "Today",
+        "why": "A conversation opening with no date leaves the reader guessing whether it started today."
+      },
+      {
+        "case": "messages on the same day are not separated",
+        "zone": "UTC",
+        "previous": "2026-08-25T09:00:00Z",
+        "current": "2026-08-25T23:59:00Z",
+        "separator": null
+      },
+      {
+        "case": "crossing midnight draws a separator",
+        "zone": "UTC",
+        "previous": "2026-08-24T23:47:00Z",
+        "current": "2026-08-25T09:14:00Z",
+        "separator": "Today",
+        "why": "Timestamps only say the hour, so 09:14 under 23:47 reads as four minutes later rather than ten hours."
+      },
+      {
+        "case": "yesterday is named rather than dated",
+        "zone": "UTC",
+        "previous": "2026-08-23T22:00:00Z",
+        "current": "2026-08-24T08:00:00Z",
+        "separator": "Yesterday"
+      },
+      {
+        "case": "an older day in this year needs no year",
+        "zone": "UTC",
+        "previous": null,
+        "current": "2026-08-03T12:00:00Z",
+        "separator": "3 August"
+      },
+      {
+        "case": "a different year earns its space",
+        "zone": "UTC",
+        "previous": null,
+        "current": "2025-12-30T12:00:00Z",
+        "separator": "30 December 2025"
+      },
+      {
+        "case": "an unparseable timestamp draws nothing rather than guessing",
+        "zone": "UTC",
+        "previous": null,
+        "current": "not-a-time",
+        "separator": null
+      },
+      {
+        "case": "the zone decides the day, not the instant",
+        "zone": "Asia/Tokyo",
+        "previous": null,
+        "current": "2026-08-24T23:30:00Z",
+        "separator": "Today",
+        "why": "23:30 UTC is already the 25th in Tokyo; a person reads their own clock."
+      },
+      {
+        "case": "a zone can push a day backwards too",
+        "zone": "America/Los_Angeles",
+        "previous": null,
+        "current": "2026-08-25T04:00:00Z",
+        "separator": "Yesterday",
+        "why": "04:00 UTC is still the 24th in California, so the same instant is a different day either side of the meridian."
       }
     ]
   }

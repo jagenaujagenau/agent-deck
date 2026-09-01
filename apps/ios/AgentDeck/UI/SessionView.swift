@@ -308,6 +308,14 @@ struct SessionView: View {
                         if index == newIndex {
                             NewDivider()
                         }
+                        // A session open since yesterday reads as one unbroken
+                        // run, and the stamps only give the hour — "09:14"
+                        // under "23:47" looks like four minutes, not ten hours.
+                        if let day = ConversationDays.separatorBefore(
+                            previous: index > 0 ? timeline[index - 1].newestEvent.createdAt : nil,
+                            current: item.leadEvent.createdAt) {
+                            DaySeparator(label: day)
+                        }
                         // A hairline where an exchange opens — never before the
                         // first entry, which opens nothing. The New divider is
                         // already a boundary; two lines would say it twice.
@@ -694,6 +702,24 @@ private struct NewDivider: View {
             Rectangle().fill(Palette.signal.opacity(0.35)).frame(height: 1)
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// The day a run of messages belongs to, as a centred pill — the same shape
+/// the Android timeline draws, because the two are read side by side.
+private struct DaySeparator: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Palette.muted)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Palette.surfaceRaised))
+            .overlay(Capsule().stroke(Palette.line, lineWidth: 1))
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 12)
     }
 }
 

@@ -701,4 +701,8 @@ export const AgentDeckPlugin = async (input: {
   };
 };
 
-export default AgentDeckPlugin;
+// The named export above is the whole entry point: OpenCode loads a plugin
+// file by taking the plugin functions it exports by name. There was a
+// `export default AgentDeckPlugin` here too, hedging against a loader that
+// wants a default — which the documented contract never asks for, and which
+// only ever showed up as a duplicate-export warning on every run.
