@@ -93,6 +93,13 @@ export type AgentEventInput = {
   subagentName?: string;
   /** Which exchange this belongs to — the deck's thread unit. */
   turnId?: string;
+  /**
+   * When this happened, when the sender knows better than the moment it
+   * arrives — an adapter replaying a transcript, or a seeder laying out a
+   * conversation with real shape. Live runtimes omit it. The bridge refuses a
+   * time in its own future.
+   */
+  createdAt?: string;
 };
 
 export type RemoteCommand = {

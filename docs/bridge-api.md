@@ -102,6 +102,14 @@ apps/server") — title a subagent by name, falling back to its type.
 everything done in its service. It is the deck's thread unit: group by it
 where present rather than guessing boundaries from timestamps.
 
+`createdAt` is normally the bridge's own: a live runtime posts as things
+happen, so arrival is when it happened. Send one to publish history instead —
+an adapter replaying a transcript, or a seeder laying out a conversation with
+real shape. A stated time may be any point in the past; the bridge refuses one
+in its own future (a skewed clock would otherwise pin an event above every
+real one forever) and keeps a session's events in time order regardless of the
+order they were posted.
+
 Publishing an event with an `id` the session already has **revises** that
 event in place (a tool's diff arrives with its completion); order by
 `createdAt`, not arrival.

@@ -215,6 +215,24 @@ export interface AgentExplanation {
  * with a confidence word per fact rather than a judgement call per debugger.
  */
 /**
+ * When an event goes on the record.
+ *
+ * A sender may say when something happened — an adapter replaying a
+ * transcript, a seeder laying out a conversation with real shape — and the
+ * deck takes its word up to one limit: not the future. A skewed clock that
+ * could stamp tomorrow would sort above every real event and stay pinned
+ * there, taking the unseen marker and the newest-message divider with it.
+ * Anything unparseable, or ahead of us, is treated as arriving now, which is
+ * what an unsaid time has always meant.
+ */
+export const eventTime = (supplied: string | null | undefined, arrival: string): string => {
+  if (supplied == null) return arrival;
+  const stated = Date.parse(supplied);
+  if (Number.isNaN(stated) || stated > Date.parse(arrival)) return arrival;
+  return new Date(stated).toISOString();
+};
+
+/**
  * Whether a State Authority claim is still live.
  *
  * ADR-0002 makes a claim a time-boxed lease: the holder's clock releases it
@@ -754,11 +772,21 @@ export class BridgeState extends Context.Service<
           ...existing,
           ...event,
           id: event.id ?? makeId(),
-          createdAt: existing?.createdAt ?? now(),
+          createdAt: eventTime(existing?.createdAt ?? event.createdAt, now()),
         };
         const events = [...previous.events];
         if (existingIndex >= 0) events[existingIndex] = created;
         else events.push(created);
+        // A stated time can land behind what is already here, and every reader
+        // downstream — day separators, silence gaps, the unseen divider —
+        // takes this array's order as the order things happened. The sort is
+        // stable, so events arriving live with the same stamp keep the order
+        // they arrived in.
+        // Every stamp is canonical ISO 8601 (`eventTime` normalises the ones
+        // that come in), so comparing them as text is comparing them as time.
+        events.sort((left, right) =>
+          left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : 0,
+        );
         const agent: AgentRecord = {
           ...previous,
           events: events.slice(-AGENT_EVENT_WINDOW),

@@ -88,6 +88,13 @@ export const AgentEventInput = Schema.Struct({
   kind: EventKind,
   summary: Schema.String,
   detail: optionalField(Schema.String),
+  /**
+   * When this happened, when the sender knows better than the moment it
+   * arrived — an adapter replaying a transcript, or a seeder laying out a
+   * conversation with real shape. Live runtimes omit it and are stamped on
+   * arrival, which is what they mean anyway.
+   */
+  createdAt: optionalField(Schema.String),
   tool: optionalField(Schema.String),
   path: optionalField(Schema.String),
   command: optionalField(Schema.String),

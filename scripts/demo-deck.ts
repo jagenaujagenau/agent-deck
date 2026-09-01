@@ -294,6 +294,10 @@ async function seed() {
         kind: line.kind,
         summary: line.summary,
         detail: line.detail,
+        // What `ago` was always for. Without it every seeded conversation
+        // landed in one instant, and the day separators, silence gaps and
+        // segment grouping had nothing to group.
+        createdAt: at(line.ago),
       };
       if (line.options) event.options = line.options;
       if (line.tool) event.tool = line.tool;
